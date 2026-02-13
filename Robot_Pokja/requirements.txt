@@ -1,0 +1,7 @@
+google-generativeai
+pdfplumber
+python-dotenv
+pandas
+openpyxl
+selenium
+webdriver-manager

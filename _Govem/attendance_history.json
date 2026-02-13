@@ -1,0 +1,24 @@
+{
+    "Istri": {
+        "2026-02-12": {
+            "pagi": true
+        },
+        "2026-02-13": {
+            "pagi": true
+        }
+    },
+    "Suami": {
+        "2026-02-12": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-02-13": {
+            "pagi": true
+        }
+    },
+    "Pancingan": {
+        "2026-02-12": {
+            "pagi": true
+        }
+    }
+}

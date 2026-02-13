@@ -1,0 +1,31 @@
+# System
+__pycache__/
+*.pyc
+*.log
+*.zip
+*.7z
+*.rar
+*.exe
+.DS_Store
+
+# Large Folders
+python/
+notebooks/
+scripts/
+settings/
+__pycache__/
+.idea/
+.vscode/
+
+# Secrets
+credentials.json
+token.json
+secret_supabase.env
+*.csv
+
+# Logs & History
+_Govem/govem_scheduler.log
+_Govem/history.json
+
+# User Specific
+govem_config.ini
