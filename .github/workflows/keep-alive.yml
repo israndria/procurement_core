@@ -1,0 +1,38 @@
+name: 🫀 Supabase Keep-Alive
+
+# ============================================================
+# Menjaga project Supabase FREE tier tetap aktif
+# Supabase akan auto-pause project gratis setelah 7 hari
+# tanpa aktivitas database. Workflow ini berjalan setiap 3 hari.
+# ============================================================
+
+on:
+  # Jadwal otomatis setiap 3 hari pada jam 00:00 UTC (08:00 WITA)
+  schedule:
+    - cron: '0 0 */3 * *'
+  
+  # Bisa juga dijalankan manual dari tab Actions di GitHub
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    name: 🏓 Ping Supabase Database
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install dependencies
+        run: pip install requests
+
+      - name: 🫀 Jalankan Keep-Alive Script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python keep_alive.py
