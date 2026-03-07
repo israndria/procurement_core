@@ -58,14 +58,15 @@ def inject_buttons(filepath):
         
         BLUE_WORD = (43, 87, 154)
         BLACK = (40, 40, 40)
-        
         GREEN = (40, 167, 69)
-        
+        RED_PDF = (200, 35, 51)
+
         sheet_buttons = [
             ("1. Input Data", [
-                ("btnBukaBA",   "Buka BA PK",   "BukaBA",   3, 6, BLUE_WORD),
-                ("btnPrintBA",  "Print BA PK",  "PrintBA",  3, 7, BLACK),
-                ("btnImportWeb", "Import Data LPSE", "ImportHTML", 3, 8, GREEN),
+                ("btnBukaBA",        "Buka BA PK",          "BukaBA",           3, 6, BLUE_WORD),
+                ("btnPrintBAReviu",  "Print BA Reviu",      "PrintBAReviuPDF",  3, 7, BLACK),
+                ("btnImportWeb",     "Import Data LPSE",    "ImportHTML",       3, 8, GREEN),
+                ("btnUndanganPDF",   "Print Undangan PDF",  "PrintUndanganPDF", 4, 6, RED_PDF),
             ]),
             ("database_reviu", [
                 ("btnBukaReviu",   "Buka Reviu",   "BukaReviu",   2, 7, BLUE_WORD),

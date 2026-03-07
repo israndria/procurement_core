@@ -32,8 +32,33 @@ End Sub
 
 ' ===== PRINT (merge + buka Print dialog) =====
 
-Public Sub PrintBA()
-    RunMerge "print", WORD_BA, SHEET_BA
+Public Sub PrintBAReviuPDF()
+    Dim kodePokja As String
+    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
+    If kodePokja = "" Then kodePokja = "000"
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & WORD_BA
+
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim cmd As String
+    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_bareviu " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+
+    Application.StatusBar = "Membuat PDF BA_REVIU_DPP_" & kodePokja & ".pdf ..."
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
 
 Public Sub PrintReviu()
@@ -42,6 +67,38 @@ End Sub
 
 Public Sub PrintDokpil()
     RunMerge "print", WORD_DOKPIL, SHEET_DOKPIL
+End Sub
+
+' ===== PDF (merge + export halaman 1-2 ke PDF) =====
+
+Public Sub PrintUndanganPDF()
+    ' Ambil Kode Pokja dari cell E14 untuk nama file PDF
+    Dim kodePokja As String
+    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
+    If kodePokja = "" Then kodePokja = "000"
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & WORD_BA
+
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim cmd As String
+    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+
+    Application.StatusBar = "Membuat PDF Undangan_" & kodePokja & ".pdf ..."
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
 
 ' ===== CORE: Panggil Python script (non-blocking) =====
