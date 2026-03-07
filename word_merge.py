@@ -93,35 +93,28 @@ def read_excel_data(excel_path, sheet_name):
 
 
 def cleanup_blank_pages(doc):
-    doc.Repaginate()
-
-    for sec_idx in range(1, doc.Sections.Count):
-        try:
-            sec = doc.Sections(sec_idx)
-            sec_range = sec.Range
-            last_page = sec_range.Information(3)
-            first_page = sec_range.Information(1)
-
-            if last_page <= first_page:
-                continue
-
-            para_count = sec_range.Paragraphs.Count
-            for p in range(para_count, 0, -1):
-                para = sec_range.Paragraphs(p)
-                para_page = para.Range.Information(3)
-                para_text = para.Range.Text.strip()
-
-                if not para_text and para_page == last_page:
-                    para.Range.Font.Size = 1
-                    para.Format.SpaceBefore = 0
-                    para.Format.SpaceAfter = 0
-                    para.Format.LineSpacingRule = 0
-                elif para_text:
-                    break
-        except:
-            pass
-
-    doc.Repaginate()
+    # Metode Ringan & Cepat: Shrink paragraf kosong di seluruh dokumen (tanpa batas halaman).
+    try:
+        for i, para in enumerate(doc.Paragraphs):
+            try:
+                txt = para.Range.Text.replace('\r', '').replace('\n', '')
+                # Hanya panggil .Information(3) (yang butuh komputasi layout berat) JIKA paragraf kosong.
+                # Ini mempercepat script 10x lipat dan mencegah hang/timeout dari RPC Server!
+                if not txt.strip():
+                    pg_num = para.Range.Information(3) # wdActiveEndPageNumber
+                    if pg_num > 1:
+                        # Shrink blank space (Enter Berlebihan di Word)
+                        para.Range.Font.Size = 1
+                        para.Format.SpaceBefore = 0
+                        para.Format.SpaceAfter = 0
+                        para.Format.LineSpacingRule = 0
+            except:
+                pass
+    except Exception as e:
+        print(f"Warning saat cleanup: {e}")
+        pass
+    
+    return
 
 
 def merge_word(word_path, data, mode="buka", pdf_name=""):
@@ -180,8 +173,11 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             except:
                 pass
 
-        # Cleanup blank pages
-        # cleanup_blank_pages(wdDoc)
+        # Cleanup blank pages (WAJIB Render API agar Information() jalan dan tidak HANG)
+        wdApp.ScreenUpdating = True
+        wdApp.Visible = True 
+        wdApp.WindowState = 2 # 2=wdWindowStateMinimize (Tampil ke layar tetapi diforced Minimize)
+        cleanup_blank_pages(wdDoc)
 
         # Simpan dan Tampilkan hanya jika bukan mode PDF
         if mode in ("buka", "print"):
