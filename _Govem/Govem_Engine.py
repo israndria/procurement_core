@@ -16,6 +16,50 @@ import threading
 # Global Lock untuk File History (Mencegah Race Condition saat tulis paralel)
 HISTORY_LOCK = threading.Lock()
 
+# Global Set untuk Per-User Disable (Toggle dari Tray Menu)
+# PERSISTEN: Disimpan ke file agar tetap aktif/nonaktif walau laptop di-restart
+DISABLED_USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "disabled_users.json")
+
+def _load_disabled_users():
+    """Load daftar user yang dinonaktifkan dari file."""
+    if os.path.exists(DISABLED_USERS_FILE):
+        try:
+            with open(DISABLED_USERS_FILE, 'r') as f:
+                data = json.load(f)
+                return set(data) if isinstance(data, list) else set()
+        except:
+            return set()
+    return set()
+
+def _save_disabled_users():
+    """Simpan daftar user yang dinonaktifkan ke file."""
+    try:
+        with open(DISABLED_USERS_FILE, 'w') as f:
+            json.dump(list(DISABLED_USERS), f)
+    except Exception as e:
+        print(f"⚠️ Gagal simpan disabled_users.json: {e}")
+
+# Load dari file saat modul di-import (Persist across restart!)
+DISABLED_USERS = _load_disabled_users()
+
+def toggle_user(name):
+    """Toggle status aktif/nonaktif satu user. Return True jika sekarang AKTIF."""
+    if name in DISABLED_USERS:
+        DISABLED_USERS.discard(name)
+        logger.info(f"✅ [{name}] DIAKTIFKAN kembali.")
+        _save_disabled_users()
+        return True
+    else:
+        DISABLED_USERS.add(name)
+        logger.info(f"⏸️ [{name}] DINONAKTIFKAN.")
+        _save_disabled_users()
+        return False
+
+def is_user_enabled(name):
+    """Cek apakah user aktif (tidak ada di DISABLED_USERS)."""
+    return name not in DISABLED_USERS
+
+
 # Setup Logging ke File
 LOG_FILE = os.path.join(os.path.dirname(__file__), "govem_scheduler.log")
 logging.basicConfig(
@@ -142,117 +186,98 @@ def save_config(section, key, value):
     with open(CONFIG_FILE, "w") as f:
         config.write(f)
 
-def run_command(command, timeout=30): # Default timeout 30 detik (Up dari 15s prevent hang di parallel)
+def run_command(command, timeout=30): # Default timeout 30 detik
     try:
         # Suppress Window (No Flashing)
-        startupinfo = None
         creationflags = 0
         if os.name == 'nt':
             creationflags = 0x08000000 # CREATE_NO_WINDOW
             
         # Jika command adalah list, jalankan tanpa shell=True (Lebih aman untuk quoting)
         if isinstance(command, list):
-            result = subprocess.run(command, capture_output=True, text=True, shell=False, creationflags=creationflags, timeout=timeout)
+            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False, creationflags=creationflags)
         else:
-            result = subprocess.run(command, capture_output=True, text=True, shell=True, creationflags=creationflags, timeout=timeout)
-        return result.stdout.strip()
-    except subprocess.TimeoutExpired:
-        print(f"⚠️ Command Timeout: {command}")
-        return ""
+            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True, creationflags=creationflags)
+        
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+            return stdout.strip()
+        except subprocess.TimeoutExpired:
+            # FORCE KILL seluruh process tree (penting untuk ldconsole yang suka hang)
+            pid = proc.pid
+            try:
+                if os.name == 'nt':
+                    # taskkill /F /T /PID: kill seluruh tree proses (child + parent)
+                    subprocess.run(f'taskkill /F /T /PID {pid}', shell=True, 
+                                   creationflags=0x08000000, timeout=5,
+                                   capture_output=True)
+                else:
+                    proc.kill()
+            except Exception:
+                pass
+            # Bersihkan pipe dengan timeout (jangan sampai hang juga)
+            try:
+                proc.communicate(timeout=3)
+            except Exception:
+                pass
+            logger.info(f"⚠️ Command Timeout ({timeout}s), KILLED PID {pid}: {command}")
+            return ""
     except Exception as e:
-        print(f"Error executing command: {e}")
+        logger.info(f"Error executing command: {e}")
         return ""
 
 def launch_emulator(idx):
-    print(f"🚀 Memulai Emulator Index {idx}...")
+    logger.info(f"🚀 Memulai Emulator Index {idx}...")
     run_command(f'"{LDCONSOLE}" launch --index {idx}')
     
-    # Tunggu fixed wait dihapus, ganti Smart Wait (Karena ADB sudah fix)
-    # DIAGNOSA & AUTO-DISCOVERY PORT
-    # Masalah: Index 1 seringkali tidak di port 5556 jika hasil clone (bisa 5558, 5560, dst)
-    print("🔍 Auto-Discovery Port ADB...")
-    
-    found_port = None
-    
-    # 1. Coba Scan Port yang mungkin (5556 - 5564)
-    possible_ports = [5554 + (idx*2), 5556, 5558, 5560, 5562, 5564]
-    if idx > 0 and 5554 in possible_ports: possible_ports.remove(5554)
-    
-    # Konek ke semua kemungkinan
-    for p in possible_ports:
-        run_command(f'"{ADB}" connect 127.0.0.1:{p}')
-    
-    # Smart Wait Loop untuk Deteksi Device Online + Boot Complete
-    print("⏳ Menunggu sistem Android siap (Smart Detect)...")
+    # SMART WAIT VIA LDCONSOLE
+    logger.info(f"⏳ [Emu {idx}] Menunggu sistem Android siap (LDConsole)...")
     boot_ready = False
-    max_retries = 30 # 30 x 2s = 60 detik max
+    max_retries = 30  # 30 x 2s = 60 detik max
     
     for i in range(max_retries):
-        devices_out = run_command(f'"{ADB}" devices')
-        
-        # Cari device yang milik index ini
-        detected_p = None
-        detected_serial = None
-        
-        # 1. Cek dari lisr devices
-        for p in possible_ports:
-            # Check loose match
-            if str(p) in devices_out and "device" in devices_out:
-                detected_p = p
-                # Determine serial format from output logic
-                if f"emulator-{p}" in devices_out:
-                    detected_serial = f"emulator-{p}"
-                elif f"127.0.0.1:{p}" in devices_out:
-                     detected_serial = f"127.0.0.1:{p}"
-                else:
-                     detected_serial = f"emulator-{p}" # Default guess
-                break
-        
-        # 2. Fallback: Jika tidak ketemu di list, coba tembak langsung port DEFAULT
-        if not detected_p:
-            default_p = 5554 + (idx*2)
-            detected_serial = f"127.0.0.1:{default_p}" # Kalau invisible, biasanya harus via IP
-            # Cek apakah port ini respond shell?
-            check_alive = run_command([ADB, "-s", detected_serial, "shell", "echo", "alive"])
-            if "alive" in check_alive:
-                detected_p = default_p
-
-        if detected_p and detected_serial:
-            # Device ketemu/hidup, sekarang cek apakah Boot Selesai?
-            cmd_boot = [ADB, "-s", detected_serial, "shell", "getprop", "sys.boot_completed"]
-            res_boot = run_command(cmd_boot)
+        try:
+            cmd_boot = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell getprop sys.boot_completed"]
+            res_boot = run_command(cmd_boot, timeout=10)
             
-            # Jika return 1 = Booted. Jika kosong/error = Masih loading.
             if "1" in res_boot:
-                 print(f"✅ Sistem Siap (Port {detected_p}). Boot Time: {i*2}s")
-                 print("☕ Menunggu 10 detik agar Launcher stabil...") # Buffer tambahan penting
-                 time.sleep(10)
-                 found_port = detected_p
-                 boot_ready = True
-                 break
+                logger.info(f"✅ [Emu {idx}] Sistem Siap! Boot Time: {i*2}s")
+                logger.info(f"☕ [Emu {idx}] Menunggu 10 detik agar Launcher stabil...")
+                time.sleep(10)
+                boot_ready = True
+                break
+        except Exception as e:
+            logger.info(f"⚠️ [Emu {idx}] Boot check error: {e}")
         
         time.sleep(2)
-        if i % 3 == 0: 
-            print(f"   ... Detecting ({i*2}s) [ADB Status: {len(devices_out.splitlines())-1} devices]")
-
+        if i % 5 == 0:
+            logger.info(f"   ... [Emu {idx}] Waiting Boot ({i*2}s)")
+    
     if not boot_ready:
-        print("⚠️ Warning: Smart Detect Timeout. Menggunakan default port & hope for the best.")
-        found_port = 5554 + (idx*2)
-
-    # Simpan ke Memory Global USERS
-    current_user_obj = next((u for u in USERS if u['index'] == idx), None)
-    if current_user_obj:
-        current_user_obj['port'] = found_port
-        # Simpan Serial juga biar konsisten di command selanjutnya
-        # Kalau detected_serial belum ada (timeout case), kita buat default
-        if not 'detected_serial' in locals() or not detected_serial:
-             detected_serial = f"emulator-{found_port}" 
-        current_user_obj['serial'] = detected_serial
+        logger.info(f"⚠️ [Emu {idx}] Warning: Boot Detect Timeout. Melanjutkan (hope for the best).")
     
-    # Force Connect Final
-    run_command(f'"{ADB}" connect 127.0.0.1:{found_port}')
+    # MINIMIZE via Win32 API (ldconsole TIDAK punya command minimize)
+    try:
+        # Cari nama emulator berdasarkan index
+        list_out = run_command(f'"{LDCONSOLE}" list2', timeout=5)
+        emu_title = None
+        for line in list_out.split('\n'):
+            parts = line.strip().split(',')
+            if len(parts) >= 2 and parts[0].strip() == str(idx):
+                emu_title = parts[1].strip()
+                break
+        
+        if emu_title:
+            # Minimize semua window yang mengandung nama emulator
+            ps_cmd = f'powershell -Command "Add-Type -Name WinAPI -Namespace Win32 -MemberDefinition \"[DllImport(\\\"user32.dll\\\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);\"; Get-Process | Where-Object {{$_.MainWindowTitle -like \"*{emu_title}*\"}} | ForEach-Object {{[Win32.WinAPI]::ShowWindow($_.MainWindowHandle, 6)}}"'
+            run_command(ps_cmd, timeout=10)
+            logger.info(f"🔽 [Emu {idx}] Window '{emu_title}' diminimize via Win32 API.")
+        else:
+            logger.info(f"⚠️ [Emu {idx}] Tidak bisa minimize: nama emulator tidak ditemukan.")
+    except Exception as e:
+        logger.info(f"⚠️ [Emu {idx}] Minimize gagal: {e}")
     
-    # Dismiss popup/iklan jika ada
+    # Dismiss popup/iklan
     dismiss_popup(idx)
 
 def dismiss_popup(idx):
@@ -412,55 +437,46 @@ def calibrate_resolution_wizard():
         print("❌ File rekaman tidak ditemukan.")
 
 def open_app(idx):
-    print(f"📱 Membuka Aplikasi {PACKAGE_NAME}...")
+    logger.info(f"📱 [Emu {idx}] Membuka Aplikasi {PACKAGE_NAME}...")
     
-    # 1. FORCE KILL DULU (Agar Fresh Start)
-    run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
-    time.sleep(1)
-    
-    # 2. RUN APP
-    run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
-    print("⏳ Menunggu Aplikasi muncul di layar (Smart Wait)...")
-    
-    # Ambil Port user & Serial
-    user_port = 5554 + (idx * 2)
-    target_serial = f"127.0.0.1:{user_port}" # Default fallback
-    
-    current_user_obj = next((u for u in USERS if u['index'] == idx), None)
-    if current_user_obj:
-        if current_user_obj.get('port'): user_port = current_user_obj['port']
-        if current_user_obj.get('serial'): target_serial = current_user_obj['serial']
-    
-    # Loop Check Focus
-    app_ready = False
-    for i in range(20): # Max 40 detik
-        # Cek Focused App
-        # Gunakan target serial yang sudah validated saat boot
-        cmd_focus = [ADB, "-s", target_serial, "shell", "dumpsys", "window", "windows"]
-        res = run_command(cmd_focus)
+    # RETRY LOGIC: 2 attempts total
+    for attempt in range(2):
+        if attempt > 0:
+            logger.info(f"🔄 [Emu {idx}] RETRY #{attempt}: Mencoba buka ulang...")
         
-        # String detection simpel (Looser)
-        # Kadang mCurrentFocus ga muncul jelas, tapi kalau package ada di list windows visible, itu sudah cukup.
-        if PACKAGE_NAME in res:
-             print(f"✅ Aplikasi {PACKAGE_NAME} terdeteksi aktif!")
-             app_ready = True
-             break
-        
+        # 1. FORCE KILL DULU (Agar Fresh Start)
+        run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
         time.sleep(2)
-        if i % 5 == 0: print(f"   ... Loading App ({i*2}s)")
         
-    if not app_ready:
-        print("⚠️ Warning: Aplikasi belum terdeteksi fokus dalam 40 detik.")
-        print("⏩ MELANJUTKAN EKSEKUSI (Optimistic Mode) - Asumsi aplikasi sudah terbuka.")
-        return True # DULU False, sekarang True agar tidak stuck.
+        # 2. RUN APP
+        run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
+        logger.info(f"⏳ [Emu {idx}] Menunggu Aplikasi muncul di layar...")
+        
+        # 3. CEK FOCUS VIA LDCONSOLE (ANTI NYASAR)
+        app_ready = False
+        max_checks = 15 if attempt == 0 else 10  # 30s pertama, 20s retry
+        for i in range(max_checks):
+            cmd_focus = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell dumpsys window windows"]
+            res = run_command(cmd_focus, timeout=10)
+            
+            if PACKAGE_NAME in res:
+                logger.info(f"✅ [Emu {idx}] Aplikasi {PACKAGE_NAME} terdeteksi aktif!")
+                time.sleep(3)  # Buffer render UI
+                return True
+            
+            time.sleep(2)
+            if i % 5 == 0: logger.info(f"   ... [Emu {idx}] Loading App ({i*2}s)")
+        
+        logger.info(f"⚠️ [Emu {idx}] Attempt {attempt+1}: Aplikasi belum terdeteksi.")
     
-    time.sleep(3) # Buffer dikit biar render UI sempurna
-    return True
+    # GAGAL TOTAL setelah 2 attempts
+    logger.info(f"❌ [Emu {idx}] GAGAL membuka {PACKAGE_NAME} setelah 2 percobaan. ABORT.")
+    return False
 
 def set_location(user):
     # Cek apakah user ini butuh set lokasi?
     if not user['gps']:
-        print(f"⏩ [Emu {user['index']}] Skip Set Lokasi (Sesuai Config).")
+        logger.info(f"⏩ [Emu {user['index']}] Skip Set Lokasi (Sesuai Config).")
         return
 
     idx = user['index']
@@ -472,12 +488,12 @@ def set_location(user):
     if config.has_section(section_name):
         lng = config.get(section_name, "longitude")
         lat = config.get(section_name, "latitude")
-        print(f"📍 Menggunakan Config Spesifik User {idx}")
+        logger.info(f"📍 [Emu {idx}] Menggunakan Config Spesifik User {idx}")
     else:
         # Fallback to shared location
         lng = config.get("LOCATION", "longitude", fallback="115.1625796")
         lat = config.get("LOCATION", "latitude", fallback="-2.9338875")
-        print(f"📍 Menggunakan Config Global/Default")
+        logger.info(f"📍 [Emu {idx}] Menggunakan Config Global/Default")
     
     # Auto-save ke section spesifik jika belum ada (Migrasi)
     if not config.has_section(section_name):
@@ -485,72 +501,34 @@ def set_location(user):
         save_config(section_name, "latitude", lat)
     
     if lng and lat:
-        print(f"📍 Mengunci GPS [Emu {idx}] ke: {lng}, {lat}")
+        logger.info(f"📍 Mengunci GPS [Emu {idx}] ke: {lng}, {lat}")
         cmd = [LDCONSOLE, "locate", "--index", str(idx), "--LLI", f"{lng},{lat}"]
         run_command(cmd)
         time.sleep(2)
-        print("✅ Lokasi terkunci.")
+        logger.info(f"✅ [Emu {idx}] Lokasi terkunci.")
     else:
-        print("⚠️ Lokasi error/kosong.")
+        logger.info(f"⚠️ [Emu {idx}] Lokasi error/kosong.")
 
 def click(x, y, idx):
-    print(f"👉 [Emu {idx}] Klik ke: {x}, {y}")
+    logger.info(f"👉 [Emu {idx}] Klik ke: {x}, {y}")
     
-    # Cara 1: Via LDConsole (Official) - List Mode untuk hindari masalah Quote
-    cmd1 = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell input tap {x} {y}"]
-    run_command(cmd1)
-    
-    # Cara 2: Via ADB Direct (Backup) - Skip dulu biar simple, fokus LDConsole
-    # Cara 2: Via Direct ADB (Backup dengan Port Dinamis)
-    # Cek apakah kita punya port hasil discovery?
-    user_port = 5554 + (idx * 2) # Default
-    
-    current_user_obj = next((u for u in USERS if u['index'] == idx), None)
-    if current_user_obj and current_user_obj.get('port'):
-         user_port = current_user_obj['port']
-         # print(f"   [Debug] Menggunakan Port Temuan: {user_port}")
-
-    serial = f"emulator-{user_port}"
-    
-    # Target 2: Serial Name
-    cmd2 = [ADB, "-s", serial, "shell", "input", "tap", str(x), str(y)]
-    res2 = run_command(cmd2)
-    if res2 and "error" in res2.lower():
-         print(f"   ⚠️ [Direct Serial] Error: {res2}")
-
-    # Target 3: IP Address (Network Mode)
-    target_ip = f"127.0.0.1:{user_port}"
-    cmd3 = [ADB, "-s", target_ip, "shell", "input", "tap", str(x), str(y)]
-    res3 = run_command(cmd3)
+    # HANYA VIA LDCONSOLE --index (PASTI AKURAT, tidak bisa nyasar ke emulator lain)
+    cmd = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell input tap {x} {y}"]
+    run_command(cmd)
 
 def long_press(x, y, idx, duration_ms=2000):
-    print(f"👇 [Emu {idx}] Long Press di: {x}, {y} selama {duration_ms}ms")
-    # Cara 1: LDConsole
-    cmd1 = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell input swipe {x} {y} {x} {y} {duration_ms}"]
-    run_command(cmd1)
-
-    # Cara 2: Direct ADB
-    user_port = 5554 + (idx * 2) # Default
-    current_user_obj = next((u for u in USERS if u['index'] == idx), None)
-    if current_user_obj and current_user_obj.get('port'):
-         user_port = current_user_obj['port']
-
-    serial = f"emulator-{user_port}"
+    logger.info(f"👇 [Emu {idx}] Long Press di: {x}, {y} selama {duration_ms}ms")
     
-    cmd2 = [ADB, "-s", serial, "shell", "input", "swipe", str(x), str(y), str(x), str(y), str(duration_ms)]
-    run_command(cmd2)
-
-    # Cara 3: Via IP
-    target_ip = f"127.0.0.1:{user_port}"
-    cmd3 = [ADB, "-s", target_ip, "shell", "input", "swipe", str(x), str(y), str(x), str(y), str(duration_ms)]
-    run_command(cmd3)
+    # HANYA VIA LDCONSOLE --index (PASTI AKURAT)
+    cmd = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell input swipe {x} {y} {x} {y} {duration_ms}"]
+    run_command(cmd)
 
 def verify_attendance(idx):
-    print(f"\n🔄 [Emu {idx}] VERIFIKASI: Restart Aplikasi...")
+    logger.info(f"🔄 [Emu {idx}] VERIFIKASI: Restart Aplikasi...")
     run_command([LDCONSOLE, "killapp", "--index", str(idx), "--packagename", PACKAGE_NAME])
     time.sleep(2)
     open_app(idx)
-    print("✅ Aplikasi dibuka ulang.")
+    logger.info(f"✅ [Emu {idx}] Aplikasi dibuka ulang.")
 
 
 
@@ -796,14 +774,6 @@ def run_activity_automation(user_obj):
             max_in_x = 19092 
             max_in_y = 10728
             
-            # Get User Serial
-            user_port = 5554 + (idx * 2) 
-            current_user = next((u for u in USERS if u['index'] == idx), None)
-            if current_user and current_user.get('serial'): 
-                 serial = current_user['serial']
-            else:
-                 serial = f"emulator-{user_port}" # Fallback
-            
             last_timing = 0
             
             for op in ops:
@@ -826,9 +796,8 @@ def run_activity_automation(user_obj):
                         real_x = int(raw_x / max_in_x * w_res)
                         real_y = int(raw_y / max_in_y * h_res)
                         
-                        # EXECUTE SWIPE (Click)
-                        # print(f"      Click: {real_x}, {real_y}") # Verbose toggle
-                        cmd = [ADB, "-s", serial, "shell", "input", "swipe", str(real_x), str(real_y), str(real_x), str(real_y), "150"]
+                        # EXECUTE VIA LDCONSOLE (ANTI NYASAR)
+                        cmd = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell input swipe {real_x} {real_y} {real_x} {real_y} 150"]
                         run_command(cmd)
                         
         except Exception as e:
@@ -920,48 +889,94 @@ def trigger_activity_istri(user_obj):
     except Exception as e:
         print(f"❌ [{name}] Gagal menjalankan V23 Istri: {e}")
 
+def _re_absen(user, tipe, final_x=None, final_y=None):
+    """Ulang absen setelah isi aktivitas (PREVENTIF).
+    Emulator sudah jalan, tinggal restart app dan klik ulang sequence absen.
+    tipe: 'pagi' atau 'sore'
+    """
+    name = user['name']
+    idx = user['index']
+    logger.info(f"🔄 [{name}] RE-ABSEN {tipe.upper()} (Preventif setelah isi aktivitas)")
+    
+    try:
+        # Restart app agar fresh
+        run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
+        time.sleep(3)
+        
+        if not open_app(idx):
+            logger.info(f"⚠️ [{name}] [Re-Absen] Gagal buka app. Skip re-absen.")
+            return
+        set_location(user)
+        
+        if tipe == 'pagi':
+            sequence = RAW_SEQUENCE_PAGI
+        else:
+            sequence = RAW_SEQUENCE_SORE
+        
+        for i, (rx, ry, action) in enumerate(sequence):
+            logger.info(f"   🔄 [{name}] [Re-{tipe.capitalize()}] Step {i+1}...")
+            sx, sy = raw_to_pixel(rx, ry)
+            if action == "long_press":
+                long_press(sx, sy, idx)
+            else:
+                click(sx, sy, idx)
+            time.sleep(5)
+        
+        # Step Final (khusus pagi yang punya koordinat Step 5)
+        if tipe == 'pagi' and final_x:
+            logger.info(f"   🔄 [{name}] [Re-Pagi] Step 5 (Final): Click {final_x}, {final_y}")
+            click(final_x, final_y, idx)
+        
+        logger.info(f"✅ [{name}] Re-Absen {tipe.upper()} Selesai (Preventif)")
+    except Exception as e:
+        logger.error(f"⚠️ [{name}] Re-Absen gagal: {e}", exc_info=True)
+
 def absen_pagi(user):
     name = user['name']
     idx = user['index']
     
     # --- LOGIC PANCINGAN ---
     if name == 'Pancingan':
-        print(f"\n🎣 [{name}] MEMANCING IKLAN PAGI (Emulator {idx})")
+        # Cek apakah sudah dilakukan hari ini (mencegah catch-up ganda)
+        if is_already_done(name, 'pagi'):
+            logger.info(f"☕ [{name}] Pancingan Pagi SUDAH SELESAI hari ini. Skip.")
+            return
+        logger.info(f"🎣 [{name}] MEMANCING IKLAN PAGI (Emulator {idx})")
         launch_emulator(idx)
-        # open_app(idx) # User confirm app belum install, hanya launch emu
-        print(f"✅ [{name}] Selesai Pancingan. Emulator terbuka untuk menampung iklan.")
+        logger.info(f"✅ [{name}] Selesai Pancingan. Emulator terbuka untuk menampung iklan.")
+        save_history_entry(name, 'pagi')  # Catat agar tidak diulang catch-up
         return # STOP di sini, jangan klik absen.
         
-    print(f"\n☀️ [{name}] MEMULAI ABSEN PAGI (Emulator {idx})")
+    logger.info(f"☀️ [{name}] MEMULAI ABSEN PAGI (Emulator {idx})")
     
     config = load_config()
     final_x = config.get("COORDS", "pagi_x", fallback=None)
     final_y = config.get("COORDS", "pagi_y", fallback=None)
 
     if not final_x:
-        print("⚠️ Koordinat Step 5 belum diset! Hanya jalan langkah 1-4.")
+        logger.info(f"⚠️ [{name}] Koordinat Step 5 belum diset! Hanya jalan langkah 1-4.")
     
     launch_emulator(idx)
     if not open_app(idx):
-        print(f"❌ [Pagi] Gagal membuka aplikasi untuk {name}. Abort.")
+        logger.info(f"❌ [{name}] [Pagi] Gagal membuka aplikasi. Abort.")
         return
     set_location(user)
     
     # Jalankan Sequence 1-4
     for i, (rx, ry, action) in enumerate(RAW_SEQUENCE_PAGI):
-        print(f"   ▶️ [Pagi] Step {i+1}...")
+        logger.info(f"   ▶️ [{name}] [Pagi] Step {i+1}...")
         sx, sy = raw_to_pixel(rx, ry)
         if action == "long_press":
              long_press(sx, sy, idx)
         else:
              click(sx, sy, idx)
-        time.sleep(5) # Diperlama jadi 5 detik (biar tidak "ketinggalan")
+        time.sleep(5)
     
     # Step 5
     if final_x:
-        print(f"Step 5: Final Click {final_x}, {final_y}")
+        logger.info(f"   ▶️ [{name}] [Pagi] Step 5 (Final): Click {final_x}, {final_y}")
         click(final_x, final_y, idx)
-        print(f"✅ [{name}] Absen Pagi Selesai.")
+        logger.info(f"✅ [{name}] Absen Pagi Selesai.")
         
         # CATAT SEJARAH
         save_history_entry(name, 'pagi')
@@ -969,9 +984,11 @@ def absen_pagi(user):
         # CHAIN REACTION: Jika Istri, lanjut isi Aktivitas setelah absen pagi
         if name == 'Istri':
             trigger_activity_istri(user)
+            # PREVENTIF: Absen pagi ULANG setelah isi aktivitas
+            _re_absen(user, 'pagi', final_x, final_y)
             
     else:
-        print(f"⚠ [{name}] Step 5 dilewati (Manual).")
+        logger.info(f"⚠ [{name}] Step 5 dilewati (Manual).")
 
 def absen_sore(user):
     name = user['name']
@@ -979,31 +996,35 @@ def absen_sore(user):
     
     # --- LOGIC PANCINGAN ---
     if name == 'Pancingan':
-        print(f"\n🎣 [{name}] MEMANCING IKLAN SORE (Emulator {idx})")
+        # Cek apakah sudah dilakukan hari ini (mencegah catch-up ganda)
+        if is_already_done(name, 'sore'):
+            logger.info(f"☕ [{name}] Pancingan Sore SUDAH SELESAI hari ini. Skip.")
+            return
+        logger.info(f"🎣 [{name}] MEMANCING IKLAN SORE (Emulator {idx})")
         launch_emulator(idx)
-        # open_app(idx) # User confirm app belum install
-        print(f"✅ [{name}] Selesai Pancingan. Emulator terbuka untuk menampung iklan.")
+        logger.info(f"✅ [{name}] Selesai Pancingan. Emulator terbuka untuk menampung iklan.")
+        save_history_entry(name, 'sore')  # Catat agar tidak diulang catch-up
         return # STOP di sini
         
-    print(f"\n🌙 [{name}] MEMULAI ABSEN SORE (Emulator {idx})")
+    logger.info(f"🌙 [{name}] MEMULAI ABSEN SORE (Emulator {idx})")
     
     launch_emulator(idx)
     if not open_app(idx):
-        print(f"❌ [Sore] Gagal membuka aplikasi untuk {name}. Abort.")
+        logger.info(f"❌ [{name}] [Sore] Gagal membuka aplikasi. Abort.")
         return
     set_location(user)
     
     # Jalankan Sequence SORE
     for i, (rx, ry, action) in enumerate(RAW_SEQUENCE_SORE):
-        print(f"   ▶️ [Sore] Step {i+1}...")
+        logger.info(f"   ▶️ [{name}] [Sore] Step {i+1}...")
         sx, sy = raw_to_pixel(rx, ry)
         if action == "long_press":
              long_press(sx, sy, idx)
         else:
              click(sx, sy, idx)
-        time.sleep(5) # Diperlama jadi 5 detik (biar tidak "ketinggalan")
+        time.sleep(5)
     
-    print(f"✅ [{name}] Absen Sore Selesai.")
+    logger.info(f"✅ [{name}] Absen Sore Selesai.")
     
     # CATAT SEJARAH
     save_history_entry(name, 'sore')
@@ -1014,6 +1035,8 @@ def absen_sore(user):
     # CHAIN REACTION: Lanjut isi Aktivitas setelah absen sore (KHUSUS SUAMI)
     if name == 'Suami':
         trigger_activity(user)
+        # PREVENTIF: Absen sore ULANG setelah isi aktivitas
+        _re_absen(user, 'sore', None, None)
     # Istri: Skip aktivitas, hanya absen saja
 
 # Helper functions job_pagi_daily and job_sore_daily removed (replaced by dynamic lambda).
@@ -1023,36 +1046,41 @@ def get_schedule_rules(name, weekday):
     # Format Time: "HH:MM"
     
     # === RULES PANCINGAN ===
-    # Jalan 5 menit LEBIH AWAL dari jadwal utama
+    # Jalan 6 menit LEBIH AWAL dari jadwal utama
+    # [RAMADAN MODE]
     if name == 'Pancingan':
-         # Senin-Kamis: Sore 17:30 (Utama 17:35)
-         if 0 <= weekday <= 3: return ("06:30", "17:30")
-         # Jumat-Sabtu: Sore 14:00 (Utama 14:05)
-         elif weekday >= 4: return ("06:30", "14:00")
+         # Senin-Kamis: Pagi 06:25, Sore 15:39
+         if 0 <= weekday <= 3: return ("06:25", "15:39")
+         # Jumat: Pagi 06:25, Sore 10:54 (Utama 11:00)
+         elif weekday == 4: return ("06:25", "10:54")
+         # Sabtu-Minggu: Pagi 06:25, Sore 14:09 (Utama 14:15)
+         elif weekday >= 5: return ("06:25", "14:09")
          
     # === RULES ISTRI ===
+    # [RAMADAN MODE]
     elif name == 'Istri':
-        # Senin - Kamis (0-3): Pagi 06:35, Sore 17:35
+        # Senin - Kamis (0-3): Pagi 06:31, Sore 15:45
         if 0 <= weekday <= 3:
-            return ("06:35", "17:35")
-        # Jumat (4): Sore 14:05
+            return ("06:31", "15:45")
+        # Jumat (4): Pagi 06:31, Sore 11:00
         elif weekday == 4:
-            return ("06:35", "14:05")
-        # Sabtu (5): Sore 14:05
+            return ("06:31", "11:00")
+        # Sabtu (5): Pagi 06:31, Sore 14:15
         elif weekday == 5:
-            return ("06:35", "14:05")
+            return ("06:31", "14:15")
         # Minggu (6)
         else:
             return None # Libur
 
     # === RULES SUAMI ===
+    # [RAMADAN MODE]
     elif name == 'Suami':
-        # Senin - Kamis (0-3): Pagi 06:35, Sore 17:35
+        # Senin - Kamis (0-3): Pagi 06:31, Sore 15:45
         if 0 <= weekday <= 3:
-            return ("06:35", "17:35")
-        # Jumat (4): Sore 14:05
+            return ("06:31", "15:45")
+        # Jumat (4): Pagi 06:31, Sore 11:00
         elif weekday == 4:
-            return ("06:35", "14:05")
+            return ("06:31", "11:00")
         # Sabtu - Minggu (5-6)
         else:
             return None # Libur
@@ -1096,56 +1124,94 @@ def run_scheduler(target_users, force_reset=False):
     
     # 1. REGISTER SCHEDULER JOBS
     # Helper wrapper agar variable 'user' ter-bind dengan benar di closure
-    def make_job_pagi(u): 
-        def job(): 
-            # Run Async (Parallel)
-            print(f"🚀 [Job] Starting Thread Absen Pagi: {u['name']}")
-            threading.Thread(target=absen_pagi, args=(u,)).start()
-        return job
+    # URUTAN LAUNCH: Pancingan(2) -> Suami(0) -> Istri(1)
+    # Pancingan HARUS pertama agar menyerap iklan, mencegah iklan muncul di Suami/Istri
+    LAUNCH_ORDER = ['Pancingan', 'Suami', 'Istri']
     
-    def make_job_sore(u): 
-        def job(): 
-            # Run Async (Parallel)
-            print(f"🚀 [Job] Starting Thread Absen Sore: {u['name']}")
-            threading.Thread(target=absen_sore, args=(u,)).start()
-        return job
+    def _run_batch_sequential(job_type, users_with_rules):
+        """Jalankan absen SEQUENTIAL (satu per satu) dengan urutan Pancingan -> Suami -> Istri.
+        Ini mencegah ldconsole hang karena 3 emulator launch bersamaan."""
+        # Sort users sesuai LAUNCH_ORDER
+        sorted_users = sorted(users_with_rules, key=lambda u: LAUNCH_ORDER.index(u['name']) if u['name'] in LAUNCH_ORDER else 99)
+        
+        for u in sorted_users:
+            if not is_user_enabled(u['name']):
+                logger.info(f"⏸️ [Job] SKIP {job_type} {u['name']} (Dinonaktifkan)")
+                continue
+            try:
+                logger.info(f"🚀 [Job] Memulai {job_type}: {u['name']}")
+                if job_type == 'Absen Pagi':
+                    absen_pagi(u)
+                else:
+                    absen_sore(u)
+                logger.info(f"✅ [Job] Selesai {job_type}: {u['name']}")
+            except Exception as e:
+                logger.error(f"💀 [CRASH] {job_type} {u['name']} GAGAL: {e}", exc_info=True)
+    
+    # Kumpulkan users per (pagi_time, sore_time) agar yang jadwal sama dilaunched bersama-sama
+    from collections import defaultdict
+    pagi_groups = defaultdict(list)  # time_str -> [user, ...]
+    sore_groups = defaultdict(list)
+    
     
     for user in target_users:
         name = user['name']
         
-        print(f"\n📅 Jadwal {name}:")
+        logger.info(f"📅 Jadwal {name}:")
         for day_idx in range(7):
             rules = get_schedule_rules(name, day_idx)
             if rules:
                 pagi_t, sore_t = rules
                 day_name = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"][day_idx]
-                print(f"   - {day_name}: Pagi {pagi_t}, Sore {sore_t}")
+                logger.info(f"   - {day_name}: Pagi {pagi_t}, Sore {sore_t}")
                 
-                # Register berdasarkan hari - FRESH schedule object setiap kali
-                if day_idx == 0:
-                    schedule.every().monday.at(pagi_t).do(make_job_pagi(user))
-                    schedule.every().monday.at(sore_t).do(make_job_sore(user))
-                elif day_idx == 1:
-                    schedule.every().tuesday.at(pagi_t).do(make_job_pagi(user))
-                    schedule.every().tuesday.at(sore_t).do(make_job_sore(user))
-                elif day_idx == 2:
-                    schedule.every().wednesday.at(pagi_t).do(make_job_pagi(user))
-                    schedule.every().wednesday.at(sore_t).do(make_job_sore(user))
-                elif day_idx == 3:
-                    schedule.every().thursday.at(pagi_t).do(make_job_pagi(user))
-                    schedule.every().thursday.at(sore_t).do(make_job_sore(user))
-                elif day_idx == 4:
-                    schedule.every().friday.at(pagi_t).do(make_job_pagi(user))
-                    schedule.every().friday.at(sore_t).do(make_job_sore(user))
-                elif day_idx == 5:
-                    schedule.every().saturday.at(pagi_t).do(make_job_pagi(user))
-                    schedule.every().saturday.at(sore_t).do(make_job_sore(user))
+                # Kumpulkan user ke group berdasarkan waktu
+                pagi_groups[(day_idx, pagi_t)].append(user)
+                sore_groups[(day_idx, sore_t)].append(user)
+    
+    # Register schedule: satu job per (hari, waktu) yang menjalankan semua users secara sequential
+    def get_day_scheduler(day_idx):
+        """Return scheduler object untuk hari tertentu."""
+        if day_idx == 0: return schedule.every().monday
+        elif day_idx == 1: return schedule.every().tuesday
+        elif day_idx == 2: return schedule.every().wednesday
+        elif day_idx == 3: return schedule.every().thursday
+        elif day_idx == 4: return schedule.every().friday
+        elif day_idx == 5: return schedule.every().saturday
+        return None
+    
+    for (day_idx, time_str), users in pagi_groups.items():
+        sched = get_day_scheduler(day_idx)
+        if sched:
+            user_names = ', '.join(u['name'] for u in users)
+            logger.info(f"   📋 Pagi {time_str} ({['Sen','Sel','Rab','Kam','Jum','Sab'][day_idx]}): {user_names}")
+            captured_users = list(users)  # capture untuk closure
+            def make_pagi_batch(u_list):
+                def job():
+                    threading.Thread(target=_run_batch_sequential, args=('Absen Pagi', u_list)).start()
+                return job
+            sched.at(time_str).do(make_pagi_batch(captured_users))
+    
+    for (day_idx, time_str), users in sore_groups.items():
+        sched = get_day_scheduler(day_idx)
+        if sched:
+            user_names = ', '.join(u['name'] for u in users)
+            logger.info(f"   📋 Sore {time_str} ({['Sen','Sel','Rab','Kam','Jum','Sab'][day_idx]}): {user_names}")
+            captured_users = list(users)  # capture untuk closure
+            def make_sore_batch(u_list):
+                def job():
+                    threading.Thread(target=_run_batch_sequential, args=('Absen Sore', u_list)).start()
+                return job
+            sched.at(time_str).do(make_sore_batch(captured_users))
 
-    print("\n✅ Jadwal Terdaftar. Menunggu waktu eksekusi...")
+    logger.info("✅ Jadwal Terdaftar. Menunggu waktu eksekusi...")
 
     # 2. FITUR LATE ARRIVAL (Catch-Up)
     skrg = datetime.datetime.now()
     wd = skrg.weekday()
+    
+    catchup_pagi = []  # Kumpulkan user yang perlu catch-up
+    catchup_sore = []
     
     for user in target_users:
         rules = get_schedule_rules(user['name'], wd)
@@ -1160,17 +1226,16 @@ def run_scheduler(target_users, force_reset=False):
             if target_pagi < skrg < batas_pagi:
                  # MASIH DALAM WINDOW PAGI (sebelum 11:00)
                  if is_already_done(user['name'], 'pagi'):
-                     print(f"☕ [{user['name']}] Absen Pagi SUDAH SELESAI hari ini. (Skip Catch-Up)")
+                     logger.info(f"☕ [{user['name']}] Absen Pagi SUDAH SELESAI hari ini. (Skip Catch-Up)")
                  else:
-                     print(f"⚠️ DETEKSI TELAT STARTUP ({user['name']})!!")
-                     print(f"   Jadwal: {pagi_t_str}, Sekarang: {skrg.strftime('%H:%M')}")
-                     print("   🚀 RUNNING CATCH-UP PAGI (Async)...")
-                     threading.Thread(target=absen_pagi, args=(user,)).start()
+                     logger.info(f"⚠️ DETEKSI TELAT STARTUP ({user['name']})!!")
+                     logger.info(f"   Jadwal: {pagi_t_str}, Sekarang: {skrg.strftime('%H:%M')}")
+                     catchup_pagi.append(user)
             elif skrg >= batas_pagi:
                  # WINDOW PAGI SUDAH LEWAT (>= 11:00)
                  if not is_already_done(user['name'], 'pagi'):
-                     print(f"⏰ [{user['name']}] Window Pagi sudah lewat ({skrg.strftime('%H:%M')} > 11:00).")
-                     print(f"   📝 Auto-mark Pagi sebagai 'Done (Skipped)' agar history bersih.")
+                     logger.info(f"⏰ [{user['name']}] Window Pagi sudah lewat ({skrg.strftime('%H:%M')} > 11:00).")
+                     logger.info(f"   📝 Auto-mark Pagi sebagai 'Done (Skipped)' agar history bersih.")
                      save_history_entry(user['name'], 'pagi')
 
             # --- CEK SORE ---
@@ -1181,25 +1246,32 @@ def run_scheduler(target_users, force_reset=False):
             if target_sore < skrg < batas_sore:
                  # MASIH DALAM WINDOW SORE (sebelum 20:00)
                  if is_already_done(user['name'], 'sore'):
-                     print(f"🍵 [{user['name']}] Absen Sore SUDAH SELESAI hari ini. (Skip Catch-Up)")
+                     logger.info(f"🍵 [{user['name']}] Absen Sore SUDAH SELESAI hari ini. (Skip Catch-Up)")
                  else:
-                     print(f"⚠️ DETEKSI TELAT STARTUP ({user['name']})!!")
-                     print(f"   Jadwal: {sore_t_str}, Sekarang: {skrg.strftime('%H:%M')}")
-                     print("   🚀 RUNNING CATCH-UP SORE (Async)...")
-                     threading.Thread(target=absen_sore, args=(user,)).start()
+                     logger.info(f"⚠️ DETEKSI TELAT STARTUP ({user['name']})!!")
+                     logger.info(f"   Jadwal: {sore_t_str}, Sekarang: {skrg.strftime('%H:%M')}")
+                     catchup_sore.append(user)
             elif skrg >= batas_sore:
                  # WINDOW SORE SUDAH LEWAT (>= 20:00)
                  if not is_already_done(user['name'], 'sore'):
-                     print(f"⏰ [{user['name']}] Window Sore sudah lewat ({skrg.strftime('%H:%M')} > 20:00).")
-                     print(f"   📝 Auto-mark Sore sebagai 'Done (Skipped)' agar history bersih.")
+                     logger.info(f"⏰ [{user['name']}] Window Sore sudah lewat ({skrg.strftime('%H:%M')} > 20:00).")
+                     logger.info(f"   📝 Auto-mark Sore sebagai 'Done (Skipped)' agar history bersih.")
                      save_history_entry(user['name'], 'sore')
+    
+    # JALANKAN CATCH-UP SECARA SEQUENTIAL (Pancingan dulu, baru Suami, baru Istri)
+    if catchup_pagi:
+        logger.info(f"🚀 CATCH-UP PAGI: {', '.join(u['name'] for u in catchup_pagi)}")
+        threading.Thread(target=_run_batch_sequential, args=('Absen Pagi', catchup_pagi)).start()
+    if catchup_sore:
+        logger.info(f"🚀 CATCH-UP SORE: {', '.join(u['name'] for u in catchup_sore)}")
+        threading.Thread(target=_run_batch_sequential, args=('Absen Sore', catchup_sore)).start()
     
     try:
         while True:
             schedule.run_pending()
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n🛑 Script Dihentikan User.")
+        logger.info("🛑 Script Dihentikan User.")
         time.sleep(2)
 
 # Library Mode: No Main Function

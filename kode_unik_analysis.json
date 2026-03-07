@@ -1,0 +1,268 @@
+[
+  {
+    "folder": "10. Pokja 059",
+    "nama_paket": "",
+    "kode_surat_input": "T/PM.Jln-LimpanaKRBB/POKJA059/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "PM.Jln-LimpanaKRBB",
+        "full_text": "Nomor : 000.3.3/09/T/PM.Jln-LimpanaKRBB/POKJA059/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "PM.Jln-LimpanaKRBB"
+  },
+  {
+    "folder": "11. Pokja 053",
+    "nama_paket": "PENINGKATAN JALAN MENUJU PONDOK PESANTREN DARUL MUHIBBIN HARUBAN DESA TUNGKAP KEC. BINUANG KAB. TAPIN",
+    "kode_surat_input": "T/PJ.PndkPDMhbbinDT/POKJA053/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "PJ.PndkPDMhbbinDT",
+        "full_text": "Nomor : 000.3.3/09/T/PJ.PndkPDMhbbinDT/POKJA053/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "PJ.PndkPDMhbbinDT"
+  },
+  {
+    "folder": "12. Pokja 050",
+    "nama_paket": "",
+    "kode_surat_input": "T/PHMX1300MP.Pinang/POKJA050/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "PHMX1300MP.Pinang",
+        "full_text": "Nomor : 000.3.3/09/T/PHMX1300MP.Pinang/POKJA050/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "PHMX1300MP.Pinang"
+  },
+  {
+    "folder": "13. Pokja 062 (Tender Gagal)",
+    "nama_paket": "Pelebaran Bahu Jalan Kabupaten dari Simpang Lima Salam Babaris RT 01 RW 01 sampai Desa Pantai Cabe RT 01 RW 01 Kec. Salam Babaris",
+    "kode_surat_input": "T/Pel.BJ_Salba-DPCabe/POKJA062/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "Pel.BJ_Salba-DPCabe",
+        "full_text": "Nomor : 000.3.3/09/T/Pel.BJ_Salba-DPCabe/POKJA062/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "Pel.BJ_Salba-DPCabe"
+  },
+  {
+    "folder": "14. Pokja 076",
+    "nama_paket": "Pelebaran Jalan Desa Tandui Menuju Kubah Datu Suban Kecamatan Tapin Selatan Kab. Tapin",
+    "kode_surat_input": "T/PJ.DsTanduiKTS/POKJA076/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "PJ.DsTanduiKTS",
+        "full_text": "Nomor : 000.3.3/09/T/PJ.DsTanduiKTS/POKJA076/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "PJ.DsTanduiKTS"
+  },
+  {
+    "folder": "15. Pokja 070",
+    "nama_paket": "Rehabilitasi Jalan Gerilya Kel. Rantau Kanan Kec. Tapin Utara",
+    "kode_surat_input": "T/RJ.GerilyaRKTU/POKJA070/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "RJ.GerilyaRKTU",
+        "full_text": "Nomor : 000.3.3/09/T/RJ.GerilyaRKTU/POKJA070/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "RJ.GerilyaRKTU"
+  },
+  {
+    "folder": "16. Pokja 075 (Diskan)",
+    "nama_paket": "",
+    "kode_surat_input": "T/RehabK.KTDLinuh/POKJA075/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "RehabK.KTDLinuh",
+        "full_text": "Nomor : 000.3.3/09/T/RehabK.KTDLinuh/POKJA075/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "RehabK.KTDLinuh"
+  },
+  {
+    "folder": "16. Pokja 075 (Diskan)",
+    "nama_paket": "",
+    "kode_surat_input": "T/RehabK.KTDLinuh/POKJA075/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "RehabK.KTDLinuh",
+        "full_text": "Nomor : 000.3.3/09/T/RehabK.KTDLinuh/POKJA075/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "RehabK.KTDLinuh"
+  },
+  {
+    "folder": "17. Pokja 082",
+    "nama_paket": "Lanjutan Pengaspalan Jalan Datu Aling Kec. Tapin Selatan Kab. Tapin",
+    "kode_surat_input": "T/LPJ.D_AlingKTS/POKJA082/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "LPJ.D_AlingKTS",
+        "full_text": "Nomor : 000.3.3/09/T/LPJ.D_AlingKTS/POKJA082/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "LPJ.D_AlingKTS"
+  },
+  {
+    "folder": "17. Pokja 082",
+    "nama_paket": "Lanjutan Pengaspalan Jalan Datu Aling Kec. Tapin Selatan Kab. Tapin",
+    "kode_surat_input": "T/LPJ.D_AlingKTS/POKJA082/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "LPJ.D_AlingKTS",
+        "full_text": "Nomor : 000.3.3/09/T/LPJ.D_AlingKTS/POKJA082/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "LPJ.D_AlingKTS"
+  },
+  {
+    "folder": "18. Pokja 086",
+    "nama_paket": "Perbaikan / Peningkatan Jalan Desa Hatungun Rt.06, Kab. Tapin",
+    "kode_surat_input": "T/PJ.D_HatungunRT06/POKJA086/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "PJ.D_HatungunRT06",
+        "full_text": "Nomor : 000.3.3/09/T/PJ.D_HatungunRT06/POKJA086/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "PJ.D_HatungunRT06"
+  },
+  {
+    "folder": "2. Pokja 009",
+    "nama_paket": "",
+    "kode_surat_input": "T/SIRINGKNTOR/POKJA009/UKPBJ/X/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "15. BA Timpang",
+        "cell": "$R$5",
+        "kode_unik": "SIRINGKNTOR",
+        "full_text": "Nomor : 000.3.3/04/T/SIRINGKNTOR/POKJA009/UKPBJ/X/2025 |FORMULA| =\"Nomor : 000.3.3/0\"&Q5&\"/\"&'1. Input Data'!F39&\"\""
+      }
+    ],
+    "kode_unik": "SIRINGKNTOR"
+  },
+  {
+    "folder": "3. Pokja 016",
+    "nama_paket": "PEMBANGUNAN 3 RUANG KELAS BARU - USULAN FISIK PRIORITAS INTERVENSI KEBAKARAN SDN BATUNG",
+    "kode_surat_input": "T/3R.KLSSDNBATUNG/POKJA016/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "15. BA Timpang",
+        "cell": "$R$5",
+        "kode_unik": "3R.KLSSDNBATUNG",
+        "full_text": "Nomor : 000.3.3/04/T/3R.KLSSDNBATUNG/POKJA016/UKPBJ/2025 |FORMULA| =\"Nomor : 000.3.3/0\"&Q5&\"/\"&'1. Input Data'!F39&\"\""
+      }
+    ],
+    "kode_unik": "3R.KLSSDNBATUNG"
+  },
+  {
+    "folder": "4. Pokja 027",
+    "nama_paket": "",
+    "kode_surat_input": "T/NS.NyaringCLU/POKJA027/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "15. BA Timpang",
+        "cell": "$R$5",
+        "kode_unik": "NS.NyaringCLU",
+        "full_text": "Nomor : 000.3.3/04/T/NS.NyaringCLU/POKJA027/UKPBJ/2025 |FORMULA| =\"Nomor : 000.3.3/0\"&Q5&\"/\"&'1. Input Data'!F39&\"\""
+      }
+    ],
+    "kode_unik": "NS.NyaringCLU"
+  },
+  {
+    "folder": "5. Pokja 025",
+    "nama_paket": "",
+    "kode_surat_input": "T/NSKdgDs.Mst/POKJA025/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$8",
+        "kode_unik": "NSKdgDs.Mst",
+        "full_text": "Nomor : 000.3.3/09/T/NSKdgDs.Mst/POKJA025/UKPBJ/2025 |FORMULA| =P8"
+      }
+    ],
+    "kode_unik": "NSKdgDs.Mst"
+  },
+  {
+    "folder": "6. Pokja 030",
+    "nama_paket": "",
+    "kode_surat_input": "T/NS.LingkarPeriukMBKR/POKJA030/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "NS.LingkarPeriukMBKR",
+        "full_text": "Nomor : 000.3.3/09/T/NS.LingkarPeriukMBKR/POKJA030/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "NS.LingkarPeriukMBKR"
+  },
+  {
+    "folder": "7. Pokja 034",
+    "nama_paket": "",
+    "kode_surat_input": "T/N&PAS.BahariSWJ/POKJA034/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "N&PAS.BahariSWJ",
+        "full_text": "Nomor : 000.3.3/09/T/N&PAS.BahariSWJ/POKJA034/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "N&PAS.BahariSWJ"
+  },
+  {
+    "folder": "8. Pokja 042",
+    "nama_paket": "",
+    "kode_surat_input": "T/NR.GalianBruKB/POKJA042/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "NR.GalianBruKB",
+        "full_text": "Nomor : 000.3.3/09/T/NR.GalianBruKB/POKJA042/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "NR.GalianBruKB"
+  },
+  {
+    "folder": "9. Pokja 040 (Strategis)",
+    "nama_paket": "Jalan Very Sungai Salai (124) (DBH Sawit)",
+    "kode_surat_input": "T/Jln.VS_Salai124DBH/POKJA040/UKPBJ/2025",
+    "kode_unik_candidates": [
+      {
+        "sheet": "9. BA Penetapan Pemenang",
+        "cell": "$C$10",
+        "kode_unik": "Jln.VS_Salai124DBH",
+        "full_text": "Nomor : 000.3.3/09/T/Jln.VS_Salai124DBH/POKJA040/UKPBJ/2025 |FORMULA| =P10"
+      }
+    ],
+    "kode_unik": "Jln.VS_Salai124DBH"
+  }
+]

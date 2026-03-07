@@ -105,7 +105,15 @@ def get_status(icon, item):
     else:
         status = "❌ Scheduler TIDAK AKTIF"
     
-    icon.notify(status, "Govem Scheduler Status")
+    # Tampilkan status per-akun
+    import Govem_Engine
+    akun_info = []
+    for u_name in ['Suami', 'Istri', 'Pancingan']:
+        st = "✅" if Govem_Engine.is_user_enabled(u_name) else "⏸️"
+        akun_info.append(f"{u_name}: {st}")
+    
+    detail = " | ".join(akun_info)
+    icon.notify(f"{status}\n{detail}", "Govem Scheduler Status")
 
 def on_exit(icon, item):
     """Menu: Exit & Stop Scheduler - Hentikan semua proses."""
@@ -244,6 +252,29 @@ def setup_tray():
         item('🗑️ Hapus Autostart (Windows Boot)', remove_autostart),
     )
     
+    # --- Toggle Per-Akun (NEW FEATURE) ---
+    # Handler Factory: buat handler unik per user agar closure benar
+    def make_toggle_handler(user_name):
+        def handler(icon, menu_item):
+            import Govem_Engine
+            is_aktif = Govem_Engine.toggle_user(user_name)
+            status = "AKTIF ✅" if is_aktif else "NONAKTIF ⏸️"
+            icon.notify(f"{user_name}: {status}", "Toggle Akun")
+        return handler
+    
+    # Checked callback: centang jika user AKTIF (tidak di-disable)
+    def make_checked_callback(user_name):
+        def is_checked(menu_item):
+            import Govem_Engine
+            return Govem_Engine.is_user_enabled(user_name)
+        return is_checked
+    
+    toggle_menu = pystray.Menu(
+        item('👨 Suami', make_toggle_handler('Suami'), checked=make_checked_callback('Suami')),
+        item('👩 Istri', make_toggle_handler('Istri'), checked=make_checked_callback('Istri')),
+        item('🎣 Pancingan', make_toggle_handler('Pancingan'), checked=make_checked_callback('Pancingan')),
+    )
+    
     # Menu items - LEBIH JELAS
     menu = pystray.Menu(
         item('▶️ Manual Trigger', manual_menu), # NEW FEATURE
@@ -253,6 +284,7 @@ def setup_tray():
         item('▶️ Start Normal', start_scheduler),
         item('♻️ Start & FORCE RUN (Reset Hari Ini)', start_scheduler_force),
         pystray.Menu.SEPARATOR,
+        item('🔀 Aktifkan/Nonaktifkan Akun', toggle_menu),  # PER-USER TOGGLE
         item('⚙️ Pengaturan', settings_menu),
         item('🛑 STOP & Exit', on_exit)
     )
