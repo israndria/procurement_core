@@ -61,12 +61,62 @@ Public Sub PrintBAReviuPDF()
     Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
 
-Public Sub PrintReviu()
-    RunMerge "print", WORD_REVIU, SHEET_REVIU
+Public Sub PrintIsiReviuPDF()
+    Dim kodePokja As String
+    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
+    If kodePokja = "" Then kodePokja = "000"
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & WORD_REVIU
+
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim cmd As String
+    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_all " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_REVIU) & " " & Q(kodePokja)
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+
+    Application.StatusBar = "Membuat PDF Isi_Reviu_" & kodePokja & ".pdf ..."
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
 
-Public Sub PrintDokpil()
-    RunMerge "print", WORD_DOKPIL, SHEET_DOKPIL
+Public Sub PrintDokpilPDF()
+    Dim kodePokja As String
+    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
+    If kodePokja = "" Then kodePokja = "000"
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & WORD_DOKPIL
+
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim cmd As String
+    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_dokpil " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_DOKPIL) & " " & Q(kodePokja)
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+
+    Application.StatusBar = "Membuat PDF DOKPIL_" & kodePokja & ".pdf ..."
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
 
 ' ===== PDF (merge + export halaman 1-2 ke PDF) =====
@@ -98,6 +148,93 @@ Public Sub PrintUndanganPDF()
     Set wsh = Nothing
 
     Application.StatusBar = "Membuat PDF Undangan_" & kodePokja & ".pdf ..."
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+End Sub
+
+Public Sub PrintPembuktianPDF()
+    Dim kodePokja As String
+    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
+    If kodePokja = "" Then kodePokja = "000"
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & WORD_BA
+
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim cmd As String
+    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_pembuktian " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+
+    Application.StatusBar = "Membuat PDF BA Pembuktian & Nego_ " & kodePokja & " ..."
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+End Sub
+
+Public Sub PrintREvaluasiPDF()
+    Dim kodePokja As String
+    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
+    If kodePokja = "" Then kodePokja = "000"
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & WORD_BA
+
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim cmd As String
+    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_revaluasi " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+
+    Application.StatusBar = "Membuat PDF REvaluasi_" & kodePokja & ".pdf ..."
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+End Sub
+
+Public Sub PrintPembuktianTimpangPDF()
+    Dim kodePokja As String
+    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
+    If kodePokja = "" Then kodePokja = "000"
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & WORD_BA
+
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim cmd As String
+    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_pembuktian_timpang " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+
+    Application.StatusBar = "Membuat PDF BA Pembuktian Timpang_" & kodePokja & ".pdf ..."
     Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
 

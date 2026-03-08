@@ -105,10 +105,23 @@ def get_html_from_folder(folder):
 
 
 def get_pdf_from_folder(folder):
-    """Mencari file pdf di folder."""
-    for f in os.listdir(folder):
-        if f.lower().endswith('.pdf'):
+    """Mencari file pdf LPSE di folder (mengabaikan hasil cetak sistem)."""
+    ignore_prefixes = ("undangan_", "ba_reviu", "ba_pembuktian", "revaluasi_", "isi_reviu", "test_")
+    
+    pdfs = [f for f in os.listdir(folder) if f.lower().endswith('.pdf')]
+    
+    # 1. Prioritaskan file yang memiliki keyword "pokja" di namanya
+    for f in pdfs:
+        lower_name = f.lower()
+        if "pokja" in lower_name and not lower_name.startswith(ignore_prefixes):
             return os.path.join(folder, f)
+            
+    # 2. Jika tidak ada keyword pokja, ambil PDF apapun yang bukan buatan sistem kita
+    for f in pdfs:
+        lower_name = f.lower()
+        if not lower_name.startswith(ignore_prefixes):
+            return os.path.join(folder, f)
+            
     return None
 
 

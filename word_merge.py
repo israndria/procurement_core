@@ -173,11 +173,13 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             except:
                 pass
 
-        # Cleanup blank pages (WAJIB Render API agar Information() jalan dan tidak HANG)
-        wdApp.ScreenUpdating = True
-        wdApp.Visible = True 
-        wdApp.WindowState = 2 # 2=wdWindowStateMinimize (Tampil ke layar tetapi diforced Minimize)
-        cleanup_blank_pages(wdDoc)
+        # Cleanup blank pages HANYA untuk "1. Full Dokumen BA PK"
+        # File "2. Isi Reviu" dan "3. Dokpil" dikecualikan karena strukturnya berbeda dan bisa berantakan
+        if "1. Full Dokumen BA PK" in os.path.basename(word_path):
+            wdApp.ScreenUpdating = True
+            wdApp.Visible = True 
+            wdApp.WindowState = 2 # 2=wdWindowStateMinimize (Tampil ke layar tetapi diforced Minimize)
+            cleanup_blank_pages(wdDoc)
 
         # Simpan dan Tampilkan hanya jika bukan mode PDF
         if mode in ("buka", "print"):
@@ -205,24 +207,224 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
 
         elif mode.startswith("pdf"):
             safe_name = pdf_name if pdf_name else "000"
-            # wdDoc.Repaginate()  # Mencegah FREEZE saat export PDF
 
             if mode == "pdf_bareviu":
                 pdf_path = os.path.join(folder, f"BA_REVIU_DPP_{safe_name}.pdf")
-                from_page = 3
-                to_page = 6
+                wdDoc.ExportAsFixedFormat(
+                    OutputFileName=pdf_path,
+                    ExportFormat=17,
+                    Range=3,  # wdExportFromTo
+                    From=3,
+                    To=6,
+                )
+            elif mode == "pdf_revaluasi":
+                pdf_path = os.path.join(folder, f"REvaluasi_{safe_name}.pdf")
+                wdDoc.ExportAsFixedFormat(
+                    OutputFileName=pdf_path,
+                    ExportFormat=17,
+                    Range=3,  # wdExportFromTo
+                    From=30,
+                    To=37,
+                )
+            elif mode == "pdf_all":
+                pdf_path = os.path.join(folder, f"Isi_Reviu_DPP_{safe_name}.pdf")
+                wdDoc.ExportAsFixedFormat(
+                    OutputFileName=pdf_path,
+                    ExportFormat=17,
+                    Range=0,  # wdExportAllDocument
+                )
+            elif mode == "pdf_dokpil":
+                pdf_path = os.path.join(folder, f"DOKPIL_{safe_name}.pdf")
+                wdDoc.ExportAsFixedFormat(
+                    OutputFileName=pdf_path,
+                    ExportFormat=17,
+                    Range=0,  # wdExportAllDocument
+                )
+            elif mode == "pdf_pembuktian":
+                import tempfile
+                from PyPDF2 import PdfReader, PdfWriter
+                
+                final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Nego_{safe_name}.pdf")
+                temp_dir = tempfile.mkdtemp()
+                temp_word_pdf = os.path.join(temp_dir, "temp_word.pdf")
+                temp_excel_pdf = os.path.join(temp_dir, "temp_excel.pdf")
+                
+                # 1. Export Word Halaman 7-29
+                wdDoc.ExportAsFixedFormat(
+                    OutputFileName=temp_word_pdf,
+                    ExportFormat=17,
+                    Range=3,
+                    From=7,
+                    To=29,
+                )
+                
+                # 2. Export Excel Sheet 7.2
+                xlApp = None
+                wb_xl = None
+                try:
+                    xlApp = win32com.client.DispatchEx("Excel.Application")
+                    xlApp.Visible = False
+                    xlApp.DisplayAlerts = False
+                    wb_xl = xlApp.Workbooks.Open(excel_path, ReadOnly=True)
+                    ws_nego = wb_xl.Sheets("7.2 Dengan Nego")
+                    ws_nego.PageSetup.Orientation = 2 # xlLandscape
+                    ws_nego.PageSetup.Zoom = False
+                    ws_nego.PageSetup.FitToPagesWide = 1
+                    ws_nego.PageSetup.FitToPagesTall = 1
+                    ws_nego.ExportAsFixedFormat(0, temp_excel_pdf) # 0 = xlTypePDF
+                finally:
+                    if wb_xl:
+                        try: wb_xl.Close(False)
+                        except: pass
+                    if xlApp:
+                        try: xlApp.Quit()
+                        except: pass
+                
+                # 3. Gabungkan dengan PyPDF2
+                writer = PdfWriter()
+                reader_word = PdfReader(temp_word_pdf)
+                reader_excel = PdfReader(temp_excel_pdf)
+                
+                # Word 7-17 itu index range(0, 11) karena From=7 adalah index 0 di pdf word
+                for i in range(11):
+                    if i < len(reader_word.pages):
+                        writer.add_page(reader_word.pages[i])
+                
+                # Sisipkan Nego Pertama (Setelah Hal 17)
+                if len(reader_excel.pages) > 0:
+                    writer.add_page(reader_excel.pages[0])
+                
+                # Word 18-26 itu index range(11, 20)
+                for i in range(11, 20):
+                    if i < len(reader_word.pages):
+                        writer.add_page(reader_word.pages[i])
+                    
+                # Sisipkan Nego Kedua (Setelah Hal 26)
+                if len(reader_excel.pages) > 0:
+                    writer.add_page(reader_excel.pages[0])
+                    
+                # Word 27-29 itu index range(20, end)
+                for i in range(20, len(reader_word.pages)):
+                    writer.add_page(reader_word.pages[i])
+                    
+                with open(final_pdf_path, 'wb') as fd_out:
+                    writer.write(fd_out)
+                    
+            elif mode == "pdf_pembuktian_timpang":
+                import tempfile
+                from PyPDF2 import PdfReader, PdfWriter
+                
+                final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Timpang_{safe_name}.pdf")
+                temp_dir = tempfile.mkdtemp()
+                temp_word_pdf = os.path.join(temp_dir, "temp_word.pdf")
+                temp_nego_pdf = os.path.join(temp_dir, "temp_nego.pdf")
+                temp_timpang_pdf = os.path.join(temp_dir, "temp_timpang.pdf")
+                
+                # 1. Export Word Halaman 7-43 (karena butuh nyampe 43)
+                wdDoc.ExportAsFixedFormat(
+                    OutputFileName=temp_word_pdf,
+                    ExportFormat=17,
+                    Range=3,
+                    From=7,
+                    To=43,
+                )
+                
+                # 2. Export Excel Sheets (Nego dan Timpang)
+                xlApp = None
+                wb_xl = None
+                try:
+                    xlApp = win32com.client.DispatchEx("Excel.Application")
+                    xlApp.Visible = False
+                    xlApp.DisplayAlerts = False
+                    wb_xl = xlApp.Workbooks.Open(excel_path, ReadOnly=True)
+                    
+                    # Nego
+                    ws_nego = wb_xl.Sheets("7.2 Dengan Nego")
+                    ws_nego.PageSetup.Orientation = 2 # xlLandscape
+                    ws_nego.PageSetup.Zoom = False
+                    ws_nego.PageSetup.FitToPagesWide = 1
+                    ws_nego.PageSetup.FitToPagesTall = 1
+                    ws_nego.ExportAsFixedFormat(0, temp_nego_pdf)
+                    
+                    # Timpang
+                    ws_timpang = wb_xl.Sheets("Klarifikasi Timpang Fix (2)")
+                    ws_timpang.PageSetup.Orientation = 2 # xlLandscape
+                    ws_timpang.PageSetup.Zoom = False
+                    ws_timpang.PageSetup.FitToPagesWide = 1
+                    ws_timpang.PageSetup.FitToPagesTall = 1
+                    ws_timpang.ExportAsFixedFormat(0, temp_timpang_pdf)
+                finally:
+                    if wb_xl:
+                        try: wb_xl.Close(False)
+                        except: pass
+                    if xlApp:
+                        try: xlApp.Quit()
+                        except: pass
+                        
+                # 3. Merajut semuanya
+                writer = PdfWriter()
+                reader_word = PdfReader(temp_word_pdf)
+                reader_nego = PdfReader(temp_nego_pdf)
+                reader_timpang = PdfReader(temp_timpang_pdf)
+                
+                def add_wp(start_idx, end_idx):
+                    for i in range(start_idx, end_idx):
+                        if i < len(reader_word.pages): writer.add_page(reader_word.pages[i])
+                
+                def add_nego():
+                    if len(reader_nego.pages) > 0: writer.add_page(reader_nego.pages[0])
+                    
+                def add_timpang():
+                    if len(reader_timpang.pages) > 0: writer.add_page(reader_timpang.pages[0])
+                
+                # Part 1: Word 7-16 (Index 0-9)
+                add_wp(0, 10)
+                
+                # ------ PENYISIPAN PERTAMA ------
+                # Sisipkan Word 38, 39 (Index 31, 32)
+                add_wp(31, 33)
+                # Sisipkan Timpang
+                add_timpang()
+                # Sisipkan Word 40 (Index 33)
+                add_wp(33, 34)
+                
+                # Part 4: Word 17 (Index 10)
+                add_wp(10, 11)
+                # Part 5: Sisipkan Nego
+                add_nego()
+                
+                # Part 6: Word 18-25 (Index 11-18)
+                add_wp(11, 19)
+                
+                # ------ PENYISIPAN KEDUA ------
+                # Sisipkan Word 41, 42 (Index 34, 35)
+                add_wp(34, 36)
+                # Sisipkan Timpang
+                add_timpang()
+                # Sisipkan Word 43 (Index 36)
+                add_wp(36, 37)
+                
+                # Part 9: Word 26 (Index 19)
+                add_wp(19, 20)
+                # Part 10: Sisipkan Nego
+                add_nego()
+                
+                # Part 11: Word 27-29 (Index 20-23)
+                add_wp(20, 23)
+                
+                with open(final_pdf_path, 'wb') as fd_out:
+                    writer.write(fd_out)
+
             else:
                 pdf_path = os.path.join(folder, f"Undangan_{safe_name}.pdf")
-                from_page = 1
-                to_page = 2
-
-            wdDoc.ExportAsFixedFormat(
-                OutputFileName=pdf_path,
-                ExportFormat=17,
-                Range=3,
-                From=from_page,
-                To=to_page,
-            )
+                wdDoc.ExportAsFixedFormat(
+                    OutputFileName=pdf_path,
+                    ExportFormat=17,
+                    Range=3,  # wdExportFromTo
+                    From=1,
+                    To=2,
+                )
+            
             wdDoc.Close(False)
             if new_instance:
                 wdApp.Quit()
