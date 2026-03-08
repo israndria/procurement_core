@@ -233,7 +233,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
             elif mode == "pdf_pembuktian":
                 import tempfile
-                from PyPDF2 import PdfReader, PdfWriter
+                from pypdf import PdfReader, PdfWriter
                 
                 final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Nego_{safe_name}.pdf")
                 temp_dir = tempfile.mkdtemp()
@@ -303,7 +303,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     
             elif mode == "pdf_pembuktian_timpang":
                 import tempfile
-                from PyPDF2 import PdfReader, PdfWriter
+                from pypdf import PdfReader, PdfWriter
                 
                 final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Timpang_{safe_name}.pdf")
                 temp_dir = tempfile.mkdtemp()

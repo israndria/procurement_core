@@ -68,6 +68,8 @@ def inject_buttons(filepath):
                 ("btnImportWeb",     "Import Data LPSE",        "ImportHTML",       3, 8, GREEN),
                 ("btnUndanganPDF",   "Print Undangan PDF",      "PrintUndanganPDF", 4, 6, RED_PDF),
                 ("btnPrintPembuktian", "Print BA Pembuktian",   "PrintPembuktianPDF", 4, 7, BLACK),
+                ("btnREvaluasi",       "Print REvaluasi",      "PrintREvaluasiPDF", 4, 8, BLACK),
+                ("btnPembuktianTimpang", "Print Timpang",      "PrintPembuktianTimpangPDF", 5, 6, BLACK),
             ]),
             ("database_reviu", [
                 ("btnBukaReviu",   "Buka Reviu",      "BukaReviu",        2, 7, BLUE_WORD),
@@ -75,7 +77,7 @@ def inject_buttons(filepath):
             ]),
             ("database_dokpil", [
                 ("btnBukaDokpil",   "Buka Dokpil",   "BukaDokpil",   2, 6, BLUE_WORD),
-                ("btnPrintDokpil",  "Print Dokpil",  "PrintDokpil",  2, 7, BLACK),
+                ("btnPrintDokpil",  "Print Dokpil",  "PrintDokpilPDF",  2, 7, BLACK),
             ]),
         ]
         
@@ -178,4 +180,4 @@ def inject_buttons(filepath):
 
 
 if __name__ == "__main__":
-    inject_buttons(r"D:\Dokumen\@ POKJA 2026\Paket Experiment\@ BA PK 2026 (Improved) v1.xlsm")
+    inject_buttons(r"D:\Dokumen\@ POKJA 2026\Paket Experiment\@ BA PK 2026 (Improved) v1.4.xlsm")
