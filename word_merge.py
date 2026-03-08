@@ -157,7 +157,16 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                                 val = data[norm]
 
                         if val is not None:
-                            field.Result.Text = str(val)
+                            val = str(val)
+                            # Terapkan format switch Word (\* Upper, \* Lower, \* FirstCap)
+                            format_str = " ".join(parts[2:]).upper()
+                            if "UPPER" in format_str:
+                                val = val.upper()
+                            elif "LOWER" in format_str:
+                                val = val.lower()
+                            elif "FIRSTCAP" in format_str:
+                                val = val.capitalize()
+                            field.Result.Text = val
                         else:
                             field.Result.Text = ""
                         field.Unlink()

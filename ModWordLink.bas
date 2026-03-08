@@ -289,6 +289,21 @@ Public Sub ResetStatusBar()
     Application.StatusBar = False
 End Sub
 
+' ===== RELINK (update data source di Word templates) =====
+Public Sub RelinkTemplate()
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim cmd As String
+    cmd = Q(ScriptDir() & "\python\python.exe") & " " & Q(ScriptDir() & "\relink_templates.py") & " " & Q(ThisWorkbook.FullName)
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, True  ' blocking - tunggu sampai selesai
+    Set wsh = Nothing
+End Sub
+
 ' ===== IMPORT (baca file HTML LPSE dan isi ke excel) =====
 Public Sub ImportHTML()
     Dim excelPath As String

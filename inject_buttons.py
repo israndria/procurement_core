@@ -70,6 +70,7 @@ def inject_buttons(filepath):
                 ("btnPrintPembuktian", "Print BA Pembuktian",   "PrintPembuktianPDF", 4, 7, BLACK),
                 ("btnREvaluasi",       "Print REvaluasi",      "PrintREvaluasiPDF", 4, 8, BLACK),
                 ("btnPembuktianTimpang", "Print Timpang",      "PrintPembuktianTimpangPDF", 5, 6, BLACK),
+                ("btnRelink",            "Relink Template",    "RelinkTemplate",           5, 8, (255, 140, 0)),
             ]),
             ("database_reviu", [
                 ("btnBukaReviu",   "Buka Reviu",      "BukaReviu",        2, 7, BLUE_WORD),

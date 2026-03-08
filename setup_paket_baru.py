@@ -15,8 +15,7 @@ import os
 import shutil
 import sys
 import zipfile
-import tempfile
-import xml.etree.ElementTree as ET
+import re
 
 # ===== KONFIGURASI =====
 TEMPLATE_DIR = r"D:\Dokumen\@ POKJA 2026\Paket Experiment"
@@ -36,94 +35,69 @@ WORD_SHEET_MAP = [
 def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
     """Link Word mail merge ke Excel dengan mengedit XML di dalam .docx."""
     
-    # Register XML namespaces
-    ns_w = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-    ET.register_namespace('w', ns_w)
-    ET.register_namespace('r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships')
-    ET.register_namespace('mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006')
-    ET.register_namespace('m', 'http://schemas.openxmlformats.org/officeDocument/2006/math')
-    ET.register_namespace('sl', 'http://schemas.openxmlformats.org/schemaLibrary/2006/main')
-    ET.register_namespace('o', 'urn:schemas-microsoft-com:office:office')
-    ET.register_namespace('w14', 'http://schemas.microsoft.com/office/word/2010/wordml')
-    ET.register_namespace('w15', 'http://schemas.microsoft.com/office/word/2012/wordml')
-    ET.register_namespace('w16se', 'http://schemas.microsoft.com/office/word/2015/wordml/symex')
-    ET.register_namespace('w16cid', 'http://schemas.microsoft.com/office/word/2016/wordml/cid')
-    ET.register_namespace('w16', 'http://schemas.microsoft.com/office/word/2018/wordml')
-    
-    temp_dir = tempfile.mkdtemp()
-    
+
     try:
-        # Extract docx (it's a zip)
+        # Baca settings.xml dari dalam docx
         with zipfile.ZipFile(word_path, 'r') as zf:
-            zf.extractall(temp_dir)
-        
-        settings_path = os.path.join(temp_dir, 'word', 'settings.xml')
-        if not os.path.exists(settings_path):
-            return False
-        
-        # Parse settings.xml
-        tree = ET.parse(settings_path)
-        root = tree.getroot()
-        
-        ns = f'{{{ns_w}}}'
-        
-        # Remove existing mailMerge element
-        for mm in root.findall(f'{ns}mailMerge'):
-            root.remove(mm)
-        
-        # Build connection string
-        conn = (
-            f"Provider=Microsoft.ACE.OLEDB.12.0;"
-            f"User ID=Admin;"
-            f"Data Source={excel_path};"
-            f"Mode=Read;"
-            f'Extended Properties="HDR=YES;IMEX=1";'
+            if 'word/settings.xml' not in zf.namelist():
+                return False
+            settings_xml = zf.read('word/settings.xml')
+
+        settings_str = settings_xml.decode('utf-8')
+
+        # Hapus mailMerge element yang ada (jika ada)
+        settings_str = re.sub(r'<w:mailMerge>.*?</w:mailMerge>', '', settings_str, flags=re.DOTALL)
+
+        # Build mailMerge XML baru
+        # Escape & dan " untuk XML attribute value
+        excel_escaped = excel_path.replace('&', '&amp;')
+        mail_merge = (
+            '<w:mailMerge>'
+            '<w:mainDocumentType w:val="formLetters"/>'
+            '<w:linkToQuery/>'
+            '<w:dataType w:val="native"/>'
+            '<w:connectString w:val="Provider=Microsoft.ACE.OLEDB.12.0;'
+            'User ID=Admin;'
+            f'Data Source={excel_escaped};'
+            'Mode=Read;'
+            'Extended Properties=&quot;HDR=YES;IMEX=1&quot;;"/>'
+            f'<w:query w:val="SELECT * FROM `{sheet_name}$`"/>'
+            '</w:mailMerge>'
         )
-        query = f"SELECT * FROM `{sheet_name}$`"
-        
-        # Create mailMerge element
-        mm_elem = ET.SubElement(root, f'{ns}mailMerge')
-        
-        mdt = ET.SubElement(mm_elem, f'{ns}mainDocumentType')
-        mdt.set(f'{ns}val', 'formLetters')
-        
-        ET.SubElement(mm_elem, f'{ns}linkToQuery')
-        
-        dt = ET.SubElement(mm_elem, f'{ns}dataType')
-        dt.set(f'{ns}val', 'native')
-        
-        cs = ET.SubElement(mm_elem, f'{ns}connectString')
-        cs.set(f'{ns}val', conn)
-        
-        q = ET.SubElement(mm_elem, f'{ns}query')
-        q.set(f'{ns}val', query)
-        
-        # Save settings.xml
-        tree.write(settings_path, xml_declaration=True, encoding='UTF-8')
-        
-        # Repack docx
+
+        # Sisipkan sebelum </w:settings>
+        settings_str = settings_str.replace('</w:settings>', mail_merge + '</w:settings>')
+
+        new_settings = settings_str.encode('utf-8')
+
+        # Repack docx - copy semua entry asli, replace hanya settings.xml
         backup = word_path + ".bak"
         shutil.copy2(word_path, backup)
-        
-        with zipfile.ZipFile(word_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for root_dir, dirs, files in os.walk(temp_dir):
-                for file in files:
-                    file_path = os.path.join(root_dir, file)
-                    arcname = os.path.relpath(file_path, temp_dir)
-                    zf.write(file_path, arcname)
-        
+
+        temp_path = word_path + ".tmp"
+        with zipfile.ZipFile(backup, 'r') as zf_in:
+            with zipfile.ZipFile(temp_path, 'w') as zf_out:
+                for item in zf_in.infolist():
+                    if item.filename == 'word/settings.xml':
+                        zf_out.writestr(item.filename, new_settings, compress_type=item.compress_type)
+                    else:
+                        zf_out.writestr(item, zf_in.read(item.filename))
+
+        # Replace original dengan file baru
+        os.replace(temp_path, word_path)
         os.remove(backup)
         return True
-        
+
     except Exception as e:
         print(f"      Error: {e}")
         backup = word_path + ".bak"
         if os.path.exists(backup):
             shutil.copy2(backup, word_path)
             os.remove(backup)
+        temp_path = word_path + ".tmp"
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
         return False
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def setup_paket_baru(folder_name=None):
