@@ -76,7 +76,7 @@ def read_pdf_data(pdf_path):
         # Regex patterns berdasarkan format Lembar Disposisi Pokja Kabupaten Tapin
         patterns = {
             # "Surat Dari DINAS PERIKANAN Diterima Tanggal"
-            "Nama Dinas": r"Surat Dari\s+(.+?)\s+Diterima Tanggal",
+            "Nama Dinas": r"Surat Dari\s*:?\s*(.+?)\s+Diterima Tanggal",
             # "Nomor Surat : 000.3.2/756-BUDKAN/DISKAN/2025"
             "Nomor Surat Dinas": r"Nomor Surat\s*:\s*([\w\.\-/]+)",
             # "Nomor : 800.1.11.1/248/075-PP/BPBJ/2025"
