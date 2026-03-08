@@ -5,8 +5,8 @@ Attribute VB_Name = "ModWordLink"
 ' Semua merge dijalankan via Python (proses terpisah, Excel tidak hang)
 ' PENTING: File Word TIDAK PERNAH dimodifikasi - koneksi saat runtime saja
 
-Private Const PY_SCRIPT As String = "D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\word_merge.py"
-Private Const PY_IMPORT As String = "D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\import_web_data.py"
+' v1.4: Path dinamis - tidak perlu hardcode, otomatis detect dari lokasi Excel
+' Struktur folder: @ POKJA 2026\<Paket>\file.xlsm  →  @ POKJA 2026\V19_Scheduler\WPy64-313110\
 
 Private Const WORD_BA As String = "1. Full Dokumen BA PK v1.docx"
 Private Const WORD_REVIU As String = "2. Isi Reviu PK v1.docx"
@@ -50,7 +50,7 @@ Public Sub PrintBAReviuPDF()
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_bareviu " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_bareviu " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
@@ -79,7 +79,7 @@ Public Sub PrintIsiReviuPDF()
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_all " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_REVIU) & " " & Q(kodePokja)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_all " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_REVIU) & " " & Q(kodePokja)
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
@@ -108,7 +108,7 @@ Public Sub PrintDokpilPDF()
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_dokpil " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_DOKPIL) & " " & Q(kodePokja)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_dokpil " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_DOKPIL) & " " & Q(kodePokja)
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
@@ -140,7 +140,7 @@ Public Sub PrintUndanganPDF()
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
@@ -169,7 +169,7 @@ Public Sub PrintPembuktianPDF()
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_pembuktian " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_pembuktian " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
@@ -198,7 +198,7 @@ Public Sub PrintREvaluasiPDF()
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_revaluasi " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_revaluasi " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
@@ -227,7 +227,7 @@ Public Sub PrintPembuktianTimpangPDF()
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = "pythonw " & Q(PY_SCRIPT) & " pdf_pembuktian_timpang " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_pembuktian_timpang " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
@@ -259,7 +259,7 @@ Private Sub RunMerge(mode As String, wordFile As String, sheetName As String)
     
     ' Jalankan Python script (proses terpisah, Excel tidak hang)
     Dim cmd As String
-    cmd = "pythonw " & Q(PY_SCRIPT) & " " & mode & " " & Q(wordPath) & " " & Q(excelPath) & " " & Q(sheetName)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " " & mode & " " & Q(wordPath) & " " & Q(excelPath) & " " & Q(sheetName)
     
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
@@ -274,6 +274,15 @@ End Sub
 
 Private Function Q(s As String) As String
     Q = Chr(34) & s & Chr(34)
+End Function
+
+Private Function ScriptDir() As String
+    ' Dari Excel (@ POKJA 2026\<Paket>\) naik 1 level, lalu ke V19_Scheduler\WPy64-313110
+    ScriptDir = ThisWorkbook.Path & "\..\V19_Scheduler\WPy64-313110"
+End Function
+
+Private Function PyExe() As String
+    PyExe = ScriptDir() & "\python\pythonw.exe"
 End Function
 
 Public Sub ResetStatusBar()
@@ -295,7 +304,7 @@ Public Sub ImportHTML()
     
     ' Jalankan Python dan TUNGGU sampai selesai (blocking: True)
     Dim cmd As String
-    cmd = "pythonw " & Q(PY_IMPORT) & " " & Q(excelPath)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\import_web_data.py") & " " & Q(excelPath)
     
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")

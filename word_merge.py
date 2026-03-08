@@ -40,19 +40,27 @@ def normalize_field_name(name):
 
 
 def read_excel_data(excel_path, sheet_name):
-    import pythoncom
-    import win32com.client
+    """Baca data Excel via openpyxl (copy ke temp dulu karena file mungkin terkunci oleh Excel)."""
+    import tempfile
+    from openpyxl import load_workbook
 
-    pythoncom.CoInitialize()
     data = {}
+    temp_dir = tempfile.mkdtemp()
+    temp_path = os.path.join(temp_dir, os.path.basename(excel_path))
 
     try:
-        wb = win32com.client.GetObject(excel_path)
-        ws = wb.Sheets(sheet_name)
+        shutil.copy2(excel_path, temp_path)
+        wb = load_workbook(temp_path, read_only=True, data_only=True, keep_links=False)
 
-        cols = ws.UsedRange.Columns.Count
-        headers = ws.Range(ws.Cells(1, 1), ws.Cells(1, cols)).Value[0]
-        values = ws.Range(ws.Cells(2, 1), ws.Cells(2, cols)).Value[0]
+        if sheet_name not in wb.sheetnames:
+            wb.close()
+            show_error(f"Sheet '{sheet_name}' tidak ditemukan di Excel.")
+            return None
+
+        ws = wb[sheet_name]
+        headers = [c.value for c in ws[1]]
+        values = [c.value for c in ws[2]]
+        wb.close()
 
         for header, value in zip(headers, values):
             if header:
@@ -62,32 +70,15 @@ def read_excel_data(excel_path, sheet_name):
                 normalized = normalize_field_name(header)
                 if normalized != header:
                     data[normalized] = val
-
-    except Exception:
-        try:
-            from openpyxl import load_workbook
-            wb = load_workbook(excel_path, read_only=True, data_only=True, keep_links=False)
-            if sheet_name not in wb.sheetnames:
-                wb.close()
-                show_error(f"Sheet '" + sheet_name + "' tidak ditemukan di Excel.")
-                return None
-            ws = wb[sheet_name]
-            headers = [c.value for c in ws[1]]
-            values = [c.value for c in ws[2]]
-            wb.close()
-            for header, value in zip(headers, values):
-                if header:
-                    header = str(header).strip()
-                    val = format_value(value)
-                    data[header] = val
-                    normalized = normalize_field_name(header)
-                    if normalized != header:
-                        data[normalized] = val
-        except Exception as e:
-            show_error(f"Error baca Excel:\n{e}")
-            return None
+    except Exception as e:
+        show_error(f"Error baca Excel:\n{e}")
+        return None
     finally:
-        pythoncom.CoUninitialize()
+        try:
+            os.remove(temp_path)
+            os.rmdir(temp_dir)
+        except:
+            pass
 
     return data
 
