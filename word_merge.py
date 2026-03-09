@@ -320,13 +320,13 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 temp_nego_pdf = os.path.join(temp_dir, "temp_nego.pdf")
                 temp_timpang_pdf = os.path.join(temp_dir, "temp_timpang.pdf")
                 
-                # 1. Export Word Halaman 7-43 (karena butuh nyampe 43)
+                # 1. Export Word Halaman 7-44 (44 = tanda terima timpang)
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=temp_word_pdf,
                     ExportFormat=17,
                     Range=3,
                     From=7,
-                    To=43,
+                    To=44,
                 )
                 
                 # 2. Export Excel Sheets (Nego dan Timpang)
@@ -409,8 +409,12 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 # Part 10: Sisipkan Nego
                 add_nego()
                 
-                # Part 11: Word 27-29 (Index 20-23)
-                add_wp(20, 23)
+                # Part 11: Word 27 saja (Index 20)
+                add_wp(20, 21)
+
+                # Part 12: Tanda Terima Timpang (Word 44 = Index 37), 2x
+                add_wp(37, 38)
+                add_wp(37, 38)
                 
                 with open(final_pdf_path, 'wb') as fd_out:
                     writer.write(fd_out)
