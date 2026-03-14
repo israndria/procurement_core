@@ -7,11 +7,11 @@ import configparser
 import json
 import glob
 import re
-import json
 import math
 import sys
 import logging
 import threading
+import importlib
 
 # Global Lock untuk File History (Mencegah Race Condition saat tulis paralel)
 HISTORY_LOCK = threading.Lock()
@@ -229,51 +229,44 @@ def run_command(command, timeout=30): # Default timeout 30 detik
 def launch_emulator(idx):
     logger.info(f"🚀 Memulai Emulator Index {idx}...")
     run_command(f'"{LDCONSOLE}" launch --index {idx}')
-    
-    # SMART WAIT VIA LDCONSOLE
+
+    # AUTO-MINIMIZE: kirim minimize tiap loop sambil tunggu boot
     logger.info(f"⏳ [Emu {idx}] Menunggu sistem Android siap (LDConsole)...")
     boot_ready = False
     max_retries = 30  # 30 x 2s = 60 detik max
-    
+
     for i in range(max_retries):
+        # Minimize setiap iterasi agar window tidak muncul
+        run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
         try:
             cmd_boot = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell getprop sys.boot_completed"]
             res_boot = run_command(cmd_boot, timeout=10)
-            
+
             if "1" in res_boot:
-                logger.info(f"✅ [Emu {idx}] Sistem Siap! Boot Time: {i*2}s")
-                logger.info(f"☕ [Emu {idx}] Menunggu 10 detik agar Launcher stabil...")
-                time.sleep(10)
+                logger.info(f"✅ [Emu {idx}] Sistem Siap! Boot Time: {i*2}s (minimized)")
+                # Extra minimize selama tunggu launcher stabil
+                for _ in range(5):
+                    time.sleep(2)
+                    run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
                 boot_ready = True
                 break
         except Exception as e:
             logger.info(f"⚠️ [Emu {idx}] Boot check error: {e}")
-        
+
         time.sleep(2)
         if i % 5 == 0:
             logger.info(f"   ... [Emu {idx}] Waiting Boot ({i*2}s)")
-    
+
     if not boot_ready:
         logger.info(f"⚠️ [Emu {idx}] Warning: Boot Detect Timeout. Melanjutkan (hope for the best).")
+
+    # Final minimize
+    run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
     
-    # MINIMIZE via Win32 API (ldconsole TIDAK punya command minimize)
+    # MINIMIZE via ldconsole sortWnd
     try:
-        # Cari nama emulator berdasarkan index
-        list_out = run_command(f'"{LDCONSOLE}" list2', timeout=5)
-        emu_title = None
-        for line in list_out.split('\n'):
-            parts = line.strip().split(',')
-            if len(parts) >= 2 and parts[0].strip() == str(idx):
-                emu_title = parts[1].strip()
-                break
-        
-        if emu_title:
-            # Minimize semua window yang mengandung nama emulator
-            ps_cmd = f'powershell -Command "Add-Type -Name WinAPI -Namespace Win32 -MemberDefinition \"[DllImport(\\\"user32.dll\\\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);\"; Get-Process | Where-Object {{$_.MainWindowTitle -like \"*{emu_title}*\"}} | ForEach-Object {{[Win32.WinAPI]::ShowWindow($_.MainWindowHandle, 6)}}"'
-            run_command(ps_cmd, timeout=10)
-            logger.info(f"🔽 [Emu {idx}] Window '{emu_title}' diminimize via Win32 API.")
-        else:
-            logger.info(f"⚠️ [Emu {idx}] Tidak bisa minimize: nama emulator tidak ditemukan.")
+        run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize', timeout=10)
+        logger.info(f"🔽 [Emu {idx}] Window diminimize via sortWnd.")
     except Exception as e:
         logger.info(f"⚠️ [Emu {idx}] Minimize gagal: {e}")
     
@@ -848,22 +841,98 @@ def run_activity_automation(user_obj):
         
     print(f"✅ Semua aktivitas {name} selesai!")
 
+def _take_dashboard_screenshot(user):
+    """Restart app (kembali ke dashboard depan) lalu screenshot."""
+    idx = user['index']
+    name = user['name']
+    try:
+        # Restart app agar kembali ke dashboard depan
+        run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
+        time.sleep(2)
+        run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
+        time.sleep(10)  # Tunggu dashboard depan load
+
+        import tempfile
+        screenshot_path = os.path.join(tempfile.gettempdir(), f"govem_final_{name.lower()}.png")
+        serial = _get_serial(idx)
+        if serial:
+            result = subprocess.run(
+                [ADB, "-s", serial, "exec-out", "screencap", "-p"],
+                capture_output=True, timeout=10,
+                creationflags=0x08000000 if os.name == 'nt' else 0
+            )
+            if result.returncode == 0 and result.stdout:
+                with open(screenshot_path, 'wb') as f:
+                    f.write(result.stdout)
+                logger.info(f"📸 [{name}] Screenshot dashboard: {screenshot_path}")
+                return screenshot_path
+    except Exception as e:
+        logger.error(f"⚠️ [{name}] Screenshot gagal: {e}")
+    return None
+
+def _send_batch_notification(job_type, screenshot_paths):
+    """Kirim 1 notifikasi Windows toast + buka semua screenshot."""
+    names = [os.path.basename(p).replace("govem_final_", "").replace(".png", "").capitalize()
+             for p in screenshot_paths if p]
+    summary = ", ".join(names) if names else "Selesai"
+    try:
+        ps_script = f'''
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$textNodes = $template.GetElementsByTagName("text")
+$textNodes.Item(0).AppendChild($template.CreateTextNode("Govem Bot - {job_type}")) | Out-Null
+$textNodes.Item(1).AppendChild($template.CreateTextNode("{summary} selesai")) | Out-Null
+$toast = [Windows.UI.Notifications.ToastNotification]::new($template)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Govem Bot").Show($toast)
+'''
+        subprocess.run(["powershell", "-Command", ps_script],
+                       capture_output=True, timeout=10,
+                       creationflags=0x08000000 if os.name == 'nt' else 0)
+        logger.info(f"🔔 Notifikasi {job_type}: {summary}")
+    except Exception as e:
+        logger.error(f"⚠️ Notifikasi gagal: {e}")
+    # Buka semua screenshot
+    for p in screenshot_paths:
+        if p and os.path.exists(p):
+            try:
+                os.startfile(p)
+            except:
+                pass
+
+def _get_serial(idx):
+    """Get ADB serial for emulator index."""
+    possible_ports = [5554 + (idx*2), 5556, 5558, 5560]
+    devices = subprocess.run([ADB, "devices"], capture_output=True, text=True,
+                             creationflags=0x08000000 if os.name == 'nt' else 0).stdout
+    for p in possible_ports:
+        if f"emulator-{p}" in devices:
+            return f"emulator-{p}"
+        if f"127.0.0.1:{p}" in devices:
+            return f"127.0.0.1:{p}"
+    return None
+
 def trigger_activity(user_obj):
     """
     Trigger pengisian aktivitas untuk Suami menggunakan V23_aktivitas_Suami.py
-    Script V23 sudah di-refine dengan:
-    - Fix untuk Jumat (senam pagi + telaah)
-    - ADB input text (proven bekerja di background)
-    - Koordinat aktivitas 6 yang tepat
+    v1.1: importlib.reload() untuk hindari stale module cache,
+          restart app sebelum isi untuk clean state.
     """
     idx = user_obj['index']
     name = user_obj['name']
-    
+
     print(f"\n📝 [{name}] MEMULAI PENGISIAN AKTIVITAS (V23 Engine)")
-    
+
+    # RESTART APP dulu agar mulai dari Dashboard bersih
+    logger.info(f"🔄 [{name}] Restart app sebelum isi aktivitas...")
+    run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
+    time.sleep(3)
+    run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
+    time.sleep(25)  # Tunggu app siap
+
     try:
-        # Import dari V23_aktivitas_Suami
+        # Import + reload untuk hindari stale cache
         import V23_aktivitas_Suami as v23
+        importlib.reload(v23)
         v23.run_hybrid_automation(idx, background_mode=True)
         print(f"✅ [{name}] Pengisian Aktivitas Selesai (V23)")
     except Exception as e:
@@ -875,15 +944,19 @@ def trigger_activity(user_obj):
 def trigger_activity_istri(user_obj):
     """
     Trigger pengisian aktivitas untuk Istri menggunakan V23_aktivitas_Istri.py
+    v1.1: importlib.reload() + restart app (sama seperti Suami)
+    Note: V23_aktivitas_Istri sudah handle restart app sendiri,
+          tapi kita tetap reload module untuk hindari stale cache.
     """
     idx = user_obj['index']
     name = user_obj['name']
-    
+
     print(f"\n📝 [{name}] MEMULAI PENGISIAN AKTIVITAS (V23 Istri Engine)")
-    
+
     try:
-        # Import dari V23_aktivitas_Istri
+        # Import + reload untuk hindari stale cache
         import V23_aktivitas_Istri as v23_istri
+        importlib.reload(v23_istri)
         v23_istri.run_istri_automation(background_mode=True)
         print(f"✅ [{name}] Pengisian Aktivitas Selesai (V23 Istri)")
     except Exception as e:
@@ -1133,7 +1206,9 @@ def run_scheduler(target_users, force_reset=False):
         Ini mencegah ldconsole hang karena 3 emulator launch bersamaan."""
         # Sort users sesuai LAUNCH_ORDER
         sorted_users = sorted(users_with_rules, key=lambda u: LAUNCH_ORDER.index(u['name']) if u['name'] in LAUNCH_ORDER else 99)
-        
+
+        screenshots = []
+        pancingan_index = None  # Simpan index Pancingan untuk deferred kill
         for u in sorted_users:
             if not is_user_enabled(u['name']):
                 logger.info(f"⏸️ [Job] SKIP {job_type} {u['name']} (Dinonaktifkan)")
@@ -1145,8 +1220,30 @@ def run_scheduler(target_users, force_reset=False):
                 else:
                     absen_sore(u)
                 logger.info(f"✅ [Job] Selesai {job_type}: {u['name']}")
+                if u['name'] == 'Pancingan':
+                    # Jangan kill sekarang — tunggu emulator berikutnya boot dulu
+                    # agar iklan tetap di Pancingan, tidak pindah ke Suami/Istri
+                    pancingan_index = u['index']
+                else:
+                    # Kill Pancingan 3s setelah emulator berikutnya selesai boot
+                    if pancingan_index is not None:
+                        time.sleep(3)
+                        logger.info(f"🔌 [Pancingan] Auto-kill emulator (iklan sudah terserap)")
+                        run_command(f'"{LDCONSOLE}" quit --index {pancingan_index}')
+                        pancingan_index = None
+                    ss = _take_dashboard_screenshot(u)
+                    if ss:
+                        screenshots.append(ss)
             except Exception as e:
                 logger.error(f"💀 [CRASH] {job_type} {u['name']} GAGAL: {e}", exc_info=True)
+        # Safety: kill Pancingan jika belum di-kill (misal semua user lain skip/gagal)
+        if pancingan_index is not None:
+            logger.info(f"🔌 [Pancingan] Auto-kill emulator (cleanup)")
+            run_command(f'"{LDCONSOLE}" quit --index {pancingan_index}')
+
+        # 1 notifikasi gabungan + buka semua screenshot
+        if screenshots:
+            _send_batch_notification(job_type, screenshots)
     
     # Kumpulkan users per (pagi_time, sore_time) agar yang jadwal sama dilaunched bersama-sama
     from collections import defaultdict

@@ -1,35 +1,33 @@
 """
 V23_aktivitas_Istri.py - Pengisian Aktivitas Otomatis untuk Istri
 =================================================================
-- Background Mode (LDPlayer bisa minimize)
-- ADB input text (proven bekerja)
+v1.2 — Rewritten to mirror Suami's proven structure
+- Uses ADB -s serial (NOT ldconsole_adb) — same as Suami
+- Same coordinates as Suami (same Govem app UI)
+- Same timing, same flow, same helpers
 - Aktivitas per hari berbeda (Senin-Sabtu)
-- Reuse recording Suami + mapping koordinat
 """
 
-import subprocess
-import time
-import datetime
 import os
+import time
+import subprocess
+import datetime
 import sys
-import json
 import logging
 
 # --- PATHS ---
 LDPLAYER_PATH = r"D:\LDPlayer\LDPlayer9"
 LDCONSOLE = os.path.join(LDPLAYER_PATH, "ldconsole.exe")
 ADB = os.path.join(LDPLAYER_PATH, "adb.exe")
-ADB = os.path.join(LDPLAYER_PATH, "adb.exe")
-RECORDS_DIR = os.path.join(LDPLAYER_PATH, r"vms\operationRecords")
 PACKAGE_NAME = "go.id.tapinkab.govem"
+
+# --- DRY RUN FLAG ---
+DRY_RUN = "--dry-run" in sys.argv
 
 # Index untuk Istri
 ISTRI_IDX = 1
 
-# Global cached serial
-_CACHED_SERIAL = {}
- 
-# Setup Logging (agar tercatat di file log utama)
+# Setup Logging
 LOG_FILE = os.path.join(os.path.dirname(__file__), "govem_scheduler.log")
 logging.basicConfig(
     level=logging.INFO,
@@ -42,353 +40,377 @@ logging.basicConfig(
 logger = logging.getLogger("V23_Istri")
 
 def log_info(msg):
-    print(msg)
     logger.info(msg)
 
 def log_error(msg):
-    print(msg)
-    logger.error(msg)
- 
-# Setup Logging (agar tercatat di file log utama)
-LOG_FILE = os.path.join(os.path.dirname(__file__), "govem_scheduler.log")
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] [ISTRI] %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("V23_Istri")
-
-def log_info(msg):
-    print(msg)
-    logger.info(msg)
-
-def log_error(msg):
-    print(msg)
     logger.error(msg)
 
-# --- AKTIVITAS ISTRI PER HARI ---
-# Format: {"teks": "...", "step3": "recording_name", "step4": "recording_name"}
-# step3 = Recording untuk SKP (Istri 3, Istri 3.1, Istri 3.2, Istri 3.3)
-# step4 = Recording untuk Jenis (Istri 4, Istri 4.1)
+# =============================================
+# KOORDINAT UI GOVEM ISTRI (dari uiautomator dump)
+# Berbeda dari Suami! Modal popup punya offset berbeda.
+# =============================================
+# Dropdown SKP
+SKP_DROPDOWN_XY = (500, 318)
+SKP_COORDS = {
+    # bounds dari uiautomator: pakai center Y
+    1: (800, 518),   # [0,469]-[1600,568] Melaksanakan tugas yang diberikan atasan
+    2: (800, 617),   # [0,568]-[1600,667] Merencanakan pembelajaran
+    3: (800, 716),   # [0,667]-[1600,766] Melaksanakan pembelajaran
+    4: (800, 815),   # [0,766]-[1600,865] Menilai hasil pembelajaran
+}
 
+# Dropdown Jenis
+JENIS_DROPDOWN_XY = (1130, 318)
+JENIS_COORDS = {
+    1: (800, 508),   # [0,475]-[1600,542] Aktifitas
+    2: (800, 592),   # [0,559]-[1600,626] Apel/Shif/Piket/Lainnya
+}
+
+# Navigasi & Form
+STEP1_TAP_1 = (1153, 769)  # Klik menu aktivitas
+STEP1_TAP_2 = (500, 331)   # Klik buat aktivitas harian
+STEP2_INPUT_XY = (246, 456) # Klik field input teks
+STEP5_SAVE_XY = (795, 897)  # Tombol simpan/posting
+
+# =============================================
+# AKTIVITAS ISTRI PER HARI
+# Format: {"teks": "...", "skp": N, "jenis": N}
+# skp: nomor opsi di dropdown SKP (1-4)
+# jenis: 1=Aktifitas, 2=Apel/Shif/Piket
+# =============================================
 AKTIVITAS_ISTRI = {
-    0: [  # SENIN
-        {"teks": "membimbing peserta didik baris berbaris dan berdoa untuk memulai kegiatan", "step3": "Istri 3", "step4": "Istri 4"},
-        {"teks": "Menyusun kegiatan pembelajaran", "step3": "Istri 3.1", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan pembelajaran bahasa Inggris", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan pembelajaran bahasa Indonesia", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Menyusun kegiatan evaluasi", "step3": "Istri 3.1", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan evaluasi pembelajaran", "step3": "Istri 3.3", "step4": "Istri 4.1"},
-        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk mengakhiri kegiatan pembelajaran", "step3": "Istri 3", "step4": "Istri 4"},
+    0: [  # SENIN (7 aktivitas)
+        {"teks": "membimbing peserta didik baris berbaris dan berdoa untuk memulai kegiatan", "skp": 1, "jenis": 2},
+        {"teks": "Menyusun kegiatan pembelajaran", "skp": 2, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan pembelajaran bahasa Inggris", "skp": 3, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan pembelajaran bahasa Indonesia", "skp": 3, "jenis": 1},
+        {"teks": "Menyusun kegiatan evaluasi", "skp": 2, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan evaluasi pembelajaran", "skp": 4, "jenis": 1},
+        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk mengakhiri kegiatan pembelajaran", "skp": 1, "jenis": 2},
     ],
-    1: [  # SELASA
-        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk memulai kegiatan pembelajaran", "step3": "Istri 3", "step4": "Istri 4"},
-        {"teks": "Menyusun kegiatan pembelajaran", "step3": "Istri 3.1", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan pembelajaran ilmu pengetahuan alam dan sosial", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan evaluasi pembelajaran", "step3": "Istri 3.3", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan pembelajaran pendidikan Pancasila", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Melakukan kegiatan evaluasi", "step3": "Istri 3.3", "step4": "Istri 4.1"},
-        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk mengakhiri kegiatan pembelajaran", "step3": "Istri 3", "step4": "Istri 4"},
+    1: [  # SELASA (7 aktivitas)
+        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk memulai kegiatan pembelajaran", "skp": 1, "jenis": 2},
+        {"teks": "Menyusun kegiatan pembelajaran", "skp": 2, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan pembelajaran ilmu pengetahuan alam dan sosial", "skp": 3, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan evaluasi pembelajaran", "skp": 4, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan pembelajaran pendidikan Pancasila", "skp": 3, "jenis": 1},
+        {"teks": "Melakukan kegiatan evaluasi", "skp": 4, "jenis": 1},
+        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk mengakhiri kegiatan pembelajaran", "skp": 1, "jenis": 2},
     ],
-    2: [  # RABU
-        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk memulai kegiatan", "step3": "Istri 3", "step4": "Istri 4"},
-        {"teks": "Menambah wawasan yang relevan dengan tugas sebagai guru", "step3": "Istri 3.1", "step4": "Istri 4.1"},
-        {"teks": "Menambah wawasan yang relevan dengan tugas sebagai guru", "step3": "Istri 3.1", "step4": "Istri 4.1"},
-        {"teks": "Menambah wawasan yang relevan dengan tugas sebagai guru", "step3": "Istri 3.1", "step4": "Istri 4.1"},
-        {"teks": "Menambah wawasan yang relevan dengan tugas sebagai guru", "step3": "Istri 3.1", "step4": "Istri 4.1"},
-        {"teks": "Menambah wawasan yang relevan dengan tugas sebagai guru", "step3": "Istri 3.1", "step4": "Istri 4.1"},
-        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk mengakhiri kegiatan", "step3": "Istri 3", "step4": "Istri 4"},
+    2: [  # RABU (7 aktivitas)
+        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk memulai kegiatan", "skp": 1, "jenis": 2},
+        {"teks": "Menambah wawasan yang relevan dengan tugas sebagai guru", "skp": 2, "jenis": 1},
+        {"teks": "Menambah wawasan yang relevan dengan tugas sebagai guru", "skp": 2, "jenis": 1},
+        {"teks": "Menambah wawasan yang relevan dengan tugas sebagai guru", "skp": 2, "jenis": 1},
+        {"teks": "Menambah wawasan yang relevan dengan tugas sebagai guru", "skp": 2, "jenis": 1},
+        {"teks": "Menambah wawasan yang relevan dengan tugas sebagai guru", "skp": 2, "jenis": 1},
+        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk mengakhiri kegiatan", "skp": 1, "jenis": 2},
     ],
-    3: [  # KAMIS
-        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk memulai kegiatan pembelajaran", "step3": "Istri 3", "step4": "Istri 4"},
-        {"teks": "Menyusun kegiatan pembelajaran", "step3": "Istri 3.1", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan pembelajaran matematika", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Menyusun kegiatan evaluasi pembelajaran", "step3": "Istri 3.3", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan evaluasi pembelajaran", "step3": "Istri 3.3", "step4": "Istri 4.1"},
-        {"teks": "Mengolah nilai peserta didik", "step3": "Istri 3.3", "step4": "Istri 4.1"},
-        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk mengakhiri kegiatan pembelajaran", "step3": "Istri 3", "step4": "Istri 4"},
+    3: [  # KAMIS (7 aktivitas)
+        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk memulai kegiatan pembelajaran", "skp": 1, "jenis": 2},
+        {"teks": "Menyusun kegiatan pembelajaran", "skp": 2, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan pembelajaran matematika", "skp": 3, "jenis": 1},
+        {"teks": "Menyusun kegiatan evaluasi pembelajaran", "skp": 4, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan evaluasi pembelajaran", "skp": 4, "jenis": 1},
+        {"teks": "Mengolah nilai peserta didik", "skp": 4, "jenis": 1},
+        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk mengakhiri kegiatan pembelajaran", "skp": 1, "jenis": 2},
     ],
     4: [  # JUMAT (6 aktivitas)
-        {"teks": "Berpartisipasi dalam kegiatan Jumat Takwa", "step3": "Istri 3", "step4": "Istri 4.1"},
-        {"teks": "Menyusun kegiatan pembelajaran", "step3": "Istri 3.1", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan pembelajaran muatan lokal baca tulis Al-Quran", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan pembelajaran kesenian", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan evaluasi pembelajaran", "step3": "Istri 3.3", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan refleksi pembelajaran", "step3": "Istri 3.3", "step4": "Istri 4.1"},
+        {"teks": "Berpartisipasi dalam kegiatan Jumat Takwa", "skp": 1, "jenis": 1},
+        {"teks": "Menyusun kegiatan pembelajaran", "skp": 2, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan pembelajaran muatan lokal baca tulis Al-Quran", "skp": 3, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan pembelajaran kesenian", "skp": 3, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan evaluasi pembelajaran", "skp": 4, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan refleksi pembelajaran", "skp": 4, "jenis": 1},
     ],
     5: [  # SABTU (7 aktivitas)
-        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk memulai kegiatan pembelajaran", "step3": "Istri 3", "step4": "Istri 4"},
-        {"teks": "Mempersiapkan kegiatan kokurikuler", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan kokurikuler", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan kokurikuler", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan kokurikuler", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Melaksanakan kegiatan kokurikuler", "step3": "Istri 3.2", "step4": "Istri 4.1"},
-        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk mengakhiri kegiatan", "step3": "Istri 3", "step4": "Istri 4"},
+        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk memulai kegiatan pembelajaran", "skp": 1, "jenis": 2},
+        {"teks": "Mempersiapkan kegiatan kokurikuler", "skp": 3, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan kokurikuler", "skp": 3, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan kokurikuler", "skp": 3, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan kokurikuler", "skp": 3, "jenis": 1},
+        {"teks": "Melaksanakan kegiatan kokurikuler", "skp": 3, "jenis": 1},
+        {"teks": "Membimbing peserta didik baris berbaris dan berdoa untuk mengakhiri kegiatan", "skp": 1, "jenis": 2},
     ],
 }
 
-# --- KOORDINAT SKP (berdasarkan analisa pyautogui + mapping ke LDPlayer) ---
-# Koordinat Y untuk dropdown SKP di LDPlayer (resolusi internal)
-# SKP 1-4 visible, SKP 5-6 perlu scroll
-SKP_COORDS = {
-    1: (400, 550),   # SKP opsi 1
-    2: (400, 620),   # SKP opsi 2 - Menyusun
-    3: (400, 690),   # SKP opsi 3
-    4: (400, 760),   # SKP opsi 4 - Melaksanakan pembelajaran
-    5: (400, 820),   # SKP opsi 5 - Evaluasi (mungkin perlu scroll)
-    6: (400, 790),   # SKP opsi 6 - Upacara/Membimbing (PASTI perlu scroll)
-}
-
-# Jenis aktivitas koordinat
-JENIS_COORDS = {
-    1: (400, 613),   # Jenis 1 - Umum
-    2: (400, 680),   # Jenis 2 - Upacara
-}
-
-# --- HELPER FUNCTIONS ---
+# =============================================
+# HELPER FUNCTIONS (carbon copy dari Suami)
+# =============================================
 def run_command(command):
-    creationflags = 0x08000000  # CREATE_NO_WINDOW
-    if isinstance(command, list):
-        result = subprocess.run(command, capture_output=True, text=True, shell=False, creationflags=creationflags)
-    else:
-        result = subprocess.run(command, capture_output=True, text=True, shell=True, creationflags=creationflags)
-    return result.stdout.strip()
+    if DRY_RUN:
+        return ""
+    try:
+        creationflags = 0x08000000 if os.name == 'nt' else 0
+        if isinstance(command, list):
+            result = subprocess.run(command, capture_output=True, text=True, shell=False, creationflags=creationflags)
+        else:
+            result = subprocess.run(command, capture_output=True, text=True, shell=True, creationflags=creationflags)
+        return result.stdout.strip()
+    except Exception as e:
+        log_error(f"Error executing command: {e}")
+        return ""
 
-# --- LDCONSOLE HELPER FUNCTIONS (INDEX BASED) ---
-def ldconsole_adb(idx, command):
-    """Kirim perintah ADB via LDConsole (Target Index Pasti Benar)"""
-    # Format: ldconsole.exe adb --index 1 --command "shell input tap ..."
-    # command arg harus di-quote? subprocess handle arg splitting.
-    args = [LDCONSOLE, "adb", "--index", str(idx), "--command", command]
-    return run_command(args)
+_CACHED_SERIAL = {}
 
-def adb_click(idx, x, y):
-    ldconsole_adb(idx, f"shell input tap {x} {y}")
+def connect_adb_smart(idx, launch_if_needed=False):
+    if DRY_RUN:
+        log_info(f"[DRY RUN] Skip ADB connect (emulator {idx})")
+        return "dry-run-serial"
 
-def adb_swipe(idx, x1, y1, x2, y2, duration=300):
-    ldconsole_adb(idx, f"shell input swipe {x1} {y1} {x2} {y2} {duration}")
+    log_info(f"Menghubungkan Emulator {idx}...")
 
-def adb_input_text(idx, text):
-    """Input teks via LDCONSOLE ADB - Index Based."""
-    # Escape characters
+    if launch_if_needed:
+        log_info("Launching emulator...")
+        run_command(f'"{LDCONSOLE}" launch --index {idx}')
+        # Loop minimize sampai emulator running
+        for attempt in range(30):
+            time.sleep(1)
+            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+            s = run_command(f'"{LDCONSOLE}" list2')
+            for line in s.splitlines():
+                parts = line.split(",")
+                if len(parts) > 4 and parts[0] == str(idx) and parts[4] == "1":
+                    log_info(f"Emulator running setelah {attempt+1}s, minimize sent!")
+                    break
+            else:
+                continue
+            break
+        # Extra minimize untuk memastikan
+        for _ in range(3):
+            time.sleep(1)
+            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+
+    possible_ports = [5554 + (idx*2), 5556, 5558, 5560, 5562, 5564]
+    detected_serial = None
+
+    for p in possible_ports:
+        run_command(f'"{ADB}" connect 127.0.0.1:{p}')
+
+    for i in range(10):
+        devices = run_command(f'"{ADB}" devices')
+        for p in possible_ports:
+            if f"127.0.0.1:{p}" in devices and "device" in devices:
+                detected_serial = f"127.0.0.1:{p}"
+                break
+            if f"emulator-{p}" in devices and "device" in devices:
+                detected_serial = f"emulator-{p}"
+                break
+        if detected_serial:
+            break
+        time.sleep(1)
+
+    if not detected_serial:
+        detected_serial = f"127.0.0.1:{5554 + (idx*2)}"
+
+    log_info(f"Terhubung ke: {detected_serial}")
+    return detected_serial
+
+def adb_click(serial, x, y):
+    run_command([ADB, "-s", serial, "shell", "input", "tap", str(x), str(y)])
+
+def adb_input_text(serial, text, idx=0):
+    if DRY_RUN:
+        return
     escaped_text = text.replace(" ", "%s")
     for char in ["'", '"', "&", "(", ")", ";", "<", ">", "|", "*", "\\"]:
         escaped_text = escaped_text.replace(char, "")
-    
-    ldconsole_adb(idx, f"shell input text {escaped_text}")
+    run_command([ADB, "-s", serial, "shell", "input", "text", escaped_text])
 
-def play_record_file(idx, record_name):
-    """Replay macro dari file recording via LDCONSOLE ADB Wrapper."""
-    # NOTE: Serial argument removed, we use idx consistently
-    serial = None # Backward compatibility variable unused
-    
-    filepath = os.path.join(RECORDS_DIR, record_name + ".record")
-    
-    if not os.path.exists(filepath):
-        print(f"   ❌ Recording tidak ditemukan: {record_name}")
-        return False
-    
-    print(f"   ▶️ Macro: {record_name[:40]}...")
-    
+def take_screenshot(serial, idx):
+    if DRY_RUN:
+        log_info("[DRY RUN] Skip screenshot")
+        return None
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        operations = data.get("operations", [])
-        
-        # HARDCODE CALIBRATION (SAMA DENGAN V22/SUAMI)
-        w_res = 1600
-        h_res = 900
-        max_in_x = 19092
-        max_in_y = 10728
-        
-        prev_timing = 0
-        
-        for op in operations:
-            op_id = op.get("operationId")
-            timing = op.get("timing", 0)
-            
-            # Delay dipercepat 50%
-            delay = (timing - prev_timing) / 1000.0 * 0.5
-            if delay > 0:
-                time.sleep(delay)
-            prev_timing = timing
-            
-            if op_id == "PutMultiTouch":
-                points = op.get("points", [])
-                if points and points[0].get("state") == 1:
-                    raw_x = points[0].get("x", 0)
-                    raw_y = points[0].get("y", 0)
-                    
-                    # Konversi Raw ke Pixel (SAMA DENGAN SUAMI)
-                    real_x = int(raw_x / max_in_x * w_res)
-                    real_y = int(raw_y / max_in_y * h_res)
-                    
-                    # Eksekusi ADB Click via LDConsole Index
-                    adb_click(idx, real_x, real_y)
-        
-        print("   ✅ Selesai")
-        return True
+        import tempfile
+        screenshot_path = os.path.join(tempfile.gettempdir(), f"govem_aktivitas_istri_{idx}.png")
+        result = subprocess.run(
+            [ADB, "-s", serial, "exec-out", "screencap", "-p"],
+            capture_output=True, timeout=10,
+            creationflags=0x08000000 if os.name == 'nt' else 0
+        )
+        if result.returncode == 0 and result.stdout:
+            with open(screenshot_path, 'wb') as f:
+                f.write(result.stdout)
+            log_info(f"Screenshot disimpan: {screenshot_path}")
+            return screenshot_path
     except Exception as e:
-        print(f"   ❌ Error replay: {e}")
-        return False
+        log_error(f"Gagal screenshot: {e}")
+    return None
 
-def click_skp_option(idx, skp_num):
-    """Klik opsi SKP berdasarkan nomor."""
-    # Buka dropdown SKP dulu
-    print(f"   📋 Membuka dropdown SKP...")
-    adb_click(idx, 400, 540)  # Koordinat dropdown SKP
-    time.sleep(0.8)
-    
-    # Jika SKP 5 atau 6, perlu scroll
-    if skp_num >= 5:
-        print(f"   📜 Scroll untuk SKP {skp_num}...")
-        adb_swipe(idx, 400, 700, 400, 400, 300)
-        time.sleep(0.5)
-    
-    # Klik opsi SKP
-    coords = SKP_COORDS.get(skp_num, (400, 620))
-    print(f"   📋 Memilih SKP {skp_num} di ({coords[0]}, {coords[1]})")
-    adb_click(idx, coords[0], coords[1])
-    time.sleep(0.8)
+def show_notification(message, screenshot_path=None):
+    try:
+        from ctypes import windll
+        windll.user32.MessageBeep(0x00000040)
+    except:
+        pass
+    try:
+        ps_script = f'''
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$textNodes = $template.GetElementsByTagName("text")
+$textNodes.Item(0).AppendChild($template.CreateTextNode("Govem Bot (Istri)")) | Out-Null
+$textNodes.Item(1).AppendChild($template.CreateTextNode("{message}")) | Out-Null
+$toast = [Windows.UI.Notifications.ToastNotification]::new($template)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Govem Bot").Show($toast)
+'''
+        subprocess.run(["powershell", "-Command", ps_script],
+                       capture_output=True, timeout=10,
+                       creationflags=0x08000000 if os.name == 'nt' else 0)
+        log_info(f"Notifikasi terkirim: {message}")
+    except Exception as e:
+        log_error(f"Notifikasi gagal: {e}")
 
-def click_jenis_option(idx, jenis_num):
-    """Klik opsi Jenis berdasarkan nomor."""
-    # Buka dropdown Jenis
-    print(f"   🎯 Membuka dropdown Jenis...")
-    adb_click(idx, 400, 640)  # Koordinat dropdown Jenis
-    time.sleep(0.8)
-    
-    # Klik opsi
-    coords = JENIS_COORDS.get(jenis_num, (400, 613))
-    print(f"   🎯 Memilih Jenis {jenis_num} di ({coords[0]}, {coords[1]})")
-    adb_click(idx, coords[0], coords[1])
-    time.sleep(0.5)
+    if screenshot_path and os.path.exists(screenshot_path):
+        try:
+            os.startfile(screenshot_path)
+        except:
+            pass
 
-# --- MAIN AUTOMATION ---
+def minimize_emulator(idx):
+    try:
+        run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+    except:
+        pass
+
+# =============================================
+# MAIN AUTOMATION (mirror Suami's run_hybrid_automation)
+# =============================================
 def run_istri_automation(background_mode=True, override_hari=None):
-    """Jalankan automation pengisian aktivitas untuk Istri."""
     idx = ISTRI_IDX
-    
-    print("\n" + "="*60)
-    print("   🤖 V23 AKTIVITAS ISTRI (Background Mode)")
-    print("="*60)
-    
-    # 1. Connect (Skip - We use LDCONSOLE Index)
-    log_info(f"   🚀 Menggunakan LDConsole Index {idx}")
-    
-    # 2. Tentukan hari
+
+    if DRY_RUN:
+        log_info("=== DRY RUN MODE === (tidak ada ADB yang dieksekusi)")
+
+    # AUTO-MINIMIZE INSTANT (sebelum apapun)
+    minimize_emulator(idx)
+
+    # Connect ADB (same as Suami)
+    serial = connect_adb_smart(idx, launch_if_needed=(not background_mode))
+    _CACHED_SERIAL[idx] = serial
+
+    # Tentukan hari
     if override_hari is not None:
         hari_ini = override_hari
     else:
         hari_ini = datetime.datetime.now().weekday()
     nama_hari = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"][hari_ini]
-    
-    # 2.5. RESTART APP (Force Clean State)
-    log_info("🔄 Restarting App agar mulai dari Dashboard bersih...")
+
+    if hari_ini == 6:
+        log_info(f"Hari ini {nama_hari} - tidak ada aktivitas")
+        return True
+
+    # Ambil aktivitas hari ini
+    aktivitas_list = AKTIVITAS_ISTRI.get(hari_ini, [])
+    if not aktivitas_list:
+        log_error(f"Tidak ada data aktivitas untuk {nama_hari}")
+        return False
+
+    log_info(f"Hari: {nama_hari}, Jumlah aktivitas: {len(aktivitas_list)}")
+    for i, act in enumerate(aktivitas_list):
+        log_info(f"  {i+1}. [SKP{act['skp']} J{act['jenis']}] {act['teks'][:70]}")
+
+    # RESTART APP (Force Clean State)
+    log_info("Restarting App...")
     run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
     time.sleep(2)
     run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
-    
-    log_info("⏳ Menunggu aplikasi siap (25s)...")
+    log_info("Menunggu aplikasi siap (25s)...")
     time.sleep(25)
-    
-    # 3. Navigasi ke form (Step 1)
-    
-    # Minggu tidak ada aktivitas
-    if hari_ini == 6:
-        print(f"\n📅 Hari ini {nama_hari} - tidak ada aktivitas")
+
+    if DRY_RUN:
+        log_info("[DRY RUN] Preview selesai.")
         return True
-    
-    # 3. Ambil aktivitas hari ini
-    aktivitas_list = AKTIVITAS_ISTRI.get(hari_ini, [])
-    if not aktivitas_list:
-        print(f"❌ Tidak ada data aktivitas untuk {nama_hari}")
-        return False
-    
-    print(f"\n📅 Hari: {nama_hari}")
-    print(f"📋 Jumlah aktivitas: {len(aktivitas_list)}")
-    
-    # 4. Navigasi ke form (Step 1)
-    print("\n📱 Step 1: Navigasi ke form aktivitas...")
-    play_record_file(idx, "Step 1 (Menuju Dashboard Isian)")
+
+    log_info(f"MEMULAI PENGISIAN {len(aktivitas_list)} AKTIVITAS")
+
+    # STEP 1: NAVIGASI (direct ADB tap — same as Suami)
+    log_info("[STEP 1] Navigasi ke Halaman Form...")
+    adb_click(serial, STEP1_TAP_1[0], STEP1_TAP_1[1])
+    time.sleep(2)
+    adb_click(serial, STEP1_TAP_2[0], STEP1_TAP_2[1])
     time.sleep(3)
-    
-    # 5. Loop aktivitas
-    for i, akt in enumerate(aktivitas_list):
-        teks = akt["teks"]
-        step3_rec = akt["step3"]  # Recording untuk SKP
-        step4_rec = akt["step4"]  # Recording untuk Jenis
-        
-        log_info(f"\n📝 [{i+1}/{len(aktivitas_list)}] {teks[:40]}...")
-        # print(f"   Recording: {step3_rec} + {step4_rec}")
-        
-        # Step 2: Klik field input
-        print("   ⌨️ Step 2: Klik field input...")
-        play_record_file(idx, "Step 2 (Klik untuk supaya bisa mengetikcopas kata2)")
+
+    # LOOP ITEMS (exact same flow as Suami)
+    for i, act in enumerate(aktivitas_list):
+        text = act["teks"]
+        skp_num = act["skp"]
+        jenis_num = act["jenis"]
+
+        log_info(f"[{i+1}/{len(aktivitas_list)}] Mengisi: {text[:50]}...")
+
+        # STEP 2: Focus Input (direct ADB tap)
+        adb_click(serial, STEP2_INPUT_XY[0], STEP2_INPUT_XY[1])
         time.sleep(0.8)
-        
-        # Input teks
-        print("   ⌨️ Mengetik teks...")
-        clean_text = teks.replace("'", "").replace('"', "")
-        adb_input_text(idx, clean_text)
-        time.sleep(0.3)
-        
-        # Hide keyboard
-        ldconsole_adb(idx, "shell input keyevent 111")
-        time.sleep(0.3)
-        
-        # Step 3: Pilih SKP (pakai recording Istri)
-        print(f"   📋 Step 3: {step3_rec}...")
-        play_record_file(idx, step3_rec)
+
+        # CLEAR FIELD: triple-tap to select all, then delete
+        for _ in range(2):
+            run_command([ADB, "-s", serial, "shell", "input", "keyevent", "123"])  # END
+            run_command([ADB, "-s", serial, "shell", "input", "keyevent", "KEYCODE_MOVE_HOME"])
+            run_command(f'"{ADB}" -s {serial} shell input keyevent --longpress 112 123')  # Shift+END (select all)
+            time.sleep(0.1)
+            run_command([ADB, "-s", serial, "shell", "input", "keyevent", "67"])  # DEL
+            time.sleep(0.1)
+        time.sleep(0.5)
+
+        # INPUT TEKS
+        log_info(f"  Mengetik...")
+        clean_text = text.replace("'", "").replace('"', "")
+        adb_input_text(serial, clean_text, idx)
         time.sleep(1)
-        
-        # Step 4: Pilih Jenis (pakai recording Istri)
-        print(f"   🎯 Step 4: {step4_rec}...")
-        play_record_file(idx, step4_rec)
+
+        # Hide Keyboard
+        run_command([ADB, "-s", serial, "shell", "input", "keyevent", "111"])
+        time.sleep(0.3)
+
+        # STEP 3: Pilih SKP (same coords as Suami)
+        log_info(f"  Memilih SKP {skp_num}...")
+        adb_click(serial, SKP_DROPDOWN_XY[0], SKP_DROPDOWN_XY[1])
         time.sleep(0.8)
-        
-        # Step 5: Simpan
-        print("   💾 Step 5: Menyimpan...")
-        play_record_file(idx, "Step 5 (Posting Aktivitas)")
-        time.sleep(2)
-    
-    print("\n" + "="*60)
-    log_info(f"   ✅ SELESAI! {len(aktivitas_list)} aktivitas terisi")
-    print("="*60)
-    
+        if skp_num >= 5:
+            # Perlu scroll (unlikely for Istri, but keep for safety)
+            run_command([ADB, "-s", serial, "shell", "input", "swipe", "400", "700", "400", "400", "300"])
+            time.sleep(0.8)
+            adb_click(serial, 400, 790)
+        else:
+            coords = SKP_COORDS[skp_num]
+            adb_click(serial, coords[0], coords[1])
+        time.sleep(0.8)
+
+        # STEP 4: Pilih Jenis (same coords as Suami)
+        jenis_label = "Apel" if jenis_num == 2 else "Aktifitas"
+        log_info(f"  Memilih Jenis {jenis_num} ({jenis_label})...")
+        adb_click(serial, JENIS_DROPDOWN_XY[0], JENIS_DROPDOWN_XY[1])
+        time.sleep(0.8)
+        jenis_coords = JENIS_COORDS[jenis_num]
+        adb_click(serial, jenis_coords[0], jenis_coords[1])
+        time.sleep(0.8)
+
+        # STEP 5: Simpan (same as Suami)
+        log_info("  Simpan & Tunggu (12s)...")
+        adb_click(serial, STEP5_SAVE_XY[0], STEP5_SAVE_XY[1])
+        time.sleep(12)
+
+    log_info(f"SELESAI! {len(aktivitas_list)} aktivitas terisi")
     return True
 
 # --- ENTRY POINT ---
 def main():
-    print("\n" + "="*50)
-    print("   🤖 V23_aktivitas_Istri")
-    print("="*50)
-    print()
-    print("Mode:")
+    print("V23_aktivitas_Istri v1.2 (Mirror Suami)")
+    if DRY_RUN:
+        print("[DRY RUN MODE]")
+
     print("1. Jalankan otomatis (hari ini)")
     print("2. Test hari tertentu")
     print("0. Keluar")
-    print()
-    
+
     choice = input("Pilihan: ").strip()
-    
     if choice == '1':
-        run_istri_automation()
+        run_istri_automation(background_mode=False)
     elif choice == '2':
-        print("\nPilih hari:")
         print("0=Senin, 1=Selasa, 2=Rabu, 3=Kamis, 4=Jumat, 5=Sabtu")
         hari = int(input("Hari: ").strip())
-        
-        # Jalankan dengan override hari
-        run_istri_automation(override_hari=hari)
-    elif choice == '0':
-        return
-    
-    input("\nTekan ENTER untuk keluar...")
+        run_istri_automation(background_mode=False, override_hari=hari)
 
 if __name__ == "__main__":
     main()

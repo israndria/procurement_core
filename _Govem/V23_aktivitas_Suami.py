@@ -17,20 +17,259 @@ ADB = os.path.join(LDPLAYER_PATH, "adb.exe")
 PACKAGE_NAME = "go.id.tapinkab.govem"
 CONFIG_FILE = "govem_aktivitas_config.ini" # Config khusus aktivitas
 
-# Direktori Script Lama (Sumber Teks)
-BASE_DIR_SUAMI = r"D:\Download\Aktivitas Govem\Aktivitas"
-BASE_DIR_ISTRI = r"D:\Download\Aktivitas Govem\Aktivitas Istri" # Asumsi nama folder
+# Google Calendar OAuth (reuse dari V19_Scheduler)
+SCHEDULER_DIR = r"D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110"
+CRED_FILE_PATH = os.path.join(SCHEDULER_DIR, "credentials.json")
+TOKEN_FILE_PATH = os.path.join(SCHEDULER_DIR, "token.json")
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+CALENDAR_ID = 'primary'
 
 # Global Config Storage
-BUTTON_MAP = {} 
+BUTTON_MAP = {}
 
-def run_command(command):
+# --- DRY RUN FLAG ---
+DRY_RUN = "--dry-run" in sys.argv
+
+# =============================================
+# KOORDINAT UI GOVEM (terdeteksi via ADB screenshot)
+# =============================================
+# Dropdown SKP: buka dengan tap (500, 318)
+SKP_DROPDOWN_XY = (500, 318)
+SKP_COORDS = {
+    1: (400, 468),   # Melaksanakan Proses pemilihan penyedia barang/jasa
+    2: (400, 558),   # Melaksanakan Kegiatan pengembangan kompetensi
+    3: (400, 648),   # Melaksanakan Kegiatan yang menunjang pengelolaan
+    4: (400, 738),   # Melaksanakan tugas lain dari pimpinan
+    # 5, 6 perlu scroll dulu
+}
+
+# Dropdown Jenis: buka dengan tap (1130, 318)
+JENIS_DROPDOWN_XY = (1130, 318)
+JENIS_COORDS = {
+    1: (400, 462),   # Aktifitas
+    2: (400, 538),   # Apel/Shif/Piket/Lainnya
+}
+
+# Navigasi & Form (decoded dari macro .record)
+# Step 1: Dashboard → Form (2 tap berurutan)
+STEP1_TAP_1 = (1153, 769)  # Klik menu aktivitas
+STEP1_TAP_2 = (500, 331)   # Klik buat aktivitas harian
+# Step 2: Klik field input teks
+STEP2_INPUT_XY = (246, 456)
+# Step 5: Tombol simpan/posting
+STEP5_SAVE_XY = (795, 897)
+
+# =============================================
+# TEMPLATE AKTIVITAS — format: {teks, skp, jenis}
+# skp: nomor SKP dropdown (1-4, atau 6 untuk senam)
+# jenis: 1=Aktifitas, 2=Apel/Shif/Piket
+# =============================================
+TEMPLATE_RUTINITAS = [
+    {"teks": "melaksanakan apel pagi", "skp": 4, "jenis": 2},
+    {"teks": "Menelaah dan menganalisa dokumen peraturan presiden no 46 tahun 2025 tentang perubahan kedua atas peraturan presiden no 16 tahun 2018 tentang pengadaan barang/jasa pemerintah", "skp": 4, "jenis": 1},
+    {"teks": "Menelaah SE Kep LKPP No. 1 2025 tentang Penjelasan Atas Pelaksanaan Perpres No. 46 2025 tentang Perubahan Kedua Atas Perpres No. 16 2018 Pada Masa Transisi", "skp": 4, "jenis": 1},
+    {"teks": "Menelaah dan menganalisa Peraturan Presiden No. 12 tahun 2021 tentang perubahan pertama atas peraturan presiden no 16 tahun 2018 tentang pengadaan barang/jasa pemerintah", "skp": 4, "jenis": 1},
+    {"teks": "Menelaah dan menganalisa Peraturan Lembaga LKPP Nomor 12 Tahun 2021 tentang Pedoman Pelaksanaan Pengadaan Barang/Jasa Pemerintah Melalui Penyedia", "skp": 4, "jenis": 1},
+    {"teks": "Menelaah dan menganalisa Peraturan Lembaga LKPP Nomor 3 Tahun 2021 tentang Pedoman Swakelola", "skp": 4, "jenis": 1},
+    {"teks": "melaksanakan apel sore", "skp": 4, "jenis": 2},
+]
+
+TEMPLATE_JUMAT = [
+    {"teks": "melaksanakan senam pagi", "skp": 6, "jenis": 1},
+    {"teks": "Menelaah dan menganalisa dokumen peraturan presiden no 46 tahun 2025 tentang perubahan kedua atas peraturan presiden no 16 tahun 2018 tentang pengadaan barang/jasa pemerintah", "skp": 4, "jenis": 1},
+    {"teks": "Menelaah SE Kep LKPP No. 1 2025 tentang Penjelasan Atas Pelaksanaan Perpres No. 46 2025 tentang Perubahan Kedua Atas Perpres No. 16 2018 Pada Masa Transisi", "skp": 4, "jenis": 1},
+    {"teks": "Menelaah dan menganalisa Peraturan Presiden No. 12 tahun 2021 tentang perubahan pertama atas peraturan presiden no 16 tahun 2018 tentang pengadaan barang/jasa pemerintah", "skp": 4, "jenis": 1},
+    {"teks": "Menelaah dan menganalisa Peraturan Lembaga LKPP Nomor 12 Tahun 2021 tentang Pedoman Pelaksanaan Pengadaan Barang/Jasa Pemerintah Melalui Penyedia", "skp": 4, "jenis": 1},
+    {"teks": "Menelaah dan menganalisa Peraturan Lembaga LKPP Nomor 3 Tahun 2021 tentang Pedoman Swakelola", "skp": 4, "jenis": 1},
+]
+
+TEMPLATE_DOKPIL = [
+    {"teks": "melaksanakan apel pagi", "skp": 4, "jenis": 2},
+    {"teks": "Melaksanakan pembuatan dokumen pemilihan paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan pembuatan jadwal tayang paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan upload dokumen pemilihan paket tender/seleksi pada SPSE", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan persetujuan paket tender/seleksi yang tayang pada SPSE", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan pengeditan paket (checklist syarat kualifikasi dan syarat adm/teknis) tender/seleksi yang akan ditayangkan di SPSE", "skp": 1, "jenis": 1},
+    {"teks": "melaksanakan apel sore", "skp": 4, "jenis": 2},
+]
+
+TEMPLATE_EVALUASI = [
+    {"teks": "melaksanakan apel pagi", "skp": 4, "jenis": 2},
+    {"teks": "Melaksanakan evaluasi kualifikasi adm paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan evaluasi kualifikasi teknis paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan evaluasi administrasi paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan evaluasi teknis paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan evaluasi harga paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "melaksanakan apel sore", "skp": 4, "jenis": 2},
+]
+
+TEMPLATE_PEMBUKTIAN = [
+    {"teks": "melaksanakan apel pagi", "skp": 4, "jenis": 2},
+    {"teks": "Melaksanakan evaluasi pembuktian kualifikasi adm paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan evaluasi pembuktian kualifikasi teknis paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan negosiasi harga paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan pembuatan berita acara dan daftar hadir pembuktian kualifikasi paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan pembuatan berita acara negosiasi paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "melaksanakan apel sore", "skp": 4, "jenis": 2},
+]
+
+TEMPLATE_REVIU_DPP = [
+    {"teks": "melaksanakan apel pagi", "skp": 4, "jenis": 2},
+    {"teks": "Melaksanakan reviu DPP paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan pembuatan berita acara reviu DPP paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan pembuatan daftar hadir reviu DPP paket tender/seleksi", "skp": 1, "jenis": 1},
+    {"teks": "Melaksanakan posting dokumen BA Reviu DPP paket tender/seleki ke SPSE", "skp": 1, "jenis": 1},
+    {"teks": "Menelaah SE Kep LKPP No. 1 2025 tentang Penjelasan Atas Pelaksanaan Perpres No. 46 2025 tentang Perubahan Kedua Atas Perpres No. 16 2018 Pada Masa Transisi", "skp": 4, "jenis": 1},
+    {"teks": "melaksanakan apel sore", "skp": 4, "jenis": 2},
+]
+
+# Mapping keyword tahapan SPSE → template
+# Event summary format dari V19_Scheduler: "{Tahap} - {Nama_Paket}"
+TAHAPAN_MAPPING = [
+    # (keyword dalam summary event, nama template, template list)
+    ("Pengumuman Prakualifikasi",           "DOKPIL",      TEMPLATE_DOKPIL),
+    ("Pengumuman Pasca",                    "DOKPIL",      TEMPLATE_DOKPIL),
+    ("Download Dokumen Pemilihan",          "DOKPIL",      TEMPLATE_DOKPIL),
+    ("Evaluasi Dokumen Kualifikasi",        "EVALUASI",    TEMPLATE_EVALUASI),
+    ("Evaluasi Penawaran",                  "EVALUASI",    TEMPLATE_EVALUASI),
+    ("Pembukaan dan Evaluasi",              "EVALUASI",    TEMPLATE_EVALUASI),
+    ("Evaluasi Administrasi",               "EVALUASI",    TEMPLATE_EVALUASI),
+    ("Evaluasi Teknis",                     "EVALUASI",    TEMPLATE_EVALUASI),
+    ("Pembuktian Kualifikasi",              "PEMBUKTIAN",  TEMPLATE_PEMBUKTIAN),
+    ("Klarifikasi dan Negosiasi",           "PEMBUKTIAN",  TEMPLATE_PEMBUKTIAN),
+    ("Penetapan Hasil Kualifikasi",         "REVIU_DPP",   TEMPLATE_REVIU_DPP),
+    ("Pengumuman Hasil Prakualifikasi",     "REVIU_DPP",   TEMPLATE_REVIU_DPP),
+    ("Penetapan Pemenang",                  "REVIU_DPP",   TEMPLATE_REVIU_DPP),
+    ("Pengumuman Pemenang",                 "REVIU_DPP",   TEMPLATE_REVIU_DPP),
+]
+
+# Prioritas template (semakin tinggi = lebih diprioritaskan jika ada >1 event)
+TEMPLATE_PRIORITY = {
+    "DOKPIL": 1,
+    "EVALUASI": 4,
+    "PEMBUKTIAN": 3,
+    "REVIU_DPP": 2,
+}
+
+
+# =============================================
+# GOOGLE CALENDAR INTEGRATION
+# =============================================
+def get_calendar_service():
+    """Connect ke Google Calendar API, reuse token dari V19_Scheduler."""
     try:
-        startupinfo = None
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+    except ImportError:
+        print("⚠️ Google API library tidak tersedia. Install: pip install google-api-python-client google-auth-oauthlib")
+        return None
+
+    creds = None
+    if os.path.exists(TOKEN_FILE_PATH):
+        creds = Credentials.from_authorized_user_file(TOKEN_FILE_PATH, SCOPES)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+                with open(TOKEN_FILE_PATH, 'w') as token:
+                    token.write(creds.to_json())
+            except Exception as e:
+                print(f"⚠️ Gagal refresh token: {e}")
+                return None
+        else:
+            print("⚠️ Token tidak valid dan tidak bisa di-refresh. Jalankan V19_Scheduler dulu untuk authorize.")
+            return None
+
+    return build('calendar', 'v3', credentials=creds)
+
+
+def get_today_events():
+    """Ambil semua event Google Calendar hari ini."""
+    service = get_calendar_service()
+    if not service:
+        return []
+
+    today = datetime.date.today()
+    time_min = datetime.datetime.combine(today, datetime.time.min).isoformat() + '+08:00'
+    time_max = datetime.datetime.combine(today, datetime.time.max).isoformat() + '+08:00'
+
+    try:
+        events_result = service.events().list(
+            calendarId=CALENDAR_ID,
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        events = events_result.get('items', [])
+        print(f"📅 Google Calendar: {len(events)} event hari ini ({today.strftime('%d/%m/%Y')})")
+        for e in events:
+            summary = e.get('summary', '(tanpa judul)')
+            print(f"   • {summary}")
+        return events
+    except Exception as e:
+        print(f"⚠️ Gagal ambil calendar: {e}")
+        return []
+
+
+def map_events_to_template(events, is_jumat):
+    """
+    Mapping event calendar hari ini ke template aktivitas.
+    Return: (template_name, activity_list)
+
+    Logic:
+    - Scan semua event, cocokkan summary dengan TAHAPAN_MAPPING
+    - Jika ada >1 match, pilih yang prioritas tertinggi (evaluasi > pembuktian > reviu > dokpil)
+    - Jika tidak ada match, fallback ke rutinitas/jumat
+    """
+    best_match = None
+    best_priority = -1
+
+    for event in events:
+        summary = event.get('summary', '').lower()
+        for keyword, template_name, template_list in TAHAPAN_MAPPING:
+            if keyword.lower() in summary:
+                priority = TEMPLATE_PRIORITY.get(template_name, 0)
+                if priority > best_priority:
+                    best_priority = priority
+                    best_match = (template_name, template_list)
+                break  # satu event cukup satu match
+
+    if best_match:
+        template_name, template_list = best_match
+        print(f"🎯 Template terpilih: {template_name} (prioritas {best_priority})")
+        if is_jumat:
+            # Jumat: 6 aktivitas, ganti apel pagi→senam, hapus apel sore
+            activities = [dict(a) for a in template_list]  # deep copy
+            if activities and "apel pagi" in activities[0]["teks"].lower():
+                activities[0] = {"teks": "melaksanakan senam pagi", "skp": 6, "jenis": 1}
+            if activities and "apel sore" in activities[-1]["teks"].lower():
+                activities.pop()
+            return template_name, activities
+        return template_name, [dict(a) for a in template_list]
+
+    # Fallback
+    if is_jumat:
+        print("📋 Tidak ada event tender → Template: JUMAT (default)")
+        return "JUMAT", [dict(a) for a in TEMPLATE_JUMAT]
+    else:
+        print("📋 Tidak ada event tender → Template: RUTINITAS (default)")
+        return "RUTINITAS", [dict(a) for a in TEMPLATE_RUTINITAS]
+
+
+# =============================================
+# CORE FUNCTIONS (unchanged from v1.0)
+# =============================================
+def run_command(command):
+    if DRY_RUN:
+        return ""
+    try:
         creationflags = 0
         if os.name == 'nt':
             creationflags = 0x08000000 # CREATE_NO_WINDOW
-            
+
         if isinstance(command, list):
             result = subprocess.run(command, capture_output=True, text=True, shell=False, creationflags=creationflags)
         else:
@@ -56,28 +295,42 @@ def save_config(section, key, value):
 
 # --- REUSED ENGINE FROM V22 (Smart Connect) ---
 def connect_adb_smart(idx, launch_if_needed=False):
-    """
-    Connect ke emulator via ADB.
-    launch_if_needed: Jika False, tidak akan launch/bring to foreground emulator (BACKGROUND MODE)
-                      Jika True, akan launch emulator jika belum running (foreground)
-    """
+    if DRY_RUN:
+        print(f"🔗 [DRY RUN] Skip ADB connect (emulator {idx})")
+        return "dry-run-serial"
+
     print(f"🔗 Menghubungkan Emulator {idx} (Background Mode: {not launch_if_needed})...")
-    
-    # BACKGROUND MODE: Skip ldconsole launch, langsung connect ADB
+
     if launch_if_needed:
         print("   📱 Launching emulator (foreground)...")
         run_command(f'"{LDCONSOLE}" launch --index {idx}')
+        # Loop minimize sampai emulator running
+        for attempt in range(30):
+            time.sleep(1)
+            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+            s = run_command(f'"{LDCONSOLE}" list2')
+            for line in s.splitlines():
+                parts = line.split(",")
+                if len(parts) > 4 and parts[0] == str(idx) and parts[4] == "1":
+                    print(f"   ✅ Emulator running setelah {attempt+1}s, minimize sent!")
+                    break
+            else:
+                continue
+            break
+        # Extra minimize untuk memastikan
+        for _ in range(3):
+            time.sleep(1)
+            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
     else:
         print("   🔇 Skip launch (background mode - assuming emulator already running)")
-    
-    # Auto-Discovery Port logic (Simplified from V22)
+
     possible_ports = [5554 + (idx*2), 5556, 5558, 5560, 5562, 5564]
     detected_serial = None
-    
+
     print("   🔍 Scanning Ports...")
     for p in possible_ports:
         run_command(f'"{ADB}" connect 127.0.0.1:{p}')
-        
+
     for i in range(10):
         devices = run_command(f'"{ADB}" devices')
         for p in possible_ports:
@@ -88,12 +341,11 @@ def connect_adb_smart(idx, launch_if_needed=False):
                  detected_serial = f"emulator-{p}"
                  break
         if detected_serial: break
-        time.sleep(1) # Dipercepat dari 2 detik
-        
+        time.sleep(1)
+
     if not detected_serial:
-        # Fallback default
         detected_serial = f"127.0.0.1:{5554 + (idx*2)}"
-        
+
     print(f"   ✅ Terhubung ke: {detected_serial}")
     return detected_serial
 
@@ -101,10 +353,8 @@ def adb_click(serial, x, y):
     run_command([ADB, "-s", serial, "shell", "input", "tap", str(x), str(y)])
 
 def adb_input_text(serial, text, idx=0):
-    """
-    Input teks via ADB - sudah proven bekerja di background
-    """
-    # ADB input text (proven bekerja di background)
+    if DRY_RUN:
+        return
     escaped_text = text.replace(" ", "%s")
     escaped_text = escaped_text.replace("'", "")
     escaped_text = escaped_text.replace('"', "")
@@ -112,90 +362,62 @@ def adb_input_text(serial, text, idx=0):
     escaped_text = escaped_text.replace("(", "")
     escaped_text = escaped_text.replace(")", "")
     escaped_text = escaped_text.replace(";", "")
-    
+
     run_command([ADB, "-s", serial, "shell", "input", "text", escaped_text])
 
-# --- TEXT PARSER (Extract content from old Python scripts) ---
-def parse_text_from_py(filepath):
-    texts = []
-    try:
-        if not os.path.exists(filepath):
-            print(f"❌ File tidak ditemukan: {filepath}")
-            return []
-            
-        with open(filepath, 'r') as f:
-            content = f.read()
-            # Regex to find pyautogui.write("TEXT")
-            matches = re.findall(r'pyautogui\.write\((?:"|\')(.+?)(?:"|\')\)', content)
-            texts = matches
-    except Exception as e:
-        print(f"Error parsing {filepath}: {e}")
-    return texts
-
+# --- SMART ACTIVITY SELECTOR (v1.1) ---
 def get_suami_activities(day_idx):
     """
-    Ambil daftar aktivitas Suami berdasarkan hari.
+    v1.1: Cek Google Calendar dulu, baru fallback ke rutinitas.
     day_idx: 0=Senin, 1=Selasa, ..., 4=Jumat
-    
-    Senin-Kamis: 7 aktivitas (apel pagi, 5 telaah, apel sore)
-    Jumat: 6 aktivitas (senam pagi, 5 telaah) - TIDAK ADA APEL SORE
     """
-    # 1. Tentukan Source File
-    source_file = ""
     is_jumat = (day_idx == 4)
-    
-    if is_jumat:
-        source_file = os.path.join(BASE_DIR_SUAMI, "Aktivitas Govem (Jumat1).py")
-    else: # Senin-Kamis
-        source_file = os.path.join(BASE_DIR_SUAMI, "Aktivitas Govem (Rutinitas).py")
-        
-    print(f"📖 Membaca sumber teks: {os.path.basename(source_file)}")
-    
-    # 2. Ambil Teks
-    activities = parse_text_from_py(source_file)
-    
-    # 3. Handle Jumat vs Senin-Kamis
-    if is_jumat:
-        # Jumat: 6 aktivitas saja, TIDAK PERLU tambah apel sore
-        print(f"   📅 JUMAT: {len(activities)} aktivitas (senam pagi + telaah)")
-    else:
-        # Senin-Kamis: Cek apakah perlu tambah apel sore
-        has_apel_sore = any("apel sore" in act.lower() for act in activities)
-        if len(activities) > 0 and not has_apel_sore:
-            activities.append("Melaksanakan apel sore")
-            print(f"   ➕ Menambahkan 'Melaksanakan apel sore' sebagai aktivitas terakhir.")
-        else:
-            print(f"   ✅ {len(activities)} aktivitas (termasuk apel sore)")
-    
-    return activities, is_jumat  # Return juga flag is_jumat untuk Step 3 logic
+
+    # 1. Cek Google Calendar
+    print("\n🔍 Mengecek Google Calendar...")
+    events = get_today_events()
+
+    # 2. Mapping event → template
+    template_name, activities = map_events_to_template(events, is_jumat)
+
+    # 3. Validasi jumlah
+    expected = 6 if is_jumat else 7
+    if len(activities) != expected:
+        print(f"⚠️ Template {template_name} punya {len(activities)} aktivitas, expected {expected}")
+
+    print(f"\n📝 Daftar aktivitas ({template_name}):")
+    for i, act in enumerate(activities):
+        teks = act["teks"]
+        print(f"   {i+1}. [SKP{act['skp']} J{act['jenis']}] {teks[:70]}{'...' if len(teks) > 70 else ''}")
+
+    return activities, is_jumat
+
 
 # --- HELPER: DIRECT JSON REPLAY (BYPASS LDCONSOLE) ---
-# Global cached serial untuk reuse antar macro calls
 _CACHED_SERIAL = {}
 
 def parse_json_and_replay(idx, record_filename_no_ext, serial=None):
-    """
-    Replay macro dari .record file via ADB input.
-    serial: Jika None, akan connect otomatis. Jika disupply, akan reuse (lebih cepat).
-    """
+    if DRY_RUN:
+        print(f"   ▶️ [DRY RUN] Skip macro: {record_filename_no_ext[:40]}...")
+        return
+
     global _CACHED_SERIAL
-    
+
     records_dir = r"D:\LDPlayer\LDPlayer9\vms\operationRecords"
     filepath = os.path.join(records_dir, record_filename_no_ext + ".record")
-    
+
     if not os.path.exists(filepath):
         print(f"❌ Record tidak ditemukan: {filepath}")
         return
 
     print(f"   ▶️ Macro: {record_filename_no_ext[:40]}...")
-    
+
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            
+
         ops = data.get('operations', [])
-        
-        # Use provided serial or get cached/new connection
+
         if serial:
             current_serial = serial
         elif idx in _CACHED_SERIAL:
@@ -203,80 +425,140 @@ def parse_json_and_replay(idx, record_filename_no_ext, serial=None):
         else:
             current_serial = connect_adb_smart(idx, launch_if_needed=False)
             _CACHED_SERIAL[idx] = current_serial
-        
-        # HARDCODE CALIBRATION (V22)
+
         w_res = 1600
         h_res = 900
-        max_in_x = 19092 
+        max_in_x = 19092
         max_in_y = 10728
 
         last_timing = 0
-        
+
         for op in ops:
             timing = op.get('timing', 0)
             op_id = op.get('operationId')
-            
-            # Hitung delay (dipercepat 50%)
+
             delay = (timing - last_timing) / 1000.0 * 0.5
             if delay > 0:
                 time.sleep(delay)
             last_timing = timing
-            
+
             if op_id == 'PutMultiTouch':
                 points = op.get('points', [])
                 if points and points[0].get('state') == 1:
                     raw_x = points[0].get('x')
                     raw_y = points[0].get('y')
-                    
-                    # Konversi Raw ke Pixel
+
                     real_x = int(raw_x / max_in_x * w_res)
                     real_y = int(raw_y / max_in_y * h_res)
-                    
-                    # Eksekusi ADB Click (SWIPE pendek)
+
                     run_command([ADB, "-s", current_serial, "shell", "input", "swipe", str(real_x), str(real_y), str(real_x), str(real_y), "100"])
-                    
+
             elif op_id == 'Wait':
                  pass
 
         print("   ✅ Selesai")
-        
+
     except Exception as e:
         print(f"   ❌ Gagal: {e}")
 
-# Alias wrapper agar kompatibel dengan call code sebelumnya
 def play_record_file(idx, record_filename_no_ext, serial=None):
     parse_json_and_replay(idx, record_filename_no_ext, serial)
 
+# --- SCREENSHOT & NOTIFICATION ---
+def take_screenshot(serial, idx):
+    """Ambil screenshot emulator via ADB, simpan ke temp file."""
+    if DRY_RUN:
+        print("📸 [DRY RUN] Skip screenshot")
+        return None
+    try:
+        import tempfile
+        screenshot_path = os.path.join(tempfile.gettempdir(), f"govem_aktivitas_{idx}.png")
+        result = subprocess.run(
+            [ADB, "-s", serial, "exec-out", "screencap", "-p"],
+            capture_output=True, timeout=10,
+            creationflags=0x08000000 if os.name == 'nt' else 0
+        )
+        if result.returncode == 0 and result.stdout:
+            with open(screenshot_path, 'wb') as f:
+                f.write(result.stdout)
+            print(f"📸 Screenshot disimpan: {screenshot_path}")
+            return screenshot_path
+    except Exception as e:
+        print(f"⚠️ Gagal screenshot: {e}")
+    return None
+
+def show_notification(message, screenshot_path=None):
+    """Tampilkan Windows toast notification."""
+    try:
+        from ctypes import windll
+        windll.user32.MessageBeep(0x00000040)  # MB_ICONINFORMATION beep
+    except:
+        pass
+
+    # Coba Windows toast via PowerShell
+    try:
+        ps_script = f'''
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$textNodes = $template.GetElementsByTagName("text")
+$textNodes.Item(0).AppendChild($template.CreateTextNode("Govem Bot")) | Out-Null
+$textNodes.Item(1).AppendChild($template.CreateTextNode("{message}")) | Out-Null
+$toast = [Windows.UI.Notifications.ToastNotification]::new($template)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Govem Bot").Show($toast)
+'''
+        subprocess.run(["powershell", "-Command", ps_script],
+                       capture_output=True, timeout=10,
+                       creationflags=0x08000000 if os.name == 'nt' else 0)
+        print(f"🔔 Notifikasi terkirim: {message}")
+    except Exception as e:
+        print(f"⚠️ Notifikasi gagal (non-critical): {e}")
+
+    # Buka screenshot otomatis
+    if screenshot_path and os.path.exists(screenshot_path):
+        try:
+            os.startfile(screenshot_path)
+        except:
+            pass
+
+def minimize_emulator(idx):
+    """Minimize window emulator via ldconsole."""
+    try:
+        # Pakai sortWnd untuk minimize
+        run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+        # Fallback: coba via window title
+        if os.name == 'nt':
+            subprocess.run(
+                ["powershell", "-Command",
+                 f'(Get-Process -Name LDPlayer -ErrorAction SilentlyContinue | Where-Object {{$_.MainWindowTitle -match "LDPlayer"}}).MainWindowHandle | ForEach-Object {{ [void][Win32]::ShowWindow($_, 6) }}'],
+                capture_output=True, timeout=5,
+                creationflags=0x08000000
+            )
+    except:
+        pass
+
 # --- HYBRID RUNNER ---
 def run_hybrid_automation(idx, background_mode=True):
-    """
-    Main automation runner.
-    background_mode: True = tidak akan bring LDPlayer ke foreground (tetap minimize)
-    """
+    if DRY_RUN:
+        print("\n⏸️ === DRY RUN MODE === (tidak ada ADB yang dieksekusi)")
+
     print(f"\n{'🔇' if background_mode else '📱'} Mode: {'BACKGROUND' if background_mode else 'FOREGROUND'}")
-    
-    # Connect sekali di awal, lalu reuse
+
     serial = connect_adb_smart(idx, launch_if_needed=(not background_mode))
-    
-    # Cache serial untuk reuse
+
     global _CACHED_SERIAL
     _CACHED_SERIAL[idx] = serial
-    
-    # 1. Identify User & Day
+
     is_suami = (idx == 0)
     wd = datetime.datetime.today().weekday()
-    
-    # 2. Load Activity List
+
     activity_texts = []
     is_jumat = False
-    
+
     if is_suami:
         result = get_suami_activities(wd)
         activity_texts = result[0]
         is_jumat = result[1]
     else:
-        # Logic Istri (Placeholder / Future)
-        # Nanti disesuaikan mapping hari -> file istri
         print("ℹ Logic Istri belum disetujui detailnya. Skip.")
         return
 
@@ -287,84 +569,94 @@ def run_hybrid_automation(idx, background_mode=True):
     print(f"\n🚀 MEMULAI PENGISIAN {len(activity_texts)} AKTIVITAS")
     if is_jumat:
         print("📅 Mode JUMAT: Step 3.2 akan digunakan (SKP aktivitas 6)")
-    if background_mode:
+    if background_mode and not DRY_RUN:
         print("💡 LDPlayer bisa di-minimize, script tetap berjalan!")
-    
-    # 3. STEP 1: NAVIGASI (Hanya sekali di awal)
+
+    if DRY_RUN:
+        print("\n✅ [DRY RUN] Preview selesai. Tidak ada yang dieksekusi.")
+        return
+
+    # STEP 1: NAVIGASI (direct ADB tap)
     print("\n[STEP 1] Navigasi ke Halaman Form...")
-    play_record_file(idx, "Step 1 (Menuju Dashboard Isian)", serial)
+    adb_click(serial, STEP1_TAP_1[0], STEP1_TAP_1[1])
+    time.sleep(2)
+    adb_click(serial, STEP1_TAP_2[0], STEP1_TAP_2[1])
     time.sleep(3)
-    
-    # 4. LOOP ITEMS
-    for i, text in enumerate(activity_texts):
+
+    # LOOP ITEMS
+    for i, act in enumerate(activity_texts):
+        text = act["teks"]
+        skp_num = act["skp"]
+        jenis_num = act["jenis"]
+
         print(f"\n📝 [{i+1}/{len(activity_texts)}] Mengisi: {text[:30]}...")
-        
-        # STEP 2: Focus Input
-        play_record_file(idx, "Step 2 (Klik untuk supaya bisa mengetikcopas kata2)", serial)
+
+        # STEP 2: Focus Input (direct ADB tap)
+        adb_click(serial, STEP2_INPUT_XY[0], STEP2_INPUT_XY[1])
         time.sleep(0.8)
-        
-        # INPUT TEKS (ADB - proven bekerja di background)
+
+        # INPUT TEKS
         print(f"   ⌨️ Mengetik...")
+        
+        # CLEAR FIELD: HOME + Shift+END (select all), then delete
+        for _ in range(2):
+            run_command([ADB, "-s", serial, "shell", "input", "keyevent", "123"]) # END
+            run_command([ADB, "-s", serial, "shell", "input", "keyevent", "KEYCODE_MOVE_HOME"])
+            run_command(f'"{ADB}" -s {serial} shell input keyevent --longpress 112 123') # Shift+END (select all)
+            time.sleep(0.1)
+            run_command([ADB, "-s", serial, "shell", "input", "keyevent", "67"]) # DEL
+            time.sleep(0.1)
+        time.sleep(0.5)
+        
         clean_text = text.replace("'", "").replace('"', "")
         adb_input_text(serial, clean_text, idx)
-        time.sleep(0.3)
-        
+        time.sleep(1)
+
         # Hide Keyboard
         run_command([ADB, "-s", serial, "shell", "input", "keyevent", "111"])
         time.sleep(0.3)
 
-        # --- STEP 3: DROPDOWN SKP (KONDISIONAL BERDASARKAN TEKS) ---
-        # Step 3.2 HANYA untuk senam pagi (Jumat aktivitas 1) - perlu delay lebih lama karena ada scroll
-        # Step 3.1 untuk semua aktivitas lainnya (termasuk telaah di Jumat)
-        text_lower = text.lower()
-        is_senam = "senam pagi" in text_lower
-        is_apel = ("apel pagi" in text_lower or "apel sore" in text_lower)
-        
-        print("   📋 Memilih SKP...")
-        if is_senam:
-            # Senam Pagi (Jumat): Step 3.2 hanya buka dropdown, lalu scroll + klik aktivitas 6 via ADB
-            play_record_file(idx, "Step 3.2 (Membuka dropdown SKP dan memilih aktivitas nomor 6)", serial)
-            time.sleep(1)  # Tunggu dropdown terbuka
-            
-            # Scroll down dalam dropdown untuk melihat aktivitas 6
-            # Koordinat scroll: dari tengah dropdown ke atas (swipe up = scroll down)
-            # Posisi dropdown kira-kira di tengah layar, swipe dari Y bawah ke Y atas
+        # STEP 3: Pilih SKP (ADB tap langsung)
+        print(f"   📋 Memilih SKP {skp_num}...")
+        adb_click(serial, SKP_DROPDOWN_XY[0], SKP_DROPDOWN_XY[1])
+        time.sleep(0.8)
+
+        if skp_num >= 5:
+            # SKP 5/6 perlu scroll
             print("   📜 Scroll dropdown...")
             run_command([ADB, "-s", serial, "shell", "input", "swipe", "400", "700", "400", "400", "300"])
             time.sleep(0.8)
-            
-            # Klik aktivitas nomor 6 - koordinat sudah diverifikasi tepat
-            print("   👆 Klik aktivitas 6...")
-            run_command([ADB, "-s", serial, "shell", "input", "tap", "400", "790"])
-            time.sleep(1)
+            # Setelah scroll, SKP 6 muncul di posisi ~790
+            adb_click(serial, 400, 790)
         else:
-            # Semua aktivitas lain: Step 3.1 (SKP aktivitas 4) - sudah termasuk buka dropdown + klik
-            play_record_file(idx, "Step 3.1 (Membuka dropdown SKP dan memilih aktivitas nomor 4)", serial)
-            time.sleep(1.5)
-        
-        # --- STEP 4: JENIS AKTIVITAS ---
-        # Apel pagi/sore = Step 4.1 (Jenis 2)
-        # Senam pagi dan aktivitas umum = Step 4 (Jenis 1)
-        if is_apel:
-            print("   ⭐ Mode Apel -> Step 4.1 (Jenis 2)")
-            play_record_file(idx, "Step 4.1 (Memilih Jenis Aktivitas Nomor 2)", serial)
-        else:
-            print("   📄 Mode Umum/Senam -> Step 4 (Jenis 1)")
-            play_record_file(idx, "Step 4 (Memilih Jenis Aktivitas Nomor 1)", serial)
+            coords = SKP_COORDS[skp_num]
+            adb_click(serial, coords[0], coords[1])
         time.sleep(0.8)
-        
-        # STEP 5: Simpan
-        play_record_file(idx, "Step 5 (Posting Aktivitas)", serial)
-        print("   💾 Simpan...")
-        time.sleep(2)
-        
-    print("\n✅ SEMUA AKTIVITAS SELESAI!")
+
+        # STEP 4: Pilih Jenis (ADB tap langsung)
+        jenis_label = "Apel" if jenis_num == 2 else "Aktifitas"
+        print(f"   🎯 Memilih Jenis {jenis_num} ({jenis_label})...")
+        adb_click(serial, JENIS_DROPDOWN_XY[0], JENIS_DROPDOWN_XY[1])
+        time.sleep(0.8)
+        jenis_coords = JENIS_COORDS[jenis_num]
+        adb_click(serial, jenis_coords[0], jenis_coords[1])
+        time.sleep(0.8)
+
+        # STEP 5: Simpan (direct ADB tap)
+        print("   💾 Simpan & Tunggu Animasi (12s)...")
+        adb_click(serial, STEP5_SAVE_XY[0], STEP5_SAVE_XY[1])
+        time.sleep(12) # SMART FILL DELAY
+
+    print(f"\n✅ SEMUA AKTIVITAS SELESAI! ({len(activity_texts)} item)")
 
 def main():
-    print("🤖 GOVEM HYBRID AUTOMATION (V23)")
+    print("🤖 GOVEM HYBRID AUTOMATION (V23 — Smart Calendar v1.1)")
+    if DRY_RUN:
+        print("⏸️ DRY RUN MODE: Hanya preview, tanpa eksekusi ADB\n")
+
     print("1. Test Run Suami (Manual Trigger)")
     print("2. Test Run Istri (Manual Trigger)")
-    
+
     # Auto Mode Argument
     target_idx = -1
     if "--auto" in sys.argv:
@@ -373,7 +665,7 @@ def main():
                 i = sys.argv.index("--index")
                 target_idx = int(sys.argv[i+1])
             except: pass
-        
+
         if target_idx != -1:
             run_hybrid_automation(target_idx)
             return
