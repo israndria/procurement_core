@@ -226,9 +226,13 @@ def run_command(command, timeout=30): # Default timeout 30 detik
         logger.info(f"Error executing command: {e}")
         return ""
 
-def launch_emulator(idx):
+def launch_emulator(idx, on_boot_callback=None):
     logger.info(f"🚀 Memulai Emulator Index {idx}...")
     run_command(f'"{LDCONSOLE}" launch --index {idx}')
+    # Minimize AGRESIF: spam minimize tanpa jeda agar window tidak sempat muncul
+    for _ in range(3):
+        run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+        time.sleep(0.2)
 
     # AUTO-MINIMIZE: kirim minimize tiap loop sambil tunggu boot
     logger.info(f"⏳ [Emu {idx}] Menunggu sistem Android siap (LDConsole)...")
@@ -244,6 +248,10 @@ def launch_emulator(idx):
 
             if "1" in res_boot:
                 logger.info(f"✅ [Emu {idx}] Sistem Siap! Boot Time: {i*2}s (minimized)")
+                # Callback segera setelah boot (misal: kill Pancingan)
+                if on_boot_callback:
+                    on_boot_callback()
+                    on_boot_callback = None  # Hanya sekali
                 # Extra minimize selama tunggu launcher stabil
                 for _ in range(5):
                     time.sleep(2)
@@ -841,8 +849,10 @@ def run_activity_automation(user_obj):
         
     print(f"✅ Semua aktivitas {name} selesai!")
 
+SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
+
 def _take_dashboard_screenshot(user):
-    """Restart app (kembali ke dashboard depan) lalu screenshot."""
+    """Restart app (kembali ke dashboard depan) lalu screenshot ke folder screenshots/ dengan timestamp."""
     idx = user['index']
     name = user['name']
     try:
@@ -852,8 +862,9 @@ def _take_dashboard_screenshot(user):
         run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
         time.sleep(10)  # Tunggu dashboard depan load
 
-        import tempfile
-        screenshot_path = os.path.join(tempfile.gettempdir(), f"govem_final_{name.lower()}.png")
+        os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        screenshot_path = os.path.join(SCREENSHOT_DIR, f"govem_{name.lower()}_{timestamp}.png")
         serial = _get_serial(idx)
         if serial:
             result = subprocess.run(
@@ -1021,15 +1032,15 @@ def absen_pagi(user):
         return # STOP di sini, jangan klik absen.
         
     logger.info(f"☀️ [{name}] MEMULAI ABSEN PAGI (Emulator {idx})")
-    
+
     config = load_config()
     final_x = config.get("COORDS", "pagi_x", fallback=None)
     final_y = config.get("COORDS", "pagi_y", fallback=None)
 
     if not final_x:
         logger.info(f"⚠️ [{name}] Koordinat Step 5 belum diset! Hanya jalan langkah 1-4.")
-    
-    launch_emulator(idx)
+
+    launch_emulator(idx, on_boot_callback=user.get('_on_boot_callback'))
     if not open_app(idx):
         logger.info(f"❌ [{name}] [Pagi] Gagal membuka aplikasi. Abort.")
         return
@@ -1080,8 +1091,8 @@ def absen_sore(user):
         return # STOP di sini
         
     logger.info(f"🌙 [{name}] MEMULAI ABSEN SORE (Emulator {idx})")
-    
-    launch_emulator(idx)
+
+    launch_emulator(idx, on_boot_callback=user.get('_on_boot_callback'))
     if not open_app(idx):
         logger.info(f"❌ [{name}] [Sore] Gagal membuka aplikasi. Abort.")
         return
@@ -1209,11 +1220,25 @@ def run_scheduler(target_users, force_reset=False):
 
         screenshots = []
         pancingan_index = None  # Simpan index Pancingan untuk deferred kill
+
+        def _kill_pancingan_callback():
+            """Callback: kill Pancingan 3s setelah emulator berikutnya boot."""
+            nonlocal pancingan_index
+            if pancingan_index is not None:
+                time.sleep(3)
+                logger.info(f"🔌 [Pancingan] Auto-kill emulator (iklan sudah terserap)")
+                run_command(f'"{LDCONSOLE}" quit --index {pancingan_index}')
+                pancingan_index = None
+
         for u in sorted_users:
             if not is_user_enabled(u['name']):
                 logger.info(f"⏸️ [Job] SKIP {job_type} {u['name']} (Dinonaktifkan)")
                 continue
             try:
+                # Inject callback kill Pancingan ke launch_emulator user berikutnya
+                if u['name'] != 'Pancingan' and pancingan_index is not None:
+                    u['_on_boot_callback'] = _kill_pancingan_callback
+
                 logger.info(f"🚀 [Job] Memulai {job_type}: {u['name']}")
                 if job_type == 'Absen Pagi':
                     absen_pagi(u)
@@ -1221,19 +1246,14 @@ def run_scheduler(target_users, force_reset=False):
                     absen_sore(u)
                 logger.info(f"✅ [Job] Selesai {job_type}: {u['name']}")
                 if u['name'] == 'Pancingan':
-                    # Jangan kill sekarang — tunggu emulator berikutnya boot dulu
-                    # agar iklan tetap di Pancingan, tidak pindah ke Suami/Istri
                     pancingan_index = u['index']
                 else:
-                    # Kill Pancingan 3s setelah emulator berikutnya selesai boot
-                    if pancingan_index is not None:
-                        time.sleep(3)
-                        logger.info(f"🔌 [Pancingan] Auto-kill emulator (iklan sudah terserap)")
-                        run_command(f'"{LDCONSOLE}" quit --index {pancingan_index}')
-                        pancingan_index = None
                     ss = _take_dashboard_screenshot(u)
                     if ss:
                         screenshots.append(ss)
+                    # Auto-kill emulator setelah screenshot selesai
+                    logger.info(f"🔌 [{u['name']}] Auto-kill emulator (tugas selesai)")
+                    run_command(f'"{LDCONSOLE}" quit --index {u["index"]}')
             except Exception as e:
                 logger.error(f"💀 [CRASH] {job_type} {u['name']} GAGAL: {e}", exc_info=True)
         # Safety: kill Pancingan jika belum di-kill (misal semua user lain skip/gagal)
