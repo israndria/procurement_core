@@ -324,20 +324,25 @@ def run_istri_automation(background_mode=True, override_hari=None):
 
     log_info(f"MEMULAI PENGISIAN {len(aktivitas_list)} AKTIVITAS")
 
-    # STEP 1: NAVIGASI (direct ADB tap — same as Suami)
-    log_info("[STEP 1] Navigasi ke Halaman Form...")
-    adb_click(serial, STEP1_TAP_1[0], STEP1_TAP_1[1])
-    time.sleep(2)
-    adb_click(serial, STEP1_TAP_2[0], STEP1_TAP_2[1])
-    time.sleep(3)
-
-    # LOOP ITEMS (exact same flow as Suami)
+    # LOOP ITEMS
     for i, act in enumerate(aktivitas_list):
         text = act["teks"]
         skp_num = act["skp"]
         jenis_num = act["jenis"]
 
         log_info(f"[{i+1}/{len(aktivitas_list)}] Mengisi: {text[:50]}...")
+
+        # STEP 1: NAVIGASI ke Form (HANYA iterasi pertama)
+        # Setelah save, form auto-reset — langsung isi tanpa navigasi ulang
+        if i == 0:
+            log_info("  Navigasi Dashboard → Form...")
+            adb_click(serial, STEP1_TAP_1[0], STEP1_TAP_1[1])
+            time.sleep(2)
+            adb_click(serial, STEP1_TAP_2[0], STEP1_TAP_2[1])
+            time.sleep(3)
+        else:
+            log_info("  (Form auto-reset, langsung isi)")
+            time.sleep(1)
 
         # STEP 2: Focus Input (direct ADB tap)
         adb_click(serial, STEP2_INPUT_XY[0], STEP2_INPUT_XY[1])

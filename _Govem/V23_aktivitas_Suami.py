@@ -34,20 +34,21 @@ DRY_RUN = "--dry-run" in sys.argv
 # KOORDINAT UI GOVEM (terdeteksi via ADB screenshot)
 # =============================================
 # Dropdown SKP: buka dengan tap (500, 318)
+# Koordinat dari uiautomator dump — resolusi emulator 1600x900
 SKP_DROPDOWN_XY = (500, 318)
 SKP_COORDS = {
-    1: (400, 468),   # Melaksanakan Proses pemilihan penyedia barang/jasa
-    2: (400, 558),   # Melaksanakan Kegiatan pengembangan kompetensi
-    3: (400, 648),   # Melaksanakan Kegiatan yang menunjang pengelolaan
-    4: (400, 738),   # Melaksanakan tugas lain dari pimpinan
+    1: (800, 518),   # Melaksanakan Proses pemilihan penyedia barang/jasa [0,469][1600,568]
+    2: (800, 617),   # Melaksanakan Kegiatan pengembangan kompetensi [0,568][1600,667]
+    3: (800, 716),   # Melaksanakan Kegiatan yang menunjang pengelolaan [0,667][1600,766]
+    4: (800, 815),   # Melaksanakan tugas lain dari pimpinan [0,766][1600,865]
     # 5, 6 perlu scroll dulu
 }
 
 # Dropdown Jenis: buka dengan tap (1130, 318)
 JENIS_DROPDOWN_XY = (1130, 318)
 JENIS_COORDS = {
-    1: (400, 462),   # Aktifitas
-    2: (400, 538),   # Apel/Shif/Piket/Lainnya
+    1: (800, 508),   # Aktifitas [0,475][1600,542]
+    2: (800, 592),   # Apel/Shif/Piket/Lainnya [0,559][1600,626]
 }
 
 # Navigasi & Form (decoded dari macro .record)
@@ -576,13 +577,6 @@ def run_hybrid_automation(idx, background_mode=True):
         print("\n✅ [DRY RUN] Preview selesai. Tidak ada yang dieksekusi.")
         return
 
-    # STEP 1: NAVIGASI (direct ADB tap)
-    print("\n[STEP 1] Navigasi ke Halaman Form...")
-    adb_click(serial, STEP1_TAP_1[0], STEP1_TAP_1[1])
-    time.sleep(2)
-    adb_click(serial, STEP1_TAP_2[0], STEP1_TAP_2[1])
-    time.sleep(3)
-
     # LOOP ITEMS
     for i, act in enumerate(activity_texts):
         text = act["teks"]
@@ -590,6 +584,18 @@ def run_hybrid_automation(idx, background_mode=True):
         jenis_num = act["jenis"]
 
         print(f"\n📝 [{i+1}/{len(activity_texts)}] Mengisi: {text[:30]}...")
+
+        # STEP 1: NAVIGASI ke Form (HANYA iterasi pertama)
+        # Setelah save, form auto-reset — langsung isi tanpa navigasi ulang
+        if i == 0:
+            print("   🧭 Navigasi Dashboard → Form...")
+            adb_click(serial, STEP1_TAP_1[0], STEP1_TAP_1[1])
+            time.sleep(2)
+            adb_click(serial, STEP1_TAP_2[0], STEP1_TAP_2[1])
+            time.sleep(3)
+        else:
+            print("   (Form auto-reset, langsung isi)")
+            time.sleep(1)
 
         # STEP 2: Focus Input (direct ADB tap)
         adb_click(serial, STEP2_INPUT_XY[0], STEP2_INPUT_XY[1])
