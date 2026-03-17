@@ -1130,15 +1130,16 @@ def get_schedule_rules(name, weekday):
     # Format Time: "HH:MM"
     
     # === RULES PANCINGAN ===
-    # Jalan 6 menit LEBIH AWAL dari jadwal utama
+    # SAMA dengan Suami/Istri agar masuk satu batch (callback kill bekerja)
+    # _run_batch_sequential sudah handle urutan: Pancingan → Suami → Istri
     # [RAMADAN MODE]
     if name == 'Pancingan':
-         # Senin-Kamis: Pagi 06:25, Sore 15:39
-         if 0 <= weekday <= 3: return ("06:25", "15:39")
-         # Jumat: Pagi 06:25, Sore 10:54 (Utama 11:00)
-         elif weekday == 4: return ("06:25", "10:54")
-         # Sabtu-Minggu: Pagi 06:25, Sore 14:09 (Utama 14:15)
-         elif weekday >= 5: return ("06:25", "14:09")
+         # Senin-Kamis: Pagi 06:31, Sore 15:45
+         if 0 <= weekday <= 3: return ("06:31", "15:45")
+         # Jumat: Pagi 06:31, Sore 11:00
+         elif weekday == 4: return ("06:31", "11:00")
+         # Sabtu-Minggu: Pagi 06:31, Sore 14:15
+         elif weekday >= 5: return ("06:31", "14:15")
          
     # === RULES ISTRI ===
     # [RAMADAN MODE]
