@@ -58,6 +58,52 @@
         },
         "2026-03-07": {
             "pagi": true
+        },
+        "2026-03-09": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-10": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-11": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-12": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-13": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-14": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-15": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-16": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-17": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-18": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-19": {
+            "pagi": true
+        },
+        "2026-03-20": {
+            "pagi": true
         }
     },
     "Suami": {
@@ -108,6 +154,48 @@
         "2026-03-06": {
             "pagi": true,
             "sore": true
+        },
+        "2026-03-09": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-10": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-11": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-12": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-13": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-15": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-16": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-17": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-18": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-19": {
+            "pagi": true
+        },
+        "2026-03-20": {
+            "pagi": true
         }
     },
     "Pancingan": {
@@ -156,6 +244,56 @@
         "2026-03-08": {
             "pagi": true,
             "sore": true
+        },
+        "2026-03-09": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-10": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-11": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-12": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-13": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-14": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-15": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-16": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-17": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-18": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-19": {
+            "pagi": true
+        },
+        "2026-03-20": {
+            "pagi": true,
+            "sore": true
+        },
+        "2026-03-22": {
+            "pagi": true
         }
     }
 }

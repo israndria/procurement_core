@@ -16,6 +16,7 @@ Private Const SHEET_BA As String = "satu_data"
 Private Const SHEET_REVIU As String = "list_reviu"
 Private Const SHEET_DOKPIL As String = "list_dokpil"
 
+
 ' ===== BUKA (merge + tampilkan Word) =====
 
 Public Sub BukaBA()
@@ -277,8 +278,23 @@ Private Function Q(s As String) As String
 End Function
 
 Private Function ScriptDir() As String
-    ' Dari Excel (@ POKJA 2026\<Paket>\) naik 1 level, lalu ke V19_Scheduler\WPy64-313110
-    ScriptDir = ThisWorkbook.Path & "\..\V19_Scheduler\WPy64-313110"
+    ' Naik folder sampai ketemu V19_Scheduler (support subfolder dalam berapa pun)
+    Dim folder As String
+    folder = ThisWorkbook.Path
+    Dim i As Integer
+    For i = 1 To 10
+        If Dir(folder & "\V19_Scheduler\WPy64-313110\python\python.exe") <> "" Then
+            ScriptDir = folder & "\V19_Scheduler\WPy64-313110"
+            Exit Function
+        End If
+        ' Naik 1 level
+        Dim pos As Long
+        pos = InStrRev(folder, "\")
+        If pos <= 3 Then Exit For
+        folder = Left(folder, pos - 1)
+    Next i
+    MsgBox "Python tidak ditemukan!" & vbCrLf & "Pastikan folder V19_Scheduler ada di dalam @ POKJA 2026", vbCritical
+    ScriptDir = ""
 End Function
 
 Private Function PyExe() As String
@@ -289,18 +305,18 @@ Public Sub ResetStatusBar()
     Application.StatusBar = False
 End Sub
 
-' ===== RELINK (update data source di Word templates) =====
+' ===== RELINK (update data source di Word templates via .NET zip — no dialog) =====
 Public Sub RelinkTemplate()
     On Error Resume Next
     ThisWorkbook.Save
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = Q(ScriptDir() & "\python\python.exe") & " " & Q(ScriptDir() & "\relink_templates.py") & " " & Q(ThisWorkbook.FullName)
+    cmd = "powershell -ExecutionPolicy Bypass -File " & Q(ScriptDir() & "\relink_dotnet.ps1") & " -ExcelPath " & Q(ThisWorkbook.FullName)
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, True  ' blocking - tunggu sampai selesai
+    wsh.Run cmd, 0, True  ' hidden, blocking
     Set wsh = Nothing
 End Sub
 

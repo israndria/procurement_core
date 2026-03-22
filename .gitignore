@@ -29,3 +29,6 @@ _Govem/history.json
 
 # User Specific
 govem_config.ini
+
+# Separated Projects (punya repo sendiri)
+Inaproc_Scraper/

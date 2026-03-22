@@ -7,7 +7,7 @@ yang ada di folder yang sama.
 Dipanggil dari tombol VBA "Relink Template" di Excel.
 
 Cara pakai:
-  python relink_templates.py "D:\path\to\file.xlsm"
+  python relink_templates.py "D:\\path\\to\\file.xlsm"
 """
 import os
 import sys
@@ -18,9 +18,9 @@ from setup_paket_baru import link_word_to_excel
 
 # Mapping: keyword di nama file Word -> sheet name untuk mail merge
 WORD_SHEET_MAP = {
-    "BA PK":   "1. Input Data",
-    "Reviu":   "database_reviu",
-    "Dokpil":  "database_dokpil",
+    "BA PK":   "satu_data",
+    "Reviu":   "list_reviu",
+    "Dokpil":  "list_dokpil",
 }
 
 

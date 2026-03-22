@@ -37,11 +37,12 @@ def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
     
 
     try:
-        # Baca settings.xml dari dalam docx
+        # Baca settings.xml dan settings.xml.rels dari dalam docx
         with zipfile.ZipFile(word_path, 'r') as zf:
             if 'word/settings.xml' not in zf.namelist():
                 return False
             settings_xml = zf.read('word/settings.xml')
+            _ = zf.namelist()  # preload for later iteration
 
         settings_str = settings_xml.decode('utf-8')
 
@@ -70,18 +71,36 @@ def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
 
         new_settings = settings_str.encode('utf-8')
 
-        # Repack docx - copy semua entry asli, replace hanya settings.xml
+        # Build settings.xml.rels dengan path Excel yang benar
+        # URL-encode path untuk file:/// URI
+        from urllib.parse import quote
+        excel_uri = 'file:///' + excel_path.replace('\\', '/').replace(' ', '%20').replace('@', '%40')
+        new_settings_rels = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            f'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/mailMergeSource" Target="{excel_uri}" TargetMode="External"/>'
+            f'<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/mailMergeSource" Target="{excel_uri}" TargetMode="External"/>'
+            '</Relationships>'
+        ).encode('utf-8')
+
+        # Repack docx - replace settings.xml + settings.xml.rels
         backup = word_path + ".bak"
         shutil.copy2(word_path, backup)
 
         temp_path = word_path + ".tmp"
         with zipfile.ZipFile(backup, 'r') as zf_in:
-            with zipfile.ZipFile(temp_path, 'w') as zf_out:
+            has_settings_rels = 'word/_rels/settings.xml.rels' in zf_in.namelist()
+            with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as zf_out:
                 for item in zf_in.infolist():
                     if item.filename == 'word/settings.xml':
-                        zf_out.writestr(item.filename, new_settings, compress_type=item.compress_type)
+                        zf_out.writestr(item, new_settings)
+                    elif item.filename == 'word/_rels/settings.xml.rels':
+                        zf_out.writestr(item, new_settings_rels)
                     else:
                         zf_out.writestr(item, zf_in.read(item.filename))
+                # Buat settings.xml.rels kalau belum ada
+                if not has_settings_rels:
+                    zf_out.writestr('word/_rels/settings.xml.rels', new_settings_rels)
 
         # Replace original dengan file baru
         os.replace(temp_path, word_path)

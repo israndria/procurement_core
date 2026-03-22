@@ -6,6 +6,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 import re
+import logging
 from supabase import create_client
 import os
 from dotenv import load_dotenv
@@ -13,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="SPSE Scraper V25", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="SPSE Scraper V1.c", page_icon="🏗️", layout="wide")
 
 st.markdown("""
     <style>
@@ -24,10 +25,24 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 2. SETUP DATA ---
-load_dotenv(dotenv_path="secret_supabase.env") 
+# Cari secret_supabase.env: coba __file__ dulu, fallback ke CWD
+_dir1 = os.path.dirname(os.path.abspath(__file__)) if '__file__' in dir() else os.getcwd()
+_env_path = os.path.join(_dir1, "secret_supabase.env")
+if not os.path.exists(_env_path):
+    _env_path = os.path.join(os.getcwd(), "secret_supabase.env")
+load_dotenv(dotenv_path=_env_path)
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-STOP_FILE = "stop_signal.txt"
+STOP_FILE = os.path.join(os.path.dirname(_env_path), "stop_signal.txt")
+LOG_FILE = os.path.join(os.path.dirname(_env_path), "scraper.log")
+
+# Setup logging ke file
+logging.basicConfig(
+    filename=LOG_FILE, level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S", encoding="utf-8"
+)
+log = logging.getLogger("scraper")
 
 # --- PENTING: MAPPING NAMA TABEL DI SINI ---
 # Pastikan nama tabel di Supabase kamu sesuai dengan yang ada di kanan (nilai dict)
@@ -99,42 +114,73 @@ def get_last_update(kode_lpse, kategori_selected):
     except: return "-"
 
 # --- 4. ENGINE SCRAPING (MULTI-TABLE) ---
-def create_driver():
+def create_driver(headless=False, minimize=False):
     options = Options()
-    options.add_argument("--start-maximized")
+    if headless:
+        options.add_argument("--headless=new")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
+    elif minimize:
+        # Off-screen: Chrome tidak pernah muncul di layar
+        options.add_argument("--window-position=-2400,-2400")
+        options.add_argument("--window-size=1920,1080")
+    else:
+        options.add_argument("--start-maximized")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
     return webdriver.Chrome(options=options)
 
-def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
+def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client, headless=False, minimize=False):
     if os.path.exists(STOP_FILE): return "⛔ Dibatalkan"
 
-    # AMBIL CONFIG BERDASARKAN KATEGORI
     config = CONFIG_KATEGORI[kategori_pilihan]
     nama_tabel_target = config["tabel"]
     endpoint_target = config["endpoint"]
 
-    driver = create_driver()
+    driver = None
     nama_lpse = target["nama"]
     kode_lpse = target["kode"]
-    wait = WebDriverWait(driver, 15)
-    
-    # URL Dinamis
+
+    def keep_minimized():
+        """Re-minimize Chrome setelah switch_to agar tidak muncul ke depan"""
+        if minimize and not headless:
+            try: driver.minimize_window()
+            except: pass
+
     url = f"https://spse.inaproc.id/{kode_lpse}/{endpoint_target}?tahun={tahun_pilihan}"
-    
-    try:
+    log.info(f"Mulai scrape: {nama_lpse} ({kategori_pilihan})")
+
+    MAX_RETRY = 2
+    for attempt in range(MAX_RETRY + 1):
+      try:
+        if driver: driver.quit(); driver = None
+        driver = create_driver(headless=headless, minimize=minimize)
+        wait = WebDriverWait(driver, 15)
         driver.get(url)
         time.sleep(4)
-        
+
+        # Cek apakah halaman berhasil dimuat
+        try:
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table.table")))
+        except:
+            if attempt < MAX_RETRY:
+                log.warning(f"  Retry {attempt+1}/{MAX_RETRY} untuk {nama_lpse} (halaman tidak termuat)")
+                continue
+            else:
+                log.error(f"  Gagal load halaman {nama_lpse} setelah {MAX_RETRY} retry")
+                return f"❌ {nama_lpse}: Gagal load halaman"
+
         halaman = 1
         paket_counter = 0
+        error_counter = 0
         halaman_kosong = 0
-        
+
         while True:
             if os.path.exists(STOP_FILE): driver.quit(); return f"🛑 {nama_lpse}: STOP"
 
             try:
                 driver.switch_to.window(driver.window_handles[0])
+                keep_minimized()
                 wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table.table")))
                 rows = driver.find_elements(By.CSS_SELECTOR, "table.table tbody tr")
             except: break 
@@ -145,7 +191,8 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
                 if os.path.exists(STOP_FILE): driver.quit(); return "STOP"
 
                 try:
-                    if "data-td-text" in row.get_attribute("class"): continue
+                    row_class = row.get_attribute("class") or ""
+                    if "data-td-text" in row_class: continue
                     links = row.find_elements(By.TAG_NAME, "a")
                     if len(links) == 0: continue 
                     
@@ -167,6 +214,7 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
                     # Buka Detail
                     driver.execute_script("window.open(arguments[0]);", link_detail)
                     driver.switch_to.window(driver.window_handles[-1])
+                    keep_minimized()
                     
                     # Logic Ambil Data Detail
                     jenis_pengadaan = "-"
@@ -199,8 +247,9 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
 
                     # Logic Pemenang (Dinamis: Cek dulu apakah tabnya ada, baru klik)
                     try:
-                        if len(driver.find_elements(By.XPATH, "//a[contains(text(), 'Pemenang')]")) > 0:
-                            wait.until(EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'Pemenang')]"))).click()
+                        pemenang_tabs = driver.find_elements(By.XPATH, "//a[text()='Pemenang']")
+                        if len(pemenang_tabs) > 0:
+                            wait.until(EC.element_to_be_clickable((By.XPATH, "//a[text()='Pemenang']"))).click()
                             wait.until(EC.presence_of_element_located((By.XPATH, "//*[@id='main']/div/table")))
                             try:
                                 elemen_td = driver.find_element(By.XPATH, "//*[@id='main']/div/table/tbody/tr[7]/td/table/tbody/tr[2]/td[1]")
@@ -224,9 +273,9 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
 
                     kontrak_mulai, kontrak_selesai = "", ""
                     try:
-                        # URL Jadwal juga dinamis mengikuti endpoint
                         driver.execute_script("window.open(arguments[0]);", f"https://spse.inaproc.id/{kode_lpse}/{endpoint_target}/{kode_tender}/jadwal")
                         driver.switch_to.window(driver.window_handles[-1])
+                        keep_minimized()
                         wait.until(EC.presence_of_element_located((By.XPATH, "//table")))
                         rows_jadwal = driver.find_elements(By.XPATH, "//table/tbody/tr")
                         for tr in rows_jadwal:
@@ -234,13 +283,15 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
                             if len(kolom) >= 5 and "Penandatanganan Kontrak" in kolom[1].text:
                                 kontrak_mulai, kontrak_selesai = kolom[2].text.strip(), kolom[3].text.strip()
                                 break
-                        driver.close()
-                        driver.switch_to.window(driver.window_handles[-1])
                     except:
                         kontrak_mulai, kontrak_selesai = "-", "-"
-                    
-                    driver.close()
-                    driver.switch_to.window(driver.window_handles[0])
+                    finally:
+                        # Tutup semua tab kecuali tab utama
+                        while len(driver.window_handles) > 1:
+                            driver.switch_to.window(driver.window_handles[-1])
+                            driver.close()
+                        driver.switch_to.window(driver.window_handles[0])
+                        keep_minimized()
 
                     # DATA UNTUK DISIMPAN
                     data = {
@@ -259,10 +310,13 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
                     supabase_client.table(nama_tabel_target).upsert(data).execute()
                     paket_counter += 1
                     
-                except Exception:
-                    if len(driver.window_handles) > 1: 
+                except Exception as e:
+                    error_counter += 1
+                    log.warning(f"  Error paket {kode_tender if 'kode_tender' in dir() else '?'}: {str(e)[:100]}")
+                    while len(driver.window_handles) > 1:
+                        driver.switch_to.window(driver.window_handles[-1])
                         driver.close()
-                        driver.switch_to.window(driver.window_handles[0])
+                    driver.switch_to.window(driver.window_handles[0])
                     continue
 
             if not paket_ditemukan: halaman_kosong += 1
@@ -272,21 +326,32 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
             
             try:
                 next_btn = driver.find_element(By.XPATH, "//a[contains(text(),'Berikutnya')] | //a[contains(@class,'next')]")
-                if "disabled" in next_btn.get_attribute("class"): break
+                if "disabled" in (next_btn.get_attribute("class") or ""): break
                 next_btn.click()
                 halaman += 1
                 time.sleep(3)
             except: break
         
-        driver.quit()
-        return f"{nama_lpse}: Selesai {paket_counter} Data ({kategori_pilihan})"
+        msg = f"{nama_lpse}: ✅ {paket_counter} data"
+        if error_counter: msg += f", ⚠️ {error_counter} error"
+        log.info(msg)
+        return msg
 
-    except Exception as e:
-        driver.quit()
+      except Exception as e:
+        if attempt < MAX_RETRY:
+            log.warning(f"  Retry {attempt+1}/{MAX_RETRY} untuk {nama_lpse}: {str(e)[:100]}")
+            continue
+        log.error(f"❌ {nama_lpse}: {str(e)[:200]}")
         return f"❌ {nama_lpse}: Error Sistem"
+      finally:
+        if driver:
+            driver.quit()
+            driver = None
+
+    return f"❌ {nama_lpse}: Gagal setelah {MAX_RETRY} retry"
 
 # --- 5. UI ---
-st.title("🏗️ SPSE Scraper V25 (Multi-Table)")
+st.title("🏗️ SPSE Scraper V1.c (Multi-Table)")
 
 # Bagian Kontrol
 col_thn, col_kat = st.columns([1, 2])
@@ -319,6 +384,14 @@ with st.container():
             st.markdown(get_last_update(lpse['kode'], kategori_input))
 
 st.write("---")
+col_opts1, col_opts2, col_opts3 = st.columns(3)
+with col_opts1:
+    headless_mode = st.checkbox("🖥️ Headless (SPSE mungkin blokir)", value=False)
+with col_opts2:
+    minimize_mode = st.checkbox("🔽 Minimize Chrome", value=True)
+with col_opts3:
+    max_workers_input = st.slider("Parallel Workers", min_value=1, max_value=5, value=2)
+
 c_start, c_stop = st.columns([4, 1])
 
 with c_start:
@@ -329,8 +402,8 @@ with c_start:
         else:
             status_box = st.status(f"Menghisap data ke tabel: **{CONFIG_KATEGORI[kategori_input]['tabel']}**...", expanded=True)
             p_bar = status_box.progress(0)
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                futures = [executor.submit(scrape_satu_lpse, t, tahun_input, kategori_input, supabase) for t in target_dipilih]
+            with ThreadPoolExecutor(max_workers=max_workers_input) as executor:
+                futures = [executor.submit(scrape_satu_lpse, t, tahun_input, kategori_input, supabase, headless_mode, minimize_mode) for t in target_dipilih]
                 done = 0
                 for f in futures:
                     res = f.result()
