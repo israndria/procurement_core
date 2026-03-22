@@ -31,192 +31,45 @@ Public Sub BukaDokpil()
     RunMerge "buka", WORD_DOKPIL, SHEET_DOKPIL
 End Sub
 
-' ===== PRINT (merge + buka Print dialog) =====
+' ===== PRINT PDF (semua pakai RunPDF) =====
 
 Public Sub PrintBAReviuPDF()
-    Dim kodePokja As String
-    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
-    If kodePokja = "" Then kodePokja = "000"
-
-    Dim wordPath As String
-    wordPath = ThisWorkbook.Path & "\" & WORD_BA
-
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
-
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
-
-    Dim cmd As String
-    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_bareviu " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
-
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, False
-    Set wsh = Nothing
-
-    Application.StatusBar = "Membuat PDF BA_REVIU_DPP_" & kodePokja & ".pdf ..."
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    RunPDF "pdf_bareviu", WORD_BA, SHEET_BA, "BA_REVIU_DPP"
 End Sub
 
 Public Sub PrintIsiReviuPDF()
-    Dim kodePokja As String
-    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
-    If kodePokja = "" Then kodePokja = "000"
-
-    Dim wordPath As String
-    wordPath = ThisWorkbook.Path & "\" & WORD_REVIU
-
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
-
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
-
-    Dim cmd As String
-    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_all " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_REVIU) & " " & Q(kodePokja)
-
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, False
-    Set wsh = Nothing
-
-    Application.StatusBar = "Membuat PDF Isi_Reviu_" & kodePokja & ".pdf ..."
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    RunPDF "pdf_all", WORD_REVIU, SHEET_REVIU, "Isi_Reviu"
 End Sub
 
 Public Sub PrintDokpilPDF()
-    Dim kodePokja As String
-    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
-    If kodePokja = "" Then kodePokja = "000"
-
-    Dim wordPath As String
-    wordPath = ThisWorkbook.Path & "\" & WORD_DOKPIL
-
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
-
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
-
-    Dim cmd As String
-    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_dokpil " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_DOKPIL) & " " & Q(kodePokja)
-
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, False
-    Set wsh = Nothing
-
-    Application.StatusBar = "Membuat PDF DOKPIL_" & kodePokja & ".pdf ..."
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    RunPDF "pdf_dokpil", WORD_DOKPIL, SHEET_DOKPIL, "DOKPIL"
 End Sub
 
-' ===== PDF (merge + export halaman 1-2 ke PDF) =====
-
 Public Sub PrintUndanganPDF()
-    ' Ambil Kode Pokja dari cell E14 untuk nama file PDF
-    Dim kodePokja As String
-    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
-    If kodePokja = "" Then kodePokja = "000"
-
-    Dim wordPath As String
-    wordPath = ThisWorkbook.Path & "\" & WORD_BA
-
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
-
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
-
-    Dim cmd As String
-    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
-
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, False
-    Set wsh = Nothing
-
-    Application.StatusBar = "Membuat PDF Undangan_" & kodePokja & ".pdf ..."
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    RunPDF "pdf", WORD_BA, SHEET_BA, "Undangan"
 End Sub
 
 Public Sub PrintPembuktianPDF()
-    Dim kodePokja As String
-    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
-    If kodePokja = "" Then kodePokja = "000"
-
-    Dim wordPath As String
-    wordPath = ThisWorkbook.Path & "\" & WORD_BA
-
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
-
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
-
-    Dim cmd As String
-    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_pembuktian " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
-
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, False
-    Set wsh = Nothing
-
-    Application.StatusBar = "Membuat PDF BA Pembuktian & Nego_ " & kodePokja & " ..."
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    RunPDF "pdf_pembuktian", WORD_BA, SHEET_BA, "BA Pembuktian & Nego"
 End Sub
 
 Public Sub PrintREvaluasiPDF()
-    Dim kodePokja As String
-    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
-    If kodePokja = "" Then kodePokja = "000"
-
-    Dim wordPath As String
-    wordPath = ThisWorkbook.Path & "\" & WORD_BA
-
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
-
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
-
-    Dim cmd As String
-    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_revaluasi " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
-
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, False
-    Set wsh = Nothing
-
-    Application.StatusBar = "Membuat PDF REvaluasi_" & kodePokja & ".pdf ..."
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    RunPDF "pdf_revaluasi", WORD_BA, SHEET_BA, "REvaluasi"
 End Sub
 
 Public Sub PrintPembuktianTimpangPDF()
+    RunPDF "pdf_pembuktian_timpang", WORD_BA, SHEET_BA, "BA Pembuktian Timpang"
+End Sub
+
+' ===== CORE: Panggil Python script (non-blocking) =====
+
+Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, statusLabel As String)
     Dim kodePokja As String
     kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
     If kodePokja = "" Then kodePokja = "000"
 
     Dim wordPath As String
-    wordPath = ThisWorkbook.Path & "\" & WORD_BA
+    wordPath = ThisWorkbook.Path & "\" & wordFile
 
     If Dir(wordPath) = "" Then
         MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
@@ -228,18 +81,16 @@ Public Sub PrintPembuktianTimpangPDF()
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " pdf_pembuktian_timpang " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(SHEET_BA) & " " & Q(kodePokja)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " " & mode & " " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(sheetName) & " " & Q(kodePokja)
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
     wsh.Run cmd, 0, False
     Set wsh = Nothing
 
-    Application.StatusBar = "Membuat PDF BA Pembuktian Timpang_" & kodePokja & ".pdf ..."
+    Application.StatusBar = "Membuat PDF " & statusLabel & "_" & kodePokja & " ..."
     Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
-
-' ===== CORE: Panggil Python script (non-blocking) =====
 
 Private Sub RunMerge(mode As String, wordFile As String, sheetName As String)
     Dim wordPath As String

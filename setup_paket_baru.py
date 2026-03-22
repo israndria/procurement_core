@@ -17,19 +17,13 @@ import sys
 import zipfile
 import re
 
-# ===== KONFIGURASI =====
-TEMPLATE_DIR = r"D:\Dokumen\@ POKJA 2026\Paket Experiment"
-OUTPUT_BASE = r"D:\Dokumen\@ POKJA 2026"
+from config import (
+    POKJA_ROOT, TEMPLATE_DIR, EXCEL_TEMPLATE, WORD_SHEET_MAP,
+    excel_to_file_uri,
+)
 
-EXCEL_TEMPLATE = "@ BA PK 2026 (Improved) v.1.xlsm"
-
-# Setiap Word template terhubung ke sheet Excel BERBEDA
-WORD_SHEET_MAP = [
-    ("1. Full Dokumen BA PK v.1.docx", "1. Input Data"),
-    ("2. Isi Reviu PK v.1.docx",       "database_reviu"),
-    ("3. Dokpil Full PK v.1.docx",     "database_dokpil"),
-]
-# ========================
+# Output base = root POKJA folder
+OUTPUT_BASE = POKJA_ROOT
 
 
 def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
@@ -72,9 +66,7 @@ def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
         new_settings = settings_str.encode('utf-8')
 
         # Build settings.xml.rels dengan path Excel yang benar
-        # URL-encode path untuk file:/// URI
-        from urllib.parse import quote
-        excel_uri = 'file:///' + excel_path.replace('\\', '/').replace(' ', '%20').replace('@', '%40')
+        excel_uri = excel_to_file_uri(excel_path)
         new_settings_rels = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'

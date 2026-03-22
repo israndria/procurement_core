@@ -6,8 +6,11 @@ param([string]$ExcelPath)
 $folder = Split-Path $ExcelPath
 $excelName = Split-Path $ExcelPath -Leaf
 
-# URL-encode path for file:/// URI
-$excelUri = "file:///" + $ExcelPath.Replace('\', '/').Replace(' ', '%20').Replace('@', '%40')
+# URL-encode path for file:/// URI (encode setiap segmen path)
+$pathForUri = $ExcelPath.Replace('\', '/')
+$segments = $pathForUri.Split('/')
+$encodedSegments = $segments | ForEach-Object { [uri]::EscapeDataString($_) }
+$excelUri = "file:///" + ($encodedSegments -join "/")
 
 # Mapping
 $mapping = @{
@@ -94,7 +97,7 @@ Get-ChildItem $folder -Filter "*.docx" | Where-Object {
         $results += "[OK] $docxName -> $sheet"
     } catch {
         if ($zip) { $zip.Dispose() }
-        $results += "[GAGAL] $docxName ($_)"
+        $results += "[GAGAL] $docxName ($($_.Exception.Message))"
     }
 }
 

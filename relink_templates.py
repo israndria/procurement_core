@@ -13,20 +13,13 @@ import os
 import sys
 import ctypes
 
-# Import fungsi link_word_to_excel dari setup_paket_baru
+from config import WORD_KEYWORD_MAP
 from setup_paket_baru import link_word_to_excel
-
-# Mapping: keyword di nama file Word -> sheet name untuk mail merge
-WORD_SHEET_MAP = {
-    "BA PK":   "satu_data",
-    "Reviu":   "list_reviu",
-    "Dokpil":  "list_dokpil",
-}
 
 
 def detect_sheet(docx_name):
     """Deteksi sheet name berdasarkan nama file Word."""
-    for keyword, sheet in WORD_SHEET_MAP.items():
+    for keyword, sheet in WORD_KEYWORD_MAP.items():
         if keyword.lower() in docx_name.lower():
             return sheet
     return None
