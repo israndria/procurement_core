@@ -152,6 +152,11 @@ Private Function PyExe() As String
     PyExe = ScriptDir() & "\python\pythonw.exe"
 End Function
 
+' Public wrapper agar Workbook_Open bisa akses ScriptDir
+Public Function ScriptDir_Public() As String
+    ScriptDir_Public = ScriptDir()
+End Function
+
 Public Sub ResetStatusBar()
     Application.StatusBar = False
 End Sub

@@ -1,10 +1,50 @@
-param([string]$ExcelPath)
+param(
+    [string]$ExcelPath,
+    [switch]$CheckOnly
+)
 
 [System.Reflection.Assembly]::LoadWithPartialName('System.IO.Compression') | Out-Null
 [System.Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem') | Out-Null
 
 $folder = Split-Path $ExcelPath
 $excelName = Split-Path $ExcelPath -Leaf
+
+# === CHECK-ONLY MODE ===
+# Baca settings.xml dari .docx pertama yang ditemukan, cek apakah Data Source cocok.
+# Exit code: 0 = cocok (tidak perlu relink), 1 = beda (perlu relink)
+if ($CheckOnly) {
+    $firstDocx = Get-ChildItem $folder -Filter "*.docx" | Where-Object {
+        $_.Name -notlike "*(Merged)*" -and $_.Name -notlike "~*"
+    } | Select-Object -First 1
+
+    if (-not $firstDocx) { exit 0 }
+
+    try {
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($firstDocx.FullName)
+        $entry = $zip.GetEntry('word/settings.xml')
+        if (-not $entry) { $zip.Dispose(); exit 0 }
+
+        $stream = $entry.Open()
+        $reader = New-Object System.IO.StreamReader($stream)
+        $xml = $reader.ReadToEnd()
+        $reader.Close()
+        $stream.Close()
+        $zip.Dispose()
+
+        # Cek apakah Data Source= mengarah ke path Excel yang benar
+        if ($xml -match 'Data Source=([^;]+);') {
+            $currentSource = $Matches[1]
+            if ($currentSource -eq $ExcelPath) {
+                exit 0  # cocok, tidak perlu relink
+            } else {
+                exit 1  # beda, perlu relink
+            }
+        }
+        exit 0  # tidak ada mailMerge, skip
+    } catch {
+        exit 0  # error baca, skip
+    }
+}
 
 # URL-encode path for file:/// URI (encode setiap segmen path)
 $pathForUri = $ExcelPath.Replace('\', '/')

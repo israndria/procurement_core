@@ -40,6 +40,63 @@ def inject_buttons(filepath):
         imported = vb_project.VBComponents.Import(bas_path)
         print(f"  [OK] Imported: {imported.Name} ({imported.CodeModule.CountOfLines} baris)")
         
+        # 2b. Inject Workbook_Open auto-relink ke ThisWorkbook module
+        auto_relink_code = (
+            "Private Sub Workbook_Open()\n"
+            "    ' Auto-relink jika path Excel berubah (misal pindah PC/drive)\n"
+            "    On Error Resume Next\n"
+            "    Dim needRelink As Boolean\n"
+            "    needRelink = False\n"
+            "    \n"
+            "    ' Cek apakah ScriptDir bisa ditemukan\n"
+            "    Dim sd As String\n"
+            "    sd = ModWordLink.ScriptDir_Public()\n"
+            "    If sd = \"\" Then Exit Sub\n"
+            "    \n"
+            "    ' Cek file Word pertama — apakah ada?\n"
+            "    Dim testWord As String\n"
+            "    testWord = ThisWorkbook.Path & \"\\\" & \"1. Full Dokumen BA PK v1.docx\"\n"
+            "    If Dir(testWord) = \"\" Then Exit Sub\n"
+            "    \n"
+            "    ' Baca byte kecil dari settings.xml untuk cek path\n"
+            "    ' Jika path Excel di settings.xml tidak cocok → relink\n"
+            "    Dim fso As Object\n"
+            "    Set fso = CreateObject(\"Scripting.FileSystemObject\")\n"
+            "    Dim zipPath As String\n"
+            "    zipPath = testWord\n"
+            "    \n"
+            "    ' Simple check: jalankan relink_dotnet.ps1 dengan flag --check-only\n"
+            "    ' yang return exit code 0 jika sudah cocok, 1 jika perlu relink\n"
+            "    Dim cmd As String\n"
+            "    Dim wsh As Object\n"
+            "    Set wsh = CreateObject(\"WScript.Shell\")\n"
+            "    cmd = \"powershell -ExecutionPolicy Bypass -File \"\"\" & sd & \"\\relink_dotnet.ps1\"\"\" & \" -ExcelPath \"\"\" & ThisWorkbook.FullName & \"\"\" -CheckOnly\"\n"
+            "    Dim exitCode As Long\n"
+            "    exitCode = wsh.Run(cmd, 0, True)\n"
+            "    Set wsh = Nothing\n"
+            "    \n"
+            "    If exitCode = 1 Then\n"
+            "        ' Path berubah — auto relink\n"
+            "        ModWordLink.RelinkTemplate\n"
+            "    End If\n"
+            "End Sub\n"
+        )
+
+        # Tulis ke ThisWorkbook module
+        this_wb = None
+        for comp in vb_project.VBComponents:
+            if comp.Name == "ThisWorkbook":
+                this_wb = comp
+                break
+
+        if this_wb:
+            cm = this_wb.CodeModule
+            # Hapus kode lama (kecuali Option Explicit di baris 1-2)
+            if cm.CountOfLines > 0:
+                cm.DeleteLines(1, cm.CountOfLines)
+            cm.AddFromString(auto_relink_code)
+            print(f"  [OK] Workbook_Open auto-relink injected ({cm.CountOfLines} baris)")
+
         # 3. Clean old buttons - langsung target 3 sheet yang diketahui ada tombolnya
         print("\n  Cleaning old buttons...")
         target_clean = ["1. Input Data", "database_reviu", "database_dokpil"]
