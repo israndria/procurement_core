@@ -32,3 +32,4 @@ govem_config.ini
 
 # Separated Projects (punya repo sendiri)
 Inaproc_Scraper/
+debug_log.txt

@@ -43,9 +43,8 @@ JUDUL_APLIKASI = f"Jadwal Tender/Seleksi Tahun Anggaran {TAHUN_SEKARANG}"
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 CALENDAR_ID = 'primary'
 
-st.set_page_config(page_title=JUDUL_APLIKASI, layout="wide")
-st.title(f"📅 {JUDUL_APLIKASI}")
-st.caption(f"📂 Lokasi Database: {DB_FILE_PATH}") # Info lokasi file (untuk memastikan)
+if not os.environ.get("POKJA_MULTIPAGE"):
+    st.set_page_config(page_title=JUDUL_APLIKASI, layout="wide")
 
 # --- FUNGSI FORMAT TANGGAL INDONESIA ---
 BULAN_INDO_MAP = {
@@ -296,118 +295,121 @@ def run_single_update(url_target, members_target):
         return True
     return False
 
-# ============================================
-# 🖥️ UI TAB SYSTEM (STREAMLIT)
-# ============================================
-tab_monitor, tab_tambah = st.tabs(["👀 Pantau & Update", "➕ Tambah Paket"])
+def main():
+    st.title(f"📅 {JUDUL_APLIKASI}")
+    st.caption(f"📂 Lokasi Database: {DB_FILE_PATH}")
 
-# --- TAB 1: DASHBOARD ---
-with tab_monitor:
-    col_reset_1, col_reset_2 = st.columns([8, 2])
-    with col_reset_2:
-        if st.button("🗑️ Reset Database", type="primary", use_container_width=True, help="Hapus semua data (Reset Tahun)"):
-            if clear_all_database():
-                st.toast("Database berhasil direset!", icon="🗑️")
-                time.sleep(1)
-                st.rerun()
+    # ============================================
+    # 🖥️ UI TAB SYSTEM (STREAMLIT)
+    # ============================================
+    tab_monitor, tab_tambah = st.tabs(["👀 Pantau & Update", "➕ Tambah Paket"])
 
-    if os.path.exists(DB_FILE_PATH):
-        try:
-            df_saved = pd.read_csv(DB_FILE_PATH)
-        except:
-            df_saved = pd.DataFrame()
-        
-        if not df_saved.empty:
-            if 'last_sync' not in df_saved.columns: df_saved['last_sync'] = "-"
-            if 'nama_paket' not in df_saved.columns: df_saved['nama_paket'] = df_saved['url']
-            
-            # HEADER (Sticky Logic akan dihandle oleh container di bawah)
-            h_no, h_info, h_sync, h_act = st.columns([0.5, 6.0, 2.0, 1.5]) 
-            h_no.markdown("**No**")
-            h_info.markdown("**Nama Paket**")
-            h_sync.markdown("**Terakhir Update**") 
-            h_act.markdown("**Aksi**")
-            st.divider()
+    # --- TAB 1: DASHBOARD ---
+    with tab_monitor:
+        col_reset_1, col_reset_2 = st.columns([8, 2])
+        with col_reset_2:
+            if st.button("🗑️ Reset Database", type="primary", use_container_width=True, help="Hapus semua data (Reset Tahun)"):
+                if clear_all_database():
+                    st.toast("Database berhasil direset!", icon="🗑️")
+                    time.sleep(1)
+                    st.rerun()
 
-            # CONTAINER SCROLLABLE (Sticky Header Effect)
-            with st.container(height=500):
-                for index, row in df_saved.iterrows():
-                    c_no, c_info, c_sync, c_act = st.columns([0.5, 6.0, 2.0, 1.5])
-                    
-                    c_no.write(f"{index + 1}")
-                    
-                    with c_info:
-                        st.write(f"**{row['nama_paket']}**")
-                        st.caption(f"👥 {row['members']}")
-                    
-                    c_sync.caption(row['last_sync'])
-                    
-                    with c_act:
-                        b_col1, b_col2 = st.columns(2)
-                        # Tombol UPDATE (Icon)
-                        if b_col1.button("🔄", key=f"upd_{index}", help="Update Data ke Calendar"):
-                            with st.spinner("Processing..."):
-                                if run_single_update(row['url'], row['members']):
-                                    st.toast("Berhasil Update!", icon="✅")
-                                    time.sleep(1)
+        if os.path.exists(DB_FILE_PATH):
+            try:
+                df_saved = pd.read_csv(DB_FILE_PATH)
+            except:
+                df_saved = pd.DataFrame()
+
+            if not df_saved.empty:
+                if 'last_sync' not in df_saved.columns: df_saved['last_sync'] = "-"
+                if 'nama_paket' not in df_saved.columns: df_saved['nama_paket'] = df_saved['url']
+
+                h_no, h_info, h_sync, h_act = st.columns([0.5, 6.0, 2.0, 1.5])
+                h_no.markdown("**No**")
+                h_info.markdown("**Nama Paket**")
+                h_sync.markdown("**Terakhir Update**")
+                h_act.markdown("**Aksi**")
+                st.divider()
+
+                with st.container(height=500):
+                    for index, row in df_saved.iterrows():
+                        c_no, c_info, c_sync, c_act = st.columns([0.5, 6.0, 2.0, 1.5])
+
+                        c_no.write(f"{index + 1}")
+
+                        with c_info:
+                            st.write(f"**{row['nama_paket']}**")
+                            st.caption(f"👥 {row['members']}")
+
+                        c_sync.caption(row['last_sync'])
+
+                        with c_act:
+                            b_col1, b_col2 = st.columns(2)
+                            if b_col1.button("🔄", key=f"upd_{index}", help="Update Data ke Calendar"):
+                                with st.spinner("Processing..."):
+                                    if run_single_update(row['url'], row['members']):
+                                        st.toast("Berhasil Update!", icon="✅")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else: st.error("Gagal")
+
+                            if b_col2.button("🗑️", key=f"del_{index}", help="Hapus Paket"):
+                                if remove_from_database(row['url']):
                                     st.rerun()
-                                else: st.error("Gagal")
-                        
-                        # Tombol DELETE (Icon)
-                        if b_col2.button("🗑️", key=f"del_{index}", help="Hapus Paket"):
-                            if remove_from_database(row['url']):
-                                st.rerun()
-                    
-                    st.divider()
+
+                        st.divider()
+            else:
+                st.info("Belum ada paket yang dipantau. Silakan masuk ke Tab 'Tambah Paket'.")
         else:
-            st.info("Belum ada paket yang dipantau. Silakan masuk ke Tab 'Tambah Paket'.")
-    else:
-        st.info("Database baru akan dibuat otomatis setelah Anda menambah paket.")
+            st.info("Database baru akan dibuat otomatis setelah Anda menambah paket.")
 
-# --- TAB 2: TAMBAH PAKET ---
-with tab_tambah:
-    if 'num_slots' not in st.session_state: st.session_state['num_slots'] = 1
-    slot_inputs = []
+    # --- TAB 2: TAMBAH PAKET ---
+    with tab_tambah:
+        if 'num_slots' not in st.session_state: st.session_state['num_slots'] = 1
+        slot_inputs = []
 
-    for i in range(st.session_state['num_slots']):
-        c1, c2 = st.columns([3, 2])
-        with c1: url_in = st.text_input(f"Link Paket #{i+1}", key=f"u{i}", placeholder="https://lpse.../jadwal/...")
-        with c2: pokja_in = st.multiselect(f"Anggota Pokja #{i+1}", DAFTAR_ANGGOTA, key=f"p{i}")
-        if url_in.strip(): slot_inputs.append({'url': url_in.strip(), 'members': ", ".join(pokja_in)})
+        for i in range(st.session_state['num_slots']):
+            c1, c2 = st.columns([3, 2])
+            with c1: url_in = st.text_input(f"Link Paket #{i+1}", key=f"u{i}", placeholder="https://lpse.../jadwal/...")
+            with c2: pokja_in = st.multiselect(f"Anggota Pokja #{i+1}", DAFTAR_ANGGOTA, key=f"p{i}")
+            if url_in.strip(): slot_inputs.append({'url': url_in.strip(), 'members': ", ".join(pokja_in)})
 
-    c_btn1, c_btn2 = st.columns([1, 1])
-    if c_btn1.button("➕ Tambah Baris"): st.session_state['num_slots'] += 1; st.rerun()
-    if c_btn2.button("🔄 Reset Form"): st.session_state['num_slots'] = 1; st.rerun()
+        c_btn1, c_btn2 = st.columns([1, 1])
+        if c_btn1.button("➕ Tambah Baris"): st.session_state['num_slots'] += 1; st.rerun()
+        if c_btn2.button("🔄 Reset Form"): st.session_state['num_slots'] = 1; st.rerun()
 
-    st.divider()
+        st.divider()
 
-    if st.button("🚀 EKSEKUSI PAKET BARU", type="primary", use_container_width=True):
-        if slot_inputs:
-            with st.status("Sedang Bekerja...", expanded=True) as s:
-                res = start_driver_and_process_slots(slot_inputs)
-                if res:
-                    df_res = pd.concat(res, ignore_index=True)
-                    update_local_database(df_res)
-                    
-                    svc = get_service()
-                    for url, grp in df_res.groupby('Source'):
-                        s.write(f"📅 Memproses: {grp.iloc[0]['Nama_Paket']}")
-                        delete_existing_events_by_source(svc, url)
-                        for _, r in grp.iterrows():
-                            ds = parse_spse_date(r['Mulai'])
-                            de = parse_spse_date(r['Sampai'])
-                            if ds:
-                                if not de: de = ds + datetime.timedelta(hours=1)
-                                evt = {
-                                    'summary': f"{r['Tahap']} - {r['Nama_Paket']}",
-                                    'description': format_desc(r['Source'], r['Perubahan'], r['Anggota_Pokja']),
-                                    'start': {'dateTime': ds.isoformat(), 'timeZone': 'Asia/Jakarta'},
-                                    'end': {'dateTime': de.isoformat(), 'timeZone': 'Asia/Jakarta'},
-                                    'reminders': get_reminders(r['Tahap'])
-                                }
-                                try: svc.events().insert(calendarId=CALENDAR_ID, body=evt).execute()
-                                except: pass
-                    s.update(label="Selesai!", state="complete", expanded=False)
-                    st.success("Sukses! Data telah masuk ke Google Calendar.")
-                    time.sleep(2); st.rerun()
-                else: st.error("Gagal mengambil data. Pastikan link benar.")
+        if st.button("🚀 EKSEKUSI PAKET BARU", type="primary", use_container_width=True):
+            if slot_inputs:
+                with st.status("Sedang Bekerja...", expanded=True) as s:
+                    res = start_driver_and_process_slots(slot_inputs)
+                    if res:
+                        df_res = pd.concat(res, ignore_index=True)
+                        update_local_database(df_res)
+
+                        svc = get_service()
+                        for url, grp in df_res.groupby('Source'):
+                            s.write(f"📅 Memproses: {grp.iloc[0]['Nama_Paket']}")
+                            delete_existing_events_by_source(svc, url)
+                            for _, r in grp.iterrows():
+                                ds = parse_spse_date(r['Mulai'])
+                                de = parse_spse_date(r['Sampai'])
+                                if ds:
+                                    if not de: de = ds + datetime.timedelta(hours=1)
+                                    evt = {
+                                        'summary': f"{r['Tahap']} - {r['Nama_Paket']}",
+                                        'description': format_desc(r['Source'], r['Perubahan'], r['Anggota_Pokja']),
+                                        'start': {'dateTime': ds.isoformat(), 'timeZone': 'Asia/Jakarta'},
+                                        'end': {'dateTime': de.isoformat(), 'timeZone': 'Asia/Jakarta'},
+                                        'reminders': get_reminders(r['Tahap'])
+                                    }
+                                    try: svc.events().insert(calendarId=CALENDAR_ID, body=evt).execute()
+                                    except: pass
+                        s.update(label="Selesai!", state="complete", expanded=False)
+                        st.success("Sukses! Data telah masuk ke Google Calendar.")
+                        time.sleep(2); st.rerun()
+                    else: st.error("Gagal mengambil data. Pastikan link benar.")
+
+if __name__ == "__main__":
+    main()

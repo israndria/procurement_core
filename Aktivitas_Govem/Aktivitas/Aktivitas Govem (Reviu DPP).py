@@ -1,0 +1,121 @@
+import pyautogui
+import time
+
+# Tunggu sebelum mulai
+time.sleep(3)
+
+# Klik aktivitas
+pyautogui.click(x=1396, y=738)
+time.sleep(0.4)
+
+# Klik buat aktivitas harian
+pyautogui.click(x=390, y=395)
+time.sleep(0.4)
+
+# Aktivitas 1 (apel pagi)
+pyautogui.click(x=435, y=396)
+time.sleep(0.4)
+pyautogui.click(x=29, y=906)
+time.sleep(0.4)
+pyautogui.click(x=256, y=486)
+pyautogui.write("melaksanakan apel pagi")
+time.sleep(0.4)
+pyautogui.click(x=1129, y=430)
+time.sleep(0.4)
+pyautogui.click(x=92, y=702)
+time.sleep(0.4)
+pyautogui.click(x=693, y=899)
+time.sleep(0.4)
+
+# Aktivitas 2
+pyautogui.click(x=435, y=396)
+time.sleep(0.4)
+pyautogui.click(x=32, y=635)
+time.sleep(0.4)
+pyautogui.click(x=256, y=486)
+pyautogui.write("Melaksanakan reviu DPP paket tender/seleksi")
+time.sleep(0.4)
+pyautogui.click(x=1129, y=430)
+time.sleep(0.4)
+pyautogui.click(x=90, y=628)
+time.sleep(0.4)
+pyautogui.click(x=693, y=899)
+time.sleep(0.4)
+
+# Aktivitas 3
+pyautogui.click(x=435, y=396)
+time.sleep(0.4)
+pyautogui.click(x=32, y=635)
+time.sleep(0.4)
+pyautogui.click(x=256, y=486)
+pyautogui.write("Melaksanakan pembuatan berita acara reviu DPP paket tender/seleksi")
+time.sleep(0.4)
+pyautogui.click(x=1129, y=430)
+time.sleep(0.4)
+pyautogui.click(x=90, y=628)
+time.sleep(0.4)
+pyautogui.click(x=693, y=899)
+time.sleep(0.4)
+
+# Aktivitas 4
+pyautogui.click(x=435, y=396)
+time.sleep(0.4)
+pyautogui.click(x=32, y=635)
+time.sleep(0.4)
+pyautogui.click(x=256, y=486)
+pyautogui.write("Melaksanakan pembuatan daftar hadir reviu DPP paket tender/seleksi")
+time.sleep(0.4)
+pyautogui.click(x=1129, y=430)
+time.sleep(0.4)
+pyautogui.click(x=90, y=628)
+time.sleep(0.4)
+pyautogui.click(x=693, y=899)
+time.sleep(0.4)
+
+# Aktivitas 5
+pyautogui.click(x=435, y=396)
+time.sleep(0.4)
+pyautogui.click(x=32, y=635)
+time.sleep(0.4)
+pyautogui.click(x=256, y=486)
+pyautogui.write("Melaksanakan posting dokumen BA Reviu DPP paket tender/seleki ke SPSE")
+time.sleep(0.4)
+pyautogui.click(x=1129, y=430)
+time.sleep(0.4)
+pyautogui.click(x=90, y=628)
+time.sleep(0.4)
+pyautogui.click(x=693, y=899)
+time.sleep(0.4)
+
+# Aktivitas 6
+pyautogui.click(x=435, y=396)
+time.sleep(0.4)
+pyautogui.click(x=42, y=760)
+time.sleep(0.4)
+pyautogui.click(x=256, y=486)
+pyautogui.write("Menelaah SE Kep LKPP No. 1 2025 tentang Penjelasan Atas Pelaksanaan Perpres No. 46 2025 tentang Perubahan Kedua Atas Perpres No. 16 2018 Pada Masa Transisi")
+time.sleep(0.4)
+pyautogui.click(x=1129, y=430)
+time.sleep(0.4)
+pyautogui.click(x=90, y=628)
+time.sleep(0.4)
+pyautogui.click(x=693, y=899)
+time.sleep(0.4)
+
+# Aktivitas 7
+pyautogui.click(x=435, y=396)
+time.sleep(0.4)
+pyautogui.click(x=29, y=906)
+time.sleep(0.4)
+pyautogui.click(x=256, y=486)
+pyautogui.write("melaksanakan apel sore")
+time.sleep(0.4)
+pyautogui.click(x=1129, y=430)
+time.sleep(0.4)
+pyautogui.click(x=92, y=702)
+time.sleep(0.4)
+pyautogui.click(x=693, y=899)
+time.sleep(0.4)
+
+# Tutup browser
+pyautogui.hotkey("ctrl", "w")

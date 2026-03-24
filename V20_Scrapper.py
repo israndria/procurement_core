@@ -14,7 +14,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="SPSE Scraper V1.c", page_icon="🏗️", layout="wide")
+if not os.environ.get("POKJA_MULTIPAGE"):
+    st.set_page_config(page_title="SPSE Scraper V1.c", page_icon="🏗️", layout="wide")
 
 st.markdown("""
     <style>
@@ -86,9 +87,9 @@ except:
 
 # --- 3. UTILITY ---
 def toggle_all():
-    state = st.session_state.chk_all
+    state = st.session_state.v20_chk_all
     for lpse in DAFTAR_LPSE:
-        st.session_state[f"chk_{lpse['kode']}"] = state
+        st.session_state[f"v20_chk_{lpse['kode']}"] = state
 
 def get_last_update(kode_lpse, kategori_selected):
     # Ambil nama tabel target berdasarkan pilihan user
@@ -350,75 +351,76 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client, h
 
     return f"❌ {nama_lpse}: Gagal setelah {MAX_RETRY} retry"
 
-# --- 5. UI ---
-st.title("🏗️ SPSE Scraper V1.c (Multi-Table)")
+def main():
+    # --- 5. UI ---
+    st.title("🏗️ SPSE Scraper V1.c (Multi-Table)")
 
-# Bagian Kontrol
-col_thn, col_kat = st.columns([1, 2])
+    # Bagian Kontrol
+    col_thn, col_kat = st.columns([1, 2])
 
-with col_thn:
-    tahun_sekarang = datetime.now().year
-    tahun_input = st.number_input("Tahun", min_value=2020, max_value=2030, value=tahun_sekarang)
+    with col_thn:
+        tahun_sekarang = datetime.now().year
+        tahun_input = st.number_input("Tahun", min_value=2020, max_value=2030, value=tahun_sekarang)
 
-with col_kat:
-    # Selector Kategori
-    kategori_input = st.radio("Kategori (Target Tabel)", ["Tender", "Non Tender", "Pencatatan"], horizontal=True)
+    with col_kat:
+        kategori_input = st.radio("Kategori (Target Tabel)", ["Tender", "Non Tender", "Pencatatan"], horizontal=True)
 
-st.write("---")
-c1, c2, c3 = st.columns([0.5, 4, 3])
-c1.checkbox("", key="chk_all", on_change=toggle_all)
-c2.markdown("**DAERAH**")
-# Header tabel dinamis
-c3.markdown(f"**LAST UPDATE (Tabel: {CONFIG_KATEGORI[kategori_input]['tabel']})**")
+    st.write("---")
+    c1, c2, c3 = st.columns([0.5, 4, 3])
+    c1.checkbox("", key="v20_chk_all", on_change=toggle_all)
+    c2.markdown("**DAERAH**")
+    c3.markdown(f"**LAST UPDATE (Tabel: {CONFIG_KATEGORI[kategori_input]['tabel']})**")
 
-target_dipilih = []
-with st.container():
-    for lpse in DAFTAR_LPSE:
-        col_a, col_b, col_c = st.columns([0.5, 4, 3])
-        with col_a:
-            if f"chk_{lpse['kode']}" not in st.session_state: st.session_state[f"chk_{lpse['kode']}"] = False
-            if col_a.checkbox("", key=f"chk_{lpse['kode']}"): target_dipilih.append(lpse)
-        with col_b: st.markdown(f"{lpse['nama']}")
-        with col_c: 
-            # Status update menyesuaikan kategori yang dipilih
-            st.markdown(get_last_update(lpse['kode'], kategori_input))
+    target_dipilih = []
+    with st.container():
+        for lpse in DAFTAR_LPSE:
+            col_a, col_b, col_c = st.columns([0.5, 4, 3])
+            with col_a:
+                if f"v20_chk_{lpse['kode']}" not in st.session_state: st.session_state[f"v20_chk_{lpse['kode']}"] = False
+                if col_a.checkbox("", key=f"v20_chk_{lpse['kode']}"): target_dipilih.append(lpse)
+            with col_b: st.markdown(f"{lpse['nama']}")
+            with col_c:
+                st.markdown(get_last_update(lpse['kode'], kategori_input))
 
-st.write("---")
-col_opts1, col_opts2, col_opts3 = st.columns(3)
-with col_opts1:
-    headless_mode = st.checkbox("🖥️ Headless (SPSE mungkin blokir)", value=False)
-with col_opts2:
-    minimize_mode = st.checkbox("🔽 Minimize Chrome", value=True)
-with col_opts3:
-    max_workers_input = st.slider("Parallel Workers", min_value=1, max_value=5, value=2)
+    st.write("---")
+    col_opts1, col_opts2, col_opts3 = st.columns(3)
+    with col_opts1:
+        headless_mode = st.checkbox("🖥️ Headless (SPSE mungkin blokir)", value=False)
+    with col_opts2:
+        minimize_mode = st.checkbox("🔽 Minimize Chrome", value=True)
+    with col_opts3:
+        max_workers_input = st.slider("Parallel Workers", min_value=1, max_value=5, value=2)
 
-c_start, c_stop = st.columns([4, 1])
+    c_start, c_stop = st.columns([4, 1])
 
-with c_start:
-    if st.button(f"🚀 GAS SCRAPE ({len(target_dipilih)})", type="primary", use_container_width=True):
-        if os.path.exists(STOP_FILE): os.remove(STOP_FILE)
-        if not target_dipilih:
-            st.warning("Pilih daerah!")
-        else:
-            status_box = st.status(f"Menghisap data ke tabel: **{CONFIG_KATEGORI[kategori_input]['tabel']}**...", expanded=True)
-            p_bar = status_box.progress(0)
-            with ThreadPoolExecutor(max_workers=max_workers_input) as executor:
-                futures = [executor.submit(scrape_satu_lpse, t, tahun_input, kategori_input, supabase, headless_mode, minimize_mode) for t in target_dipilih]
-                done = 0
-                for f in futures:
-                    res = f.result()
-                    done += 1
-                    p_bar.progress(int((done/len(futures))*100))
-                    status_box.write(res)
-            
-            if not os.path.exists(STOP_FILE):
-                status_box.update(label="Selesai!", state="complete", expanded=False)
-                st.balloons()
-                st.cache_data.clear()
-                time.sleep(2)
-                st.rerun()
+    with c_start:
+        if st.button(f"🚀 GAS SCRAPE ({len(target_dipilih)})", type="primary", use_container_width=True):
+            if os.path.exists(STOP_FILE): os.remove(STOP_FILE)
+            if not target_dipilih:
+                st.warning("Pilih daerah!")
+            else:
+                status_box = st.status(f"Menghisap data ke tabel: **{CONFIG_KATEGORI[kategori_input]['tabel']}**...", expanded=True)
+                p_bar = status_box.progress(0)
+                with ThreadPoolExecutor(max_workers=max_workers_input) as executor:
+                    futures = [executor.submit(scrape_satu_lpse, t, tahun_input, kategori_input, supabase, headless_mode, minimize_mode) for t in target_dipilih]
+                    done = 0
+                    for f in futures:
+                        res = f.result()
+                        done += 1
+                        p_bar.progress(int((done/len(futures))*100))
+                        status_box.write(res)
 
-with c_stop:
-    if st.button("⛔ STOP", type="secondary"):
-        with open(STOP_FILE, "w") as f: f.write("STOP")
-        st.toast("Stop signal sent.")
+                if not os.path.exists(STOP_FILE):
+                    status_box.update(label="Selesai!", state="complete", expanded=False)
+                    st.balloons()
+                    st.cache_data.clear()
+                    time.sleep(2)
+                    st.rerun()
+
+    with c_stop:
+        if st.button("⛔ STOP", type="secondary"):
+            with open(STOP_FILE, "w") as f: f.write("STOP")
+            st.toast("Stop signal sent.")
+
+if __name__ == "__main__":
+    main()
