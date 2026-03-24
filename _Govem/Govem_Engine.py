@@ -968,7 +968,18 @@ def trigger_activity_istri(user_obj):
         # Import + reload untuk hindari stale cache
         import V23_aktivitas_Istri as v23_istri
         importlib.reload(v23_istri)
-        v23_istri.run_istri_automation(background_mode=True)
+
+        # === OVERRIDE HARI TEMPORER ===
+        # 25-28 Maret 2026: Istri isi aktivitas Rabu (weekday=2)
+        # Hapus blok ini setelah 28 Maret 2026
+        import datetime as _dt
+        _today = _dt.date.today()
+        _override = None
+        if _dt.date(2026, 3, 25) <= _today <= _dt.date(2026, 3, 28):
+            _override = 2  # Rabu
+            logger.info(f"📌 [{name}] Override hari → Rabu (25-28 Maret 2026)")
+
+        v23_istri.run_istri_automation(background_mode=True, override_hari=_override)
         print(f"✅ [{name}] Pengisian Aktivitas Selesai (V23 Istri)")
     except Exception as e:
         print(f"❌ [{name}] Gagal menjalankan V23 Istri: {e}")
@@ -1132,40 +1143,42 @@ def get_schedule_rules(name, weekday):
     # === RULES PANCINGAN ===
     # SAMA dengan Suami/Istri agar masuk satu batch (callback kill bekerja)
     # _run_batch_sequential sudah handle urutan: Pancingan → Suami → Istri
-    # [RAMADAN MODE]
+    # [NORMAL MODE — pasca Ramadan]
     if name == 'Pancingan':
-         # Senin-Kamis: Pagi 06:31, Sore 15:45
-         if 0 <= weekday <= 3: return ("06:31", "15:45")
-         # Jumat: Pagi 06:31, Sore 11:00
-         elif weekday == 4: return ("06:31", "11:00")
-         # Sabtu-Minggu: Pagi 06:31, Sore 14:15
-         elif weekday >= 5: return ("06:31", "14:15")
-         
+         # Senin-Kamis: Pagi 06:31, Sore 17:01
+         if 0 <= weekday <= 3: return ("06:31", "17:01")
+         # Jumat: Pagi 06:31, Sore 11:30
+         elif weekday == 4: return ("06:31", "11:30")
+         # Sabtu: Pagi 06:31, Sore 15:30 (ikut Istri)
+         elif weekday == 5: return ("06:31", "15:30")
+         # Minggu: libur
+         else: return None
+
     # === RULES ISTRI ===
-    # [RAMADAN MODE]
+    # [NORMAL MODE — pasca Ramadan]
     elif name == 'Istri':
-        # Senin - Kamis (0-3): Pagi 06:31, Sore 15:45
+        # Senin - Kamis (0-3): Pagi 06:31, Sore 17:01
         if 0 <= weekday <= 3:
-            return ("06:31", "15:45")
-        # Jumat (4): Pagi 06:31, Sore 11:00
+            return ("06:31", "17:01")
+        # Jumat (4): Pagi 06:31, Sore 11:30
         elif weekday == 4:
-            return ("06:31", "11:00")
-        # Sabtu (5): Pagi 06:31, Sore 14:15
+            return ("06:31", "11:30")
+        # Sabtu (5): Pagi 06:31, Sore 15:30
         elif weekday == 5:
-            return ("06:31", "14:15")
+            return ("06:31", "15:30")
         # Minggu (6)
         else:
             return None # Libur
 
     # === RULES SUAMI ===
-    # [RAMADAN MODE]
+    # [NORMAL MODE — pasca Ramadan]
     elif name == 'Suami':
-        # Senin - Kamis (0-3): Pagi 06:31, Sore 15:45
+        # Senin - Kamis (0-3): Pagi 06:31, Sore 17:01
         if 0 <= weekday <= 3:
-            return ("06:31", "15:45")
-        # Jumat (4): Pagi 06:31, Sore 11:00
+            return ("06:31", "17:01")
+        # Jumat (4): Pagi 06:31, Sore 11:30
         elif weekday == 4:
-            return ("06:31", "11:00")
+            return ("06:31", "11:30")
         # Sabtu - Minggu (5-6)
         else:
             return None # Libur
