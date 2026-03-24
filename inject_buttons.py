@@ -11,34 +11,60 @@ def inject_buttons(filepath):
     filepath = os.path.abspath(filepath)
     print(f"Injecting to: {filepath}")
     
-    bas_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ModWordLink.bas")
-    if not os.path.exists(bas_path):
-        print(f"[ERROR] .bas file not found: {bas_path}")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Semua module yang akan di-inject (urutan penting: dependencies dulu)
+    modules_to_inject = [
+        "ModWordLink",      # Core: buka/print Word, relink, import LPSE
+        "ModTerbilang",     # Fungsi terbilang (angka → kata)
+        "ModUtilitas",      # Export PDF, Direct Print, konversi bulan
+        "ModNavigator",     # Navigasi sheet, input data tender, daftar isi
+        "ModKodeUnik",      # Generate kode unik otomatis
+        "ModAutoFit",       # Auto-fit baris
+    ]
+
+    # Verify semua .bas file ada
+    bas_files = {}
+    for mod_name in modules_to_inject:
+        bas_path = os.path.join(script_dir, f"{mod_name}.bas")
+        if os.path.exists(bas_path):
+            bas_files[mod_name] = bas_path
+        else:
+            print(f"  [SKIP] {mod_name}.bas tidak ditemukan")
+
+    if "ModWordLink" not in bas_files:
+        print(f"[ERROR] ModWordLink.bas wajib ada!")
         return
-    print(f"  .bas file: {bas_path}")
-    
+
     pythoncom.CoInitialize()
     excel = None
     wb = None
-    
+
     try:
         excel = win32com.client.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
-        
+
         wb = excel.Workbooks.Open(filepath)
         vb_project = wb.VBProject
-        
-        # 1. Remove existing ModWordLink
+
+        # 1. Remove existing modules yang akan di-inject (+ cleanup ModSearchDrop)
+        remove_targets = set(bas_files.keys()) | {"ModSearchDrop"}
+        names_to_remove = []
         for comp in vb_project.VBComponents:
-            if comp.Name == "ModWordLink":
-                vb_project.VBComponents.Remove(comp)
-                print("  ModWordLink lama dihapus")
-                break
-        
-        # 2. Import .bas file (this is more reliable than Add+AddFromString)
-        imported = vb_project.VBComponents.Import(bas_path)
-        print(f"  [OK] Imported: {imported.Name} ({imported.CodeModule.CountOfLines} baris)")
+            if comp.Name in remove_targets:
+                names_to_remove.append(comp.Name)
+        for name in names_to_remove:
+            for comp in vb_project.VBComponents:
+                if comp.Name == name:
+                    vb_project.VBComponents.Remove(comp)
+                    print(f"  {name} lama dihapus")
+                    break
+
+        # 2. Import semua .bas files
+        for mod_name, bas_path in bas_files.items():
+            imported = vb_project.VBComponents.Import(bas_path)
+            print(f"  [OK] Imported: {imported.Name} ({imported.CodeModule.CountOfLines} baris)")
         
         # 2b. Inject Workbook_Open auto-relink ke ThisWorkbook module
         auto_relink_code = (
@@ -193,33 +219,32 @@ def inject_buttons(filepath):
         
         # 6. Final verify
         print("  Verifying...")
-        found = False
+        verified_count = 0
         for comp in wb.VBProject.VBComponents:
-            if comp.Name == "ModWordLink":
-                found = True
-                print(f"  [VERIFIED] ModWordLink: {comp.CodeModule.CountOfLines} baris")
-                break
-        if not found:
-            print("  [FAIL] ModWordLink NOT found after save!")
-        
+            if comp.Name in bas_files:
+                verified_count += 1
+                print(f"  [VERIFIED] {comp.Name}: {comp.CodeModule.CountOfLines} baris")
+        if verified_count < len(bas_files):
+            print(f"  [WARN] Hanya {verified_count}/{len(bas_files)} module terverifikasi!")
+
         wb.Close(SaveChanges=False)
         wb = None
-        
+
         # 7. Re-open and re-verify (paranoid check)
         print("\n  Re-open verify...")
         wb2 = excel.Workbooks.Open(filepath, ReadOnly=True)
-        found2 = False
+        verified2 = 0
         for comp in wb2.VBProject.VBComponents:
-            if comp.Name == "ModWordLink":
-                found2 = True
-                print(f"  [RE-VERIFY] ModWordLink: {comp.CodeModule.CountOfLines} baris - CONFIRMED!")
-                break
-        if not found2:
-            print("  [RE-VERIFY FAIL] ModWordLink NOT persisted on disk!")
+            if comp.Name in bas_files:
+                verified2 += 1
+                print(f"  [RE-VERIFY] {comp.Name}: {comp.CodeModule.CountOfLines} baris - CONFIRMED!")
+        if verified2 < len(bas_files):
+            print(f"  [RE-VERIFY WARN] Hanya {verified2}/{len(bas_files)} module persisted!")
         wb2.Close(SaveChanges=False)
         wb = None
-        
-        print(f"\n{'[OK]' if found2 else '[FAIL]'} Injection complete!")
+
+        all_ok = verified2 == len(bas_files)
+        print(f"\n{'[OK]' if all_ok else '[PARTIAL]'} Injection complete! ({verified2}/{len(bas_files)} modules)")
         
     except Exception as e:
         print(f"\n[ERROR] {e}")
