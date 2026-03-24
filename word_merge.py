@@ -217,6 +217,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     From=3,
                     To=6,
                 )
+                show_success(pdf_path)
             elif mode == "pdf_revaluasi":
                 pdf_path = os.path.join(folder, f"REvaluasi_{safe_name}.pdf")
                 wdDoc.ExportAsFixedFormat(
@@ -226,6 +227,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     From=30,
                     To=37,
                 )
+                show_success(pdf_path)
             elif mode == "pdf_all":
                 pdf_path = os.path.join(folder, f"Isi_Reviu_DPP_{safe_name}.pdf")
                 wdDoc.ExportAsFixedFormat(
@@ -233,6 +235,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     ExportFormat=17,
                     Range=0,  # wdExportAllDocument
                 )
+                show_success(pdf_path)
             elif mode == "pdf_dokpil":
                 pdf_path = os.path.join(folder, f"DOKPIL_{safe_name}.pdf")
                 wdDoc.ExportAsFixedFormat(
@@ -240,6 +243,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     ExportFormat=17,
                     Range=0,  # wdExportAllDocument
                 )
+                show_success(pdf_path)
             elif mode == "pdf_pembuktian":
                 import tempfile
                 from pypdf import PdfReader, PdfWriter
@@ -309,7 +313,8 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     
                 with open(final_pdf_path, 'wb') as fd_out:
                     writer.write(fd_out)
-                    
+                show_success(final_pdf_path)
+
             elif mode == "pdf_pembuktian_timpang":
                 import tempfile
                 from pypdf import PdfReader, PdfWriter
@@ -418,6 +423,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 
                 with open(final_pdf_path, 'wb') as fd_out:
                     writer.write(fd_out)
+                show_success(final_pdf_path)
 
             else:
                 pdf_path = os.path.join(folder, f"Undangan_{safe_name}.pdf")
@@ -428,7 +434,8 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     From=1,
                     To=2,
                 )
-            
+                show_success(pdf_path)
+
             wdDoc.Close(False)
             if new_instance:
                 wdApp.Quit()
@@ -450,6 +457,18 @@ def show_error(msg):
         ctypes.windll.user32.MessageBoxW(0, msg, "Word Merge Error", 0x10)
     except:
         print(f"ERROR: {msg}")
+
+
+def show_success(pdf_path):
+    """Notifikasi popup setelah PDF selesai dibuat."""
+    try:
+        import ctypes
+        filename = os.path.basename(pdf_path)
+        ctypes.windll.user32.MessageBoxW(
+            0, f"PDF berhasil dibuat:\n{filename}", "Export PDF Selesai", 0x40
+        )
+    except:
+        pass
 
 
 if __name__ == "__main__":
