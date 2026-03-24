@@ -10,9 +10,10 @@ Strategy:
   4. Tampilkan Word / print / export PDF
 
 Usage:
-  python word_merge.py buka  <word_path> <excel_path> <sheet_name>
-  python word_merge.py print <word_path> <excel_path> <sheet_name>
-  python word_merge.py pdf   <word_path> <excel_path> <sheet_name> <pdf_name>
+  python word_merge.py buka    <word_path> <excel_path> <sheet_name>
+  python word_merge.py print   <word_path> <excel_path> <sheet_name>
+  python word_merge.py pdf     <word_path> <excel_path> <sheet_name> <pdf_name>
+  python word_merge.py printer <word_path> <excel_path> <sheet_name> <printer_name> [from_page] [to_page]
 """
 import sys
 import os
@@ -204,6 +205,42 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             time.sleep(1)
             shell = win32com.client.Dispatch("WScript.Shell")
             shell.SendKeys("^p", 0)
+
+        elif mode == "printer":
+            # Direct print ke printer fisik (tanpa dialog)
+            printer_name = pdf_name  # arg ke-5 dipakai sebagai nama printer
+            from_page = int(sys.argv[6]) if len(sys.argv) > 6 else 0
+            to_page = int(sys.argv[7]) if len(sys.argv) > 7 else 0
+
+            wdDoc.Save()
+            wdApp.ScreenUpdating = True
+            wdApp.Visible = False
+
+            try:
+                # Set printer tujuan
+                wdApp.ActivePrinter = printer_name
+
+                # PrintOut dengan atau tanpa page range
+                if from_page > 0 and to_page > 0:
+                    wdDoc.PrintOut(
+                        Background=False,
+                        Range=3,   # wdPrintFromTo
+                        From=str(from_page),
+                        To=str(to_page),
+                    )
+                else:
+                    wdDoc.PrintOut(Background=False)
+
+                # Tunggu spooler selesai
+                time.sleep(3)
+                show_print_success(printer_name)
+            except Exception as print_err:
+                show_error(f"Gagal print ke {printer_name}:\n{print_err}")
+
+            wdDoc.Close(False)
+            if new_instance:
+                wdApp.Quit()
+            return  # skip cleanup di bawah
 
         elif mode.startswith("pdf"):
             safe_name = pdf_name if pdf_name else "000"
@@ -466,6 +503,19 @@ def show_success(pdf_path):
         filename = os.path.basename(pdf_path)
         ctypes.windll.user32.MessageBoxW(
             0, f"PDF berhasil dibuat:\n{filename}", "Export PDF Selesai", 0x40
+        )
+    except:
+        pass
+
+
+def show_print_success(printer_name):
+    """Notifikasi popup setelah print dikirim ke spooler."""
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(
+            0, f"Dokumen dikirim ke antrian print:\n{printer_name}\n\n"
+               f"Pastikan printer menyala untuk mencetak.",
+            "Print Dikirim", 0x40
         )
     except:
         pass
