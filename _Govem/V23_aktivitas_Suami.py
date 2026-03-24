@@ -364,7 +364,15 @@ def adb_input_text(serial, text, idx=0):
     escaped_text = escaped_text.replace(")", "")
     escaped_text = escaped_text.replace(";", "")
 
-    run_command([ADB, "-s", serial, "shell", "input", "text", escaped_text])
+    # ADB input text limit ~150 chars — kirim per chunk
+    CHUNK_SIZE = 120
+    if len(escaped_text) <= CHUNK_SIZE:
+        run_command([ADB, "-s", serial, "shell", "input", "text", escaped_text])
+    else:
+        for j in range(0, len(escaped_text), CHUNK_SIZE):
+            chunk = escaped_text[j:j+CHUNK_SIZE]
+            run_command([ADB, "-s", serial, "shell", "input", "text", chunk])
+            time.sleep(0.3)
 
 # --- SMART ACTIVITY SELECTOR (v1.1) ---
 def get_suami_activities(day_idx):

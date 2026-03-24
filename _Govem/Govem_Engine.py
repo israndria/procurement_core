@@ -266,7 +266,33 @@ def launch_emulator(idx, on_boot_callback=None):
             logger.info(f"   ... [Emu {idx}] Waiting Boot ({i*2}s)")
 
     if not boot_ready:
-        logger.info(f"⚠️ [Emu {idx}] Warning: Boot Detect Timeout. Melanjutkan (hope for the best).")
+        logger.info(f"⚠️ [Emu {idx}] Boot timeout! Restart emulator sekali...")
+        run_command(f'"{LDCONSOLE}" quit --index {idx}')
+        time.sleep(5)
+        run_command(f'"{LDCONSOLE}" launch --index {idx}')
+        for _ in range(3):
+            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+            time.sleep(0.2)
+        # Tunggu boot kedua (max 90 detik)
+        for i in range(45):
+            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+            try:
+                res_boot = run_command([LDCONSOLE, "adb", "--index", str(idx), "--command", "shell getprop sys.boot_completed"], timeout=10)
+                if "1" in res_boot:
+                    logger.info(f"✅ [Emu {idx}] Boot OK setelah restart! ({i*2}s)")
+                    if on_boot_callback:
+                        on_boot_callback()
+                        on_boot_callback = None
+                    for _ in range(5):
+                        time.sleep(2)
+                        run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+                    boot_ready = True
+                    break
+            except:
+                pass
+            time.sleep(2)
+        if not boot_ready:
+            logger.info(f"❌ [Emu {idx}] Boot gagal setelah restart. Melanjutkan (hope for the best).")
 
     # Final minimize
     run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
