@@ -228,34 +228,36 @@ def run_command(command, timeout=30): # Default timeout 30 detik
 
 def launch_emulator(idx, on_boot_callback=None):
     logger.info(f"🚀 Memulai Emulator Index {idx}...")
-    run_command(f'"{LDCONSOLE}" launch --index {idx}')
-    # Minimize AGRESIF: spam minimize tanpa jeda agar window tidak sempat muncul
-    for _ in range(3):
-        run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
-        time.sleep(0.2)
 
-    # AUTO-MINIMIZE: kirim minimize tiap loop sambil tunggu boot
+    # RAM CHECK: Pastikan cukup sebelum launch (penting untuk 8 GB RAM)
+    try:
+        from ram_optimizer import ensure_ram_available, get_ram_report
+        logger.info(get_ram_report())
+        ensure_ram_available(min_mb=1500, max_wait_seconds=30, aggressive=True)
+    except Exception as e:
+        logger.warning(f"⚠️ RAM optimizer error (lanjut tanpa optimasi): {e}")
+
+    run_command(f'"{LDCONSOLE}" launch --index {idx}')
+    # Minimize sekali setelah launch (cukup 1x, tidak perlu spam)
+    time.sleep(1)
+    run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+
+    # Tunggu boot tanpa spam minimize (window sudah diminimize di atas)
     logger.info(f"⏳ [Emu {idx}] Menunggu sistem Android siap (LDConsole)...")
     boot_ready = False
     max_retries = 30  # 30 x 2s = 60 detik max
 
     for i in range(max_retries):
-        # Minimize setiap iterasi agar window tidak muncul
-        run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
         try:
             cmd_boot = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell getprop sys.boot_completed"]
             res_boot = run_command(cmd_boot, timeout=10)
 
             if "1" in res_boot:
                 logger.info(f"✅ [Emu {idx}] Sistem Siap! Boot Time: {i*2}s (minimized)")
-                # Callback segera setelah boot (misal: kill Pancingan)
                 if on_boot_callback:
                     on_boot_callback()
-                    on_boot_callback = None  # Hanya sekali
-                # Extra minimize selama tunggu launcher stabil
-                for _ in range(5):
-                    time.sleep(2)
-                    run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+                    on_boot_callback = None
+                time.sleep(10)  # Tunggu launcher stabil
                 boot_ready = True
                 break
         except Exception as e:
@@ -270,12 +272,10 @@ def launch_emulator(idx, on_boot_callback=None):
         run_command(f'"{LDCONSOLE}" quit --index {idx}')
         time.sleep(5)
         run_command(f'"{LDCONSOLE}" launch --index {idx}')
-        for _ in range(3):
-            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
-            time.sleep(0.2)
+        time.sleep(1)
+        run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
         # Tunggu boot kedua (max 90 detik)
         for i in range(45):
-            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
             try:
                 res_boot = run_command([LDCONSOLE, "adb", "--index", str(idx), "--command", "shell getprop sys.boot_completed"], timeout=10)
                 if "1" in res_boot:
@@ -283,9 +283,7 @@ def launch_emulator(idx, on_boot_callback=None):
                     if on_boot_callback:
                         on_boot_callback()
                         on_boot_callback = None
-                    for _ in range(5):
-                        time.sleep(2)
-                        run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+                    time.sleep(10)
                     boot_ready = True
                     break
             except:
@@ -294,10 +292,7 @@ def launch_emulator(idx, on_boot_callback=None):
         if not boot_ready:
             logger.info(f"❌ [Emu {idx}] Boot gagal setelah restart. Melanjutkan (hope for the best).")
 
-    # Final minimize
-    run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
-    
-    # MINIMIZE via ldconsole sortWnd
+    # Final minimize (safety net, 1x saja)
     try:
         run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize', timeout=10)
         logger.info(f"🔽 [Emu {idx}] Window diminimize via sortWnd.")
@@ -948,29 +943,33 @@ def _get_serial(idx):
             return f"127.0.0.1:{p}"
     return None
 
-def trigger_activity(user_obj):
+def trigger_activity(user_obj, skip_nav=False):
     """
     Trigger pengisian aktivitas untuk Suami menggunakan V23_aktivitas_Suami.py
     v1.1: importlib.reload() untuk hindari stale module cache,
           restart app sebelum isi untuk clean state.
+    skip_nav: True = manual trigger dari form (skip restart app + navigasi)
     """
     idx = user_obj['index']
     name = user_obj['name']
 
     print(f"\n📝 [{name}] MEMULAI PENGISIAN AKTIVITAS (V23 Engine)")
 
-    # RESTART APP dulu agar mulai dari Dashboard bersih
-    logger.info(f"🔄 [{name}] Restart app sebelum isi aktivitas...")
-    run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
-    time.sleep(3)
-    run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
-    time.sleep(25)  # Tunggu app siap
+    # RESTART APP dulu agar mulai dari Dashboard bersih — skip jika manual dari form
+    if not skip_nav:
+        logger.info(f"🔄 [{name}] Restart app sebelum isi aktivitas...")
+        run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
+        time.sleep(3)
+        run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
+        time.sleep(25)  # Tunggu app siap
+    else:
+        logger.info(f"⏩ [{name}] Skip restart app (manual trigger dari form)")
 
     try:
         # Import + reload untuk hindari stale cache
         import V23_aktivitas_Suami as v23
         importlib.reload(v23)
-        v23.run_hybrid_automation(idx, background_mode=True)
+        v23.run_hybrid_automation(idx, background_mode=True, skip_nav=skip_nav)
         print(f"✅ [{name}] Pengisian Aktivitas Selesai (V23)")
     except Exception as e:
         print(f"❌ [{name}] Gagal menjalankan V23: {e}")
@@ -978,12 +977,11 @@ def trigger_activity(user_obj):
         print(f"   Mencoba fallback ke versi lama...")
         run_activity_automation(user_obj)
 
-def trigger_activity_istri(user_obj):
+def trigger_activity_istri(user_obj, skip_nav=False):
     """
     Trigger pengisian aktivitas untuk Istri menggunakan V23_aktivitas_Istri.py
     v1.1: importlib.reload() + restart app (sama seperti Suami)
-    Note: V23_aktivitas_Istri sudah handle restart app sendiri,
-          tapi kita tetap reload module untuk hindari stale cache.
+    skip_nav: True = manual trigger dari form (skip restart app + navigasi)
     """
     idx = user_obj['index']
     name = user_obj['name']
@@ -1005,7 +1003,7 @@ def trigger_activity_istri(user_obj):
             _override = 2  # Rabu
             logger.info(f"📌 [{name}] Override hari → Rabu (25-28 Maret 2026)")
 
-        v23_istri.run_istri_automation(background_mode=True, override_hari=_override)
+        v23_istri.run_istri_automation(background_mode=True, override_hari=_override, skip_nav=skip_nav)
         print(f"✅ [{name}] Pengisian Aktivitas Selesai (V23 Istri)")
     except Exception as e:
         print(f"❌ [{name}] Gagal menjalankan V23 Istri: {e}")
