@@ -16,6 +16,9 @@ Private Const SHEET_BA As String = "satu_data"
 Private Const SHEET_REVIU As String = "list_reviu"
 Private Const SHEET_DOKPIL As String = "list_dokpil"
 
+' Printer terakhir yang dipilih (reset saat Excel ditutup)
+Private m_LastPrinter As String
+
 
 ' ===== BUKA (merge + tampilkan Word) =====
 
@@ -64,6 +67,21 @@ End Sub
 ' ===== CORE: Panggil Python script (non-blocking) =====
 
 Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, statusLabel As String)
+    ' Tentukan apakah mode ini mendukung printer langsung
+    ' Mode kompleks (pembuktian) hanya PDF karena butuh stitching multi-source
+    Dim supportsPrinter As Boolean
+    supportsPrinter = (mode <> "pdf_pembuktian" And mode <> "pdf_pembuktian_timpang")
+
+    ' Tanya user: PDF atau Printer?
+    Dim outputMode As String
+    Dim printerName As String
+    If supportsPrinter Then
+        outputMode = ChooseOutputMode(printerName)
+        If outputMode = "" Then Exit Sub  ' cancelled
+    Else
+        outputMode = "pdf"
+    End If
+
     Dim kodePokja As String
     kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
     If kodePokja = "" Then kodePokja = "000"
@@ -81,16 +99,170 @@ Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, stat
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " " & mode & " " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(sheetName) & " " & Q(kodePokja)
-
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, False
-    Set wsh = Nothing
 
-    Application.StatusBar = "Membuat PDF " & statusLabel & "_" & kodePokja & " ..."
+    If outputMode = "printer" Then
+        ' Mapping page range per mode (0 = all pages)
+        Dim fromPage As Long, toPage As Long
+        fromPage = 0: toPage = 0
+        Select Case mode
+            Case "pdf_bareviu": fromPage = 3: toPage = 6
+            Case "pdf_revaluasi": fromPage = 30: toPage = 37
+            Case "pdf": fromPage = 1: toPage = 2  ' Undangan
+            ' pdf_all, pdf_dokpil = all pages (0,0)
+        End Select
+
+        cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " printer " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(sheetName) & " " & Q(printerName) & " " & fromPage & " " & toPage
+        wsh.Run cmd, 0, False
+        Application.StatusBar = "Printing " & statusLabel & " ke " & printerName & " ..."
+    Else
+        cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " " & mode & " " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(sheetName) & " " & Q(kodePokja)
+        wsh.Run cmd, 0, False
+        Application.StatusBar = "Membuat PDF " & statusLabel & "_" & kodePokja & " ..."
+    End If
+
+    Set wsh = Nothing
     Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
+
+' ===== OUTPUT MODE: Popup pilih PDF atau Printer =====
+
+Private Function ChooseOutputMode(ByRef outPrinter As String) As String
+    On Error GoTo ErrChoose
+    Dim choice As VbMsgBoxResult
+    choice = MsgBox("Pilih output:" & vbCrLf & vbCrLf & _
+                     "YES = Export PDF (seperti biasa)" & vbCrLf & _
+                     "NO = Print ke Printer", _
+                     vbYesNoCancel + vbQuestion, "Pilih Output")
+
+    If choice = vbCancel Then
+        ChooseOutputMode = ""
+        Exit Function
+    ElseIf choice = vbYes Then
+        ChooseOutputMode = "pdf"
+        Exit Function
+    End If
+
+    ' User pilih Printer
+    outPrinter = PickPhysicalPrinter()
+    If outPrinter = "" Then
+        ChooseOutputMode = ""  ' cancelled atau tidak ada printer
+    Else
+        ChooseOutputMode = "printer"
+        m_LastPrinter = outPrinter
+    End If
+    Exit Function
+
+ErrChoose:
+    MsgBox "Error di ChooseOutputMode:" & vbCrLf & Err.Description, vbCritical, "Debug"
+    ChooseOutputMode = ""
+End Function
+
+' ===== PRINTER ENUMERATION: Scan & filter printer fisik =====
+
+Private Function PickPhysicalPrinter() As String
+    On Error GoTo ErrHandler
+
+    Dim blacklist As Variant
+    blacklist = Array("pdf", "xps", "onenote", "fax", "send to", "writer", "print to", "microsoft print", "onedriver")
+
+    ' WMI query semua printer
+    Dim wmi As Object
+    Set wmi = GetObject("winmgmts:\\.\root\cimv2")
+    Dim printers As Object
+    Set printers = wmi.ExecQuery("SELECT Name FROM Win32_Printer")
+
+    Dim names() As String
+    Dim count As Long
+    count = 0
+
+    Dim p As Object
+    For Each p In printers
+        Dim pName As String
+        pName = p.Name
+        Dim isVirtual As Boolean
+        isVirtual = False
+        Dim j As Long
+        For j = LBound(blacklist) To UBound(blacklist)
+            If InStr(1, LCase(pName), blacklist(j)) > 0 Then
+                isVirtual = True
+                Exit For
+            End If
+        Next j
+        If Not isVirtual Then
+            count = count + 1
+            ReDim Preserve names(1 To count)
+            names(count) = pName
+        End If
+    Next p
+
+    If count = 0 Then
+        MsgBox "Tidak ada printer fisik ditemukan!" & vbCrLf & vbCrLf & _
+               "Pastikan driver printer sudah terinstall.", vbExclamation, "Printer"
+        PickPhysicalPrinter = ""
+        Exit Function
+    End If
+
+    ' Jika printer terakhir masih tersedia, tawarkan
+    If m_LastPrinter <> "" Then
+        Dim found As Boolean: found = False
+        For j = 1 To count
+            If names(j) = m_LastPrinter Then found = True: Exit For
+        Next j
+        If found Then
+            Dim reuse As VbMsgBoxResult
+            reuse = MsgBox("Pakai printer terakhir?" & vbCrLf & vbCrLf & m_LastPrinter, _
+                           vbYesNo + vbQuestion, "Printer")
+            If reuse = vbYes Then
+                PickPhysicalPrinter = m_LastPrinter
+                Exit Function
+            End If
+        End If
+    End If
+
+    ' Jika hanya 1 printer fisik, konfirmasi dulu
+    If count = 1 Then
+        Dim confirmOne As VbMsgBoxResult
+        confirmOne = MsgBox("Print ke printer ini?" & vbCrLf & vbCrLf & names(1), _
+                            vbOKCancel + vbQuestion, "Printer")
+        If confirmOne = vbOK Then
+            PickPhysicalPrinter = names(1)
+        Else
+            PickPhysicalPrinter = ""
+        End If
+        Exit Function
+    End If
+
+    ' Jika >1, tampilkan list pilihan
+    Dim listStr As String
+    For j = 1 To count
+        listStr = listStr & j & ". " & names(j) & vbCrLf
+    Next j
+
+    Dim ans As String
+    ans = InputBox("Pilih nomor printer:" & vbCrLf & vbCrLf & listStr, "Pilih Printer", "1")
+    If ans = "" Then
+        PickPhysicalPrinter = ""
+        Exit Function
+    End If
+
+    Dim idx As Long
+    On Error Resume Next
+    idx = CLng(ans)
+    On Error GoTo 0
+    If idx >= 1 And idx <= count Then
+        PickPhysicalPrinter = names(idx)
+    Else
+        MsgBox "Nomor tidak valid.", vbExclamation
+        PickPhysicalPrinter = ""
+    End If
+    Exit Function
+
+ErrHandler:
+    MsgBox "Error di PickPhysicalPrinter:" & vbCrLf & Err.Description, vbCritical, "Debug"
+    PickPhysicalPrinter = ""
+End Function
 
 Private Sub RunMerge(mode As String, wordFile As String, sheetName As String)
     Dim wordPath As String
