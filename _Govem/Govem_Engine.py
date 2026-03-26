@@ -16,9 +16,12 @@ import importlib
 # Global Lock untuk File History (Mencegah Race Condition saat tulis paralel)
 HISTORY_LOCK = threading.Lock()
 
+# Absolute path ke folder script — dipakai semua path config/log/history
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Global Set untuk Per-User Disable (Toggle dari Tray Menu)
 # PERSISTEN: Disimpan ke file agar tetap aktif/nonaktif walau laptop di-restart
-DISABLED_USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "disabled_users.json")
+DISABLED_USERS_FILE = os.path.join(_SCRIPT_DIR, "disabled_users.json")
 
 def _load_disabled_users():
     """Load daftar user yang dinonaktifkan dari file."""
@@ -37,7 +40,7 @@ def _save_disabled_users():
         with open(DISABLED_USERS_FILE, 'w') as f:
             json.dump(list(DISABLED_USERS), f)
     except Exception as e:
-        print(f"⚠️ Gagal simpan disabled_users.json: {e}")
+        logger.error(f"Gagal simpan disabled_users.json: {e}")
 
 # Load dari file saat modul di-import (Persist across restart!)
 DISABLED_USERS = _load_disabled_users()
@@ -61,14 +64,17 @@ def is_user_enabled(name):
 
 
 # Setup Logging ke File
-LOG_FILE = os.path.join(os.path.dirname(__file__), "govem_scheduler.log")
+LOG_FILE = os.path.join(_SCRIPT_DIR, "govem_scheduler.log")
+_log_handlers = [logging.FileHandler(LOG_FILE, encoding='utf-8')]
+# StreamHandler hanya jika ada console asli (bukan pythonw/devnull)
+if sys.stdout is not None and hasattr(sys.stdout, 'buffer'):
+    import io
+    _sh = logging.StreamHandler(io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace'))
+    _log_handlers.append(_sh)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8'),
-        logging.StreamHandler()  # Juga print ke console
-    ]
+    handlers=_log_handlers
 )
 logger = logging.getLogger(__name__)
 
@@ -81,9 +87,11 @@ PACKAGE_NAME = "go.id.tapinkab.govem"
 EMULATOR_INDEX = 0  # 0 = Suami, 1 = Istri (Sesuaikan nanti)
 
 # File Config untuk menyimpan koordinat
-CONFIG_FILE = "govem_config.ini"
+# PENTING: Gunakan _SCRIPT_DIR (absolute) agar tidak bergantung CWD
+# (CWD bisa berbeda saat dijalankan via pythonw/autostart/tray)
+CONFIG_FILE = os.path.join(_SCRIPT_DIR, "govem_config.ini")
 # File History untuk mencatat status absen harian
-HISTORY_FILE = "attendance_history.json"
+HISTORY_FILE = os.path.join(_SCRIPT_DIR, "attendance_history.json")
 
 # Konfigurasi Multi-User
 # Days: 0=Senin, 1=Selasa, ... 4=Jumat, 5=Sabtu, 6=Minggu
@@ -295,6 +303,10 @@ def launch_emulator(idx, on_boot_callback=None, safe_mode=False):
             time.sleep(2)
         if not boot_ready:
             logger.info(f"❌ [Emu {idx}] Boot gagal setelah restart. Melanjutkan (hope for the best).")
+            # PASTIKAN memicu callback agar antrean tidak macet untuk user berikutnya
+            if on_boot_callback:
+                on_boot_callback()
+                on_boot_callback = None
 
     # Final minimize (safety net, 1x saja)
     try:
@@ -476,18 +488,45 @@ def restart_adb_bridge(idx):
     logger.info(f"✅ [Emu {idx}] ADB bridge restarted ({addr}).")
 
 def check_app_running(idx):
-    """Cek apakah app sedang running — pakai dumpsys activity (ringan) bukan dumpsys window (berat)."""
-    # Method 1: dumpsys activity top (RINGAN, cepat)
-    cmd = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell dumpsys activity top"]
-    res = run_command(cmd, timeout=8)
-    if PACKAGE_NAME in res:
-        return True
+    """Cek apakah app sedang running — multi-method untuk mengurangi false negative.
+    
+    False negative menyebabkan retry loop (kill app → reopen → cek → false → kill lagi).
+    Kita pakai 3 method: dumpsys activity, pidof, dan ps grep.
+    Return True jika SALAH SATU method mendeteksi app running.
+    """
+    # Method 1: dumpsys activity top (RINGAN, cepat, tapi kadang miss app yang baru launch)
+    try:
+        cmd = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell dumpsys activity top"]
+        res = run_command(cmd, timeout=8)
+        if res and PACKAGE_NAME in res:
+            logger.info(f"   [Emu {idx}] App terdeteksi via dumpsys activity top")
+            return True
+    except Exception:
+        pass
 
-    # Method 2: pidof (SANGAT RINGAN)
-    cmd2 = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell pidof {PACKAGE_NAME}"]
-    res2 = run_command(cmd2, timeout=5)
-    if res2.strip() and res2.strip().isdigit():
-        return True
+    # Method 2: pidof (SANGAT RINGAN — tapi output bisa multi-PID atau ada newline)
+    try:
+        cmd2 = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell pidof {PACKAGE_NAME}"]
+        res2 = run_command(cmd2, timeout=5)
+        if res2 and res2.strip():
+            # pidof bisa return "1234" atau "1234 5678" (multi-process)
+            # Cukup cek ada angka = proses ada
+            parts = res2.strip().split()
+            if any(p.isdigit() for p in parts):
+                logger.info(f"   [Emu {idx}] App terdeteksi via pidof (PID: {res2.strip()})")
+                return True
+    except Exception:
+        pass
+
+    # Method 3: ps grep (FALLBACK — lebih reliable, sedikit lebih berat)
+    try:
+        cmd3 = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell ps -A | grep {PACKAGE_NAME}"]
+        res3 = run_command(cmd3, timeout=8)
+        if res3 and PACKAGE_NAME in res3:
+            logger.info(f"   [Emu {idx}] App terdeteksi via ps grep")
+            return True
+    except Exception:
+        pass
 
     return False
 
@@ -951,7 +990,7 @@ def run_activity_automation(user_obj):
         
     print(f"✅ Semua aktivitas {name} selesai!")
 
-SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
+SCREENSHOT_DIR = os.path.join(_SCRIPT_DIR, "screenshots")
 
 def _take_dashboard_screenshot(user):
     """Restart app (kembali ke dashboard depan) lalu screenshot ke folder screenshots/ dengan timestamp."""
@@ -1034,28 +1073,28 @@ def trigger_activity(user_obj, skip_nav=False):
     idx = user_obj['index']
     name = user_obj['name']
 
-    print(f"\n📝 [{name}] MEMULAI PENGISIAN AKTIVITAS (V23 Engine)")
+    logger.info(f"[{name}] MEMULAI PENGISIAN AKTIVITAS (V23 Engine)")
 
     # RESTART APP dulu agar mulai dari Dashboard bersih — skip jika manual dari form
     if not skip_nav:
-        logger.info(f"🔄 [{name}] Restart app sebelum isi aktivitas...")
+        logger.info(f"[{name}] Restart app sebelum isi aktivitas...")
         run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
         time.sleep(3)
         run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
         time.sleep(25)  # Tunggu app siap
     else:
-        logger.info(f"⏩ [{name}] Skip restart app (manual trigger dari form)")
+        logger.info(f"[{name}] Skip restart app (manual trigger dari form)")
 
     try:
         # Import + reload untuk hindari stale cache
         import V23_aktivitas_Suami as v23
         importlib.reload(v23)
         v23.run_hybrid_automation(idx, background_mode=True, skip_nav=skip_nav)
-        print(f"✅ [{name}] Pengisian Aktivitas Selesai (V23)")
+        logger.info(f"[{name}] Pengisian Aktivitas Selesai (V23)")
     except Exception as e:
-        print(f"❌ [{name}] Gagal menjalankan V23: {e}")
+        logger.error(f"[{name}] Gagal menjalankan V23: {e}")
         # Fallback ke versi lama jika V23 gagal
-        print(f"   Mencoba fallback ke versi lama...")
+        logger.info(f"[{name}] Mencoba fallback ke versi lama...")
         run_activity_automation(user_obj)
 
 def trigger_activity_istri(user_obj, skip_nav=False):
@@ -1067,7 +1106,7 @@ def trigger_activity_istri(user_obj, skip_nav=False):
     idx = user_obj['index']
     name = user_obj['name']
 
-    print(f"\n📝 [{name}] MEMULAI PENGISIAN AKTIVITAS (V23 Istri Engine)")
+    logger.info(f"[{name}] MEMULAI PENGISIAN AKTIVITAS (V23 Istri Engine)")
 
     try:
         # Import + reload untuk hindari stale cache
@@ -1082,12 +1121,12 @@ def trigger_activity_istri(user_obj, skip_nav=False):
         _override = None
         if _dt.date(2026, 3, 25) <= _today <= _dt.date(2026, 3, 28):
             _override = 2  # Rabu
-            logger.info(f"📌 [{name}] Override hari → Rabu (25-28 Maret 2026)")
+            logger.info(f"[{name}] Override hari -> Rabu (25-28 Maret 2026)")
 
         v23_istri.run_istri_automation(background_mode=True, override_hari=_override, skip_nav=skip_nav)
-        print(f"✅ [{name}] Pengisian Aktivitas Selesai (V23 Istri)")
+        logger.info(f"[{name}] Pengisian Aktivitas Selesai (V23 Istri)")
     except Exception as e:
-        print(f"❌ [{name}] Gagal menjalankan V23 Istri: {e}")
+        logger.error(f"[{name}] Gagal menjalankan V23 Istri: {e}")
 
 def _re_absen(user, tipe, final_x=None, final_y=None):
     """Ulang absen setelah isi aktivitas (PREVENTIF).
@@ -1310,24 +1349,24 @@ def reset_today_history():
             if today_str in history[user]:
                 del history[user][today_str]
                 changed = True
-                print(f"♻️ Reset history hari ini untuk {user}")
-                
+                logger.info(f"♻️ Reset history hari ini untuk {user}")
+
         if changed:
             with open(HISTORY_FILE, 'w') as f:
                 json.dump(history, f, indent=4)
-            print("✅ History hari ini berhasil dihapus (Start Fresh).")
-            
+            logger.info("✅ History hari ini berhasil dihapus (Start Fresh).")
+
     except Exception as e:
-        print(f"❌ Gagal reset history: {e}")
+        logger.error(f"❌ Gagal reset history: {e}")
 
 def run_scheduler(target_users, force_reset=False):
-    print("🕒 Scheduler berjalan... (Tekan Ctrl+C untuk stop)")
-    
+    logger.info("🕒 Scheduler berjalan...")
+
     if force_reset:
-        print("\n⚡ FORCE RESET REQUESTED: Menghapus status absensi hari ini...")
+        logger.info("⚡ FORCE RESET REQUESTED: Menghapus status absensi hari ini...")
         reset_today_history()
-        
-    print(f"👥 Target User: {', '.join([u['name'] for u in target_users])}")
+
+    logger.info(f"👥 Target User: {', '.join([u['name'] for u in target_users])}")
     
     # 1. REGISTER SCHEDULER JOBS
     # Helper wrapper agar variable 'user' ter-bind dengan benar di closure
@@ -1367,18 +1406,41 @@ def run_scheduler(target_users, force_reset=False):
             except Exception as e:
                 logger.error(f"💀 [CRASH] {job_type} Pancingan GAGAL: {e}", exc_info=True)
 
-        # === STEP 2: SUAMI + ISTRI (PARALEL) ===
+        # === STEP 2: SUAMI + ISTRI (STAGGER LAUNCH → PARALEL ABSEN) ===
+        # PENTING: Pada laptop 8 GB RAM, launch 2 emulator bersamaan → RAM habis → boot fail.
+        # Strategi: Boot emulator SATU-SATU (sequential), lalu jalankan absen PARALEL.
+        # Gate signal dikirim via on_boot_callback setelah emulator boot selesai.
         parallel_users = [u for u in sorted_users if u['name'] != 'Pancingan' and is_user_enabled(u['name'])]
 
-        def _user_worker(user):
+        # Gate: Emulator kedua baru launch setelah emulator pertama boot
+        launch_gate = threading.Event()
+        launch_gate.set()  # User pertama boleh langsung launch
+
+        def _make_boot_callback(name):
+            """Buat callback yang: (1) kill Pancingan jika perlu, (2) signal gate."""
+            def _callback():
+                # Kill Pancingan (siapa duluan boot, dia kill)
+                if pancingan_index is not None:
+                    _kill_pancingan_callback()
+                # Buka gate untuk emulator berikutnya
+                logger.info(f"🔓 [{name}] Boot selesai → buka gate untuk emulator berikutnya")
+                launch_gate.set()
+            return _callback
+
+        def _user_worker(user, is_first):
             """Worker thread untuk satu user (Suami atau Istri)."""
             name = user['name']
             try:
                 # Safe mode: jangan kill proses saat paralel (bisa kill emulator saudara)
                 user['_safe_mode'] = True
-                # Inject kill Pancingan callback (siapa duluan boot, dia kill)
-                if pancingan_index is not None:
-                    user['_on_boot_callback'] = _kill_pancingan_callback
+                # Inject combined callback (kill Pancingan + gate signal)
+                user['_on_boot_callback'] = _make_boot_callback(name)
+
+                # STAGGER: Tunggu giliran launch (user pertama langsung, sisanya tunggu)
+                if not is_first:
+                    logger.info(f"⏳ [{name}] Menunggu emulator sebelumnya boot dulu (stagger)...")
+                    launch_gate.wait(timeout=300)  # Max 5 menit tunggu
+                    logger.info(f"🟢 [{name}] Giliran launch!")
 
                 logger.info(f"🚀 [Job] Memulai {job_type}: {name}")
                 if job_type == 'Absen Pagi':
@@ -1395,13 +1457,23 @@ def run_scheduler(target_users, force_reset=False):
                 run_command(f'"{LDCONSOLE}" quit --index {user["index"]}')
             except Exception as e:
                 logger.error(f"💀 [CRASH] {job_type} {name} GAGAL: {e}", exc_info=True)
+                # PENTING: Jika crash, tetap buka gate agar thread berikutnya tidak stuck selamanya
+                launch_gate.set()
 
         threads = []
-        for u in parallel_users:
-            t = threading.Thread(target=_user_worker, args=(u,), name=f"Govem-{u['name']}")
+        for i, u in enumerate(parallel_users):
+            is_first = (i == 0)
+            if i > 0:
+                launch_gate.clear()  # Reset gate: user berikutnya harus tunggu
+
+            t = threading.Thread(target=_user_worker, args=(u, is_first), name=f"Govem-{u['name']}")
             t.start()
             threads.append(t)
-            logger.info(f"🧵 [Parallel] Thread {u['name']} started")
+            logger.info(f"🧵 [Stagger] Thread {u['name']} started (is_first={is_first})")
+
+            # Tunggu sebentar agar thread pertama mulai launch dulu
+            if is_first and len(parallel_users) > 1:
+                time.sleep(2)
 
         # Tunggu semua thread selesai
         for t in threads:
@@ -1509,7 +1581,7 @@ def run_scheduler(target_users, force_reset=False):
             # --- CEK SORE ---
             h_s, m_s = map(int, sore_t_str.split(':'))
             target_sore = skrg.replace(hour=h_s, minute=m_s, second=0, microsecond=0)
-            batas_sore = skrg.replace(hour=20, minute=0, second=0, microsecond=0)
+            batas_sore = skrg.replace(hour=23, minute=59, second=0, microsecond=0)
             
             if target_sore < skrg < batas_sore:
                  # MASIH DALAM WINDOW SORE (sebelum 20:00)
@@ -1522,7 +1594,7 @@ def run_scheduler(target_users, force_reset=False):
             elif skrg >= batas_sore:
                  # WINDOW SORE SUDAH LEWAT (>= 20:00)
                  if not is_already_done(user['name'], 'sore'):
-                     logger.info(f"⏰ [{user['name']}] Window Sore sudah lewat ({skrg.strftime('%H:%M')} > 20:00).")
+                     logger.info(f"⏰ [{user['name']}] Window Sore sudah lewat ({skrg.strftime('%H:%M')} > 23:59).")
                      logger.info(f"   📝 Auto-mark Sore sebagai 'Done (Skipped)' agar history bersih.")
                      save_history_entry(user['name'], 'sore')
     
