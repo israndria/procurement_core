@@ -24,6 +24,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 GOVEM_ENGINE = os.path.join(SCRIPT_DIR, "Govem_Engine.py")
 PYTHON_EXE = sys.executable
 
+# Fix pythonw: stdout/stderr = None → redirect ke devnull agar print() tidak crash
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
+
 # Status global
 scheduler_running = False
 scheduler_thread = None

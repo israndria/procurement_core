@@ -8,6 +8,18 @@ import glob
 import math
 import sys
 import re
+import builtins
+
+# Fix pythonw cp1252 encoding crash — override print() to silently handle emoji
+if not getattr(builtins.print, '_safe_wrapped', False):
+    _original_print = builtins.print
+    def _safe_print(*args, **kwargs):
+        try:
+            _original_print(*args, **kwargs)
+        except (UnicodeEncodeError, ValueError, OSError):
+            pass
+    _safe_print._safe_wrapped = True
+    builtins.print = _safe_print
 
 # Konfigurasi LDPlayer (Sama dengan V22)
 LDPLAYER_PATH = r"D:\LDPlayer\LDPlayer9"
@@ -660,14 +672,14 @@ def run_hybrid_automation(idx, background_mode=True, skip_nav=False):
         time.sleep(0.8)
 
         # STEP 5: Simpan (direct ADB tap)
-        print("   💾 Simpan & Tunggu Animasi (12s)...")
+        print("   💾 Simpan & Tunggu Animasi (6s)...")
         adb_click(serial, STEP5_SAVE_XY[0], STEP5_SAVE_XY[1])
-        time.sleep(12) # SMART FILL DELAY
+        time.sleep(6) # SMART FILL DELAY
 
     print(f"\n✅ SEMUA AKTIVITAS SELESAI! ({len(activity_texts)} item)")
 
 def main():
-    print("🤖 GOVEM HYBRID AUTOMATION (V23 — Smart Calendar v1.1)")
+    print("🤖 GOVEM HYBRID AUTOMATION (V23 — Smart Calendar v1.3i-speedup)")
     if DRY_RUN:
         print("⏸️ DRY RUN MODE: Hanya preview, tanpa eksekusi ADB\n")
 

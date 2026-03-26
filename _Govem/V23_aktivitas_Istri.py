@@ -1,7 +1,7 @@
 """
 V23_aktivitas_Istri.py - Pengisian Aktivitas Otomatis untuk Istri
 =================================================================
-v1.2 — Rewritten to mirror Suami's proven structure
+v1.3i-speedup — Reduced delay to 6s
 - Uses ADB -s serial (NOT ldconsole_adb) — same as Suami
 - Same coordinates as Suami (same Govem app UI)
 - Same timing, same flow, same helpers
@@ -14,6 +14,18 @@ import subprocess
 import datetime
 import sys
 import logging
+import builtins
+
+# Fix pythonw cp1252 encoding crash — override print() to silently handle emoji
+if not getattr(builtins.print, '_safe_wrapped', False):
+    _original_print = builtins.print
+    def _safe_print(*args, **kwargs):
+        try:
+            _original_print(*args, **kwargs)
+        except (UnicodeEncodeError, ValueError, OSError):
+            pass
+    _safe_print._safe_wrapped = True
+    builtins.print = _safe_print
 
 # --- PATHS ---
 LDPLAYER_PATH = r"D:\LDPlayer\LDPlayer9"
@@ -407,16 +419,16 @@ def run_istri_automation(background_mode=True, override_hari=None, skip_nav=Fals
         time.sleep(0.8)
 
         # STEP 5: Simpan (same as Suami)
-        log_info("  Simpan & Tunggu (12s)...")
+        log_info("  Simpan & Tunggu (6s)...")
         adb_click(serial, STEP5_SAVE_XY[0], STEP5_SAVE_XY[1])
-        time.sleep(12)
+        time.sleep(6)
 
     log_info(f"SELESAI! {len(aktivitas_list)} aktivitas terisi")
     return True
 
 # --- ENTRY POINT ---
 def main():
-    print("V23_aktivitas_Istri v1.2 (Mirror Suami)")
+    print("V23_aktivitas_Istri v1.3i-speedup (Mirror Suami)")
     if DRY_RUN:
         print("[DRY RUN MODE]")
 
