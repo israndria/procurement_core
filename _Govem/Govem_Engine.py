@@ -458,39 +458,69 @@ def calibrate_resolution_wizard():
     else:
         print("❌ File rekaman tidak ditemukan.")
 
+def restart_adb_bridge(idx):
+    """Restart ADB bridge untuk emulator tertentu — fix hang ADB daemon."""
+    logger.info(f"🔧 [Emu {idx}] Restart ADB bridge...")
+    port = 5554 + idx * 2  # Emu 0=5554, Emu 1=5556, Emu 2=5558
+    serial = f"emulator-{port}"
+    addr = f"127.0.0.1:{port + 1}"  # ADB connect pakai port+1 (5555, 5557, 5559)
+    run_command(f'"{ADB}" disconnect {serial}', timeout=5)
+    run_command(f'"{ADB}" disconnect {addr}', timeout=5)
+    time.sleep(1)
+    run_command(f'"{ADB}" connect {addr}', timeout=5)
+    time.sleep(2)
+    logger.info(f"✅ [Emu {idx}] ADB bridge restarted ({addr}).")
+
+def check_app_running(idx):
+    """Cek apakah app sedang running — pakai dumpsys activity (ringan) bukan dumpsys window (berat)."""
+    # Method 1: dumpsys activity top (RINGAN, cepat)
+    cmd = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell dumpsys activity top"]
+    res = run_command(cmd, timeout=8)
+    if PACKAGE_NAME in res:
+        return True
+
+    # Method 2: pidof (SANGAT RINGAN)
+    cmd2 = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell pidof {PACKAGE_NAME}"]
+    res2 = run_command(cmd2, timeout=5)
+    if res2.strip() and res2.strip().isdigit():
+        return True
+
+    return False
+
 def open_app(idx):
     logger.info(f"📱 [Emu {idx}] Membuka Aplikasi {PACKAGE_NAME}...")
-    
-    # RETRY LOGIC: 2 attempts total
-    for attempt in range(2):
+
+    # PREEMPTIVE: Restart ADB bridge (fix hang ADB daemon — terutama Emu 1)
+    restart_adb_bridge(idx)
+
+    # RETRY LOGIC: 3 attempts total
+    for attempt in range(3):
         if attempt > 0:
             logger.info(f"🔄 [Emu {idx}] RETRY #{attempt}: Mencoba buka ulang...")
-        
+            # Restart ADB bridge setiap retry
+            restart_adb_bridge(idx)
+
         # 1. FORCE KILL DULU (Agar Fresh Start)
         run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
         time.sleep(2)
-        
+
         # 2. RUN APP
         run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
         logger.info(f"⏳ [Emu {idx}] Menunggu Aplikasi muncul di layar...")
-        
-        # 3. CEK FOCUS VIA LDCONSOLE (ANTI NYASAR)
-        app_ready = False
-        max_checks = 15 if attempt == 0 else 10  # 30s pertama, 20s retry
+
+        # 3. CEK APP RUNNING (pakai method ringan, bukan dumpsys window)
+        max_checks = 20 if attempt == 0 else 12
         for i in range(max_checks):
-            cmd_focus = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell dumpsys window windows"]
-            res = run_command(cmd_focus, timeout=10)
-            
-            if PACKAGE_NAME in res:
+            if check_app_running(idx):
                 logger.info(f"✅ [Emu {idx}] Aplikasi {PACKAGE_NAME} terdeteksi aktif!")
                 time.sleep(3)  # Buffer render UI
                 return True
-            
+
             time.sleep(2)
             if i % 5 == 0: logger.info(f"   ... [Emu {idx}] Loading App ({i*2}s)")
-        
+
         logger.info(f"⚠️ [Emu {idx}] Attempt {attempt+1}: Aplikasi belum terdeteksi.")
-    
+
     # NUCLEAR RETRY: Quit emulator → relaunch → coba 1x lagi
     logger.info(f"💀 [Emu {idx}] NUCLEAR RETRY: Quit emulator & relaunch...")
     run_command(f'"{LDCONSOLE}" quit --index {idx}')
@@ -523,6 +553,7 @@ def open_app(idx):
         return False
 
     run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+    restart_adb_bridge(idx)
 
     # Final attempt: buka app
     run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
@@ -531,9 +562,7 @@ def open_app(idx):
     logger.info(f"⏳ [Emu {idx}] Nuclear retry: Menunggu app...")
 
     for i in range(15):
-        cmd_focus = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell dumpsys window windows"]
-        res = run_command(cmd_focus, timeout=10)
-        if PACKAGE_NAME in res:
+        if check_app_running(idx):
             logger.info(f"✅ [Emu {idx}] Aplikasi AKHIRNYA terdeteksi setelah nuclear restart!")
             time.sleep(3)
             return True
