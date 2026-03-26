@@ -104,17 +104,17 @@ def load_history():
 
 def save_history_entry(name, period):
     # Period: 'pagi' or 'sore'
-    with HISTORY_LOCK: # Thread-safe access
+    with HISTORY_LOCK:  # Thread-safe: read + modify + write dalam satu lock
         history = load_history()
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    
-    if name not in history: history[name] = {}
-    if today_str not in history[name]: history[name][today_str] = {}
-    
-    history[name][today_str][period] = True
-    
-    with open(HISTORY_FILE, 'w') as f:
-        json.dump(history, f, indent=4)
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+
+        if name not in history: history[name] = {}
+        if today_str not in history[name]: history[name][today_str] = {}
+
+        history[name][today_str][period] = True
+
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(history, f, indent=4)
         
 def is_already_done(name, period):
     history = load_history()
@@ -226,14 +226,18 @@ def run_command(command, timeout=30): # Default timeout 30 detik
         logger.info(f"Error executing command: {e}")
         return ""
 
-def launch_emulator(idx, on_boot_callback=None):
+def launch_emulator(idx, on_boot_callback=None, safe_mode=False):
     logger.info(f"🚀 Memulai Emulator Index {idx}...")
 
     # RAM CHECK: Pastikan cukup sebelum launch (penting untuk 8 GB RAM)
+    # safe_mode=True saat paralel: hanya flush, jangan kill proses (bisa kill emulator saudara)
     try:
-        from ram_optimizer import ensure_ram_available, get_ram_report
+        from ram_optimizer import ensure_ram_available, flush_standby_ram, get_ram_report
         logger.info(get_ram_report())
-        ensure_ram_available(min_mb=1500, max_wait_seconds=30, aggressive=True)
+        if safe_mode:
+            flush_standby_ram()
+        else:
+            ensure_ram_available(min_mb=1500, max_wait_seconds=30, aggressive=True)
     except Exception as e:
         logger.warning(f"⚠️ RAM optimizer error (lanjut tanpa optimasi): {e}")
 
@@ -1152,7 +1156,7 @@ def absen_pagi(user):
     if not final_x:
         logger.info(f"⚠️ [{name}] Koordinat Step 5 belum diset! Hanya jalan langkah 1-4.")
 
-    launch_emulator(idx, on_boot_callback=user.get('_on_boot_callback'))
+    launch_emulator(idx, on_boot_callback=user.get('_on_boot_callback'), safe_mode=user.get('_safe_mode', False))
     if not open_app(idx):
         logger.info(f"❌ [{name}] [Pagi] Gagal membuka aplikasi.")
         # Istri: tetap coba aktivitas meskipun absen gagal
@@ -1208,7 +1212,7 @@ def absen_sore(user):
         
     logger.info(f"🌙 [{name}] MEMULAI ABSEN SORE (Emulator {idx})")
 
-    launch_emulator(idx, on_boot_callback=user.get('_on_boot_callback'))
+    launch_emulator(idx, on_boot_callback=user.get('_on_boot_callback'), safe_mode=user.get('_safe_mode', False))
     if not open_app(idx):
         logger.info(f"❌ [{name}] [Sore] Gagal membuka aplikasi. Abort.")
         return
@@ -1247,7 +1251,7 @@ def get_schedule_rules(name, weekday):
     
     # === RULES PANCINGAN ===
     # SAMA dengan Suami/Istri agar masuk satu batch (callback kill bekerja)
-    # _run_batch_sequential sudah handle urutan: Pancingan → Suami → Istri
+    # _run_batch: Pancingan dulu, lalu Suami + Istri paralel
     # [NORMAL MODE — pasca Ramadan]
     if name == 'Pancingan':
          # Senin-Kamis: Pagi 06:31, Sore 17:01
@@ -1331,52 +1335,80 @@ def run_scheduler(target_users, force_reset=False):
     # Pancingan HARUS pertama agar menyerap iklan, mencegah iklan muncul di Suami/Istri
     LAUNCH_ORDER = ['Pancingan', 'Suami', 'Istri']
     
-    def _run_batch_sequential(job_type, users_with_rules):
-        """Jalankan absen SEQUENTIAL (satu per satu) dengan urutan Pancingan -> Suami -> Istri.
-        Ini mencegah ldconsole hang karena 3 emulator launch bersamaan."""
-        # Sort users sesuai LAUNCH_ORDER
+    def _run_batch(job_type, users_with_rules):
+        """Jalankan absen: Pancingan dulu (serap iklan), lalu Suami + Istri PARALEL."""
         sorted_users = sorted(users_with_rules, key=lambda u: LAUNCH_ORDER.index(u['name']) if u['name'] in LAUNCH_ORDER else 99)
 
         screenshots = []
-        pancingan_index = None  # Simpan index Pancingan untuk deferred kill
+        screenshots_lock = threading.Lock()
+        pancingan_index = None
+        pancingan_killed = threading.Event()
 
         def _kill_pancingan_callback():
-            """Callback: kill Pancingan 3s setelah emulator berikutnya boot."""
+            """Callback: kill Pancingan 3s setelah emulator boot. Thread-safe via Event."""
             nonlocal pancingan_index
-            if pancingan_index is not None:
+            if pancingan_index is not None and not pancingan_killed.is_set():
+                pancingan_killed.set()  # Cegah double-kill dari thread lain
                 time.sleep(3)
                 logger.info(f"🔌 [Pancingan] Auto-kill emulator (iklan sudah terserap)")
                 run_command(f'"{LDCONSOLE}" quit --index {pancingan_index}')
-                pancingan_index = None
 
-        for u in sorted_users:
-            if not is_user_enabled(u['name']):
-                logger.info(f"⏸️ [Job] SKIP {job_type} {u['name']} (Dinonaktifkan)")
-                continue
+        # === STEP 1: PANCINGAN (sequential, harus duluan) ===
+        pancingan_user = next((u for u in sorted_users if u['name'] == 'Pancingan'), None)
+        if pancingan_user and is_user_enabled('Pancingan'):
             try:
-                # Inject callback kill Pancingan ke launch_emulator user berikutnya
-                if u['name'] != 'Pancingan' and pancingan_index is not None:
-                    u['_on_boot_callback'] = _kill_pancingan_callback
-
-                logger.info(f"🚀 [Job] Memulai {job_type}: {u['name']}")
+                logger.info(f"🚀 [Job] Memulai {job_type}: Pancingan")
                 if job_type == 'Absen Pagi':
-                    absen_pagi(u)
+                    absen_pagi(pancingan_user)
                 else:
-                    absen_sore(u)
-                logger.info(f"✅ [Job] Selesai {job_type}: {u['name']}")
-                if u['name'] == 'Pancingan':
-                    pancingan_index = u['index']
-                else:
-                    ss = _take_dashboard_screenshot(u)
-                    if ss:
-                        screenshots.append(ss)
-                    # Auto-kill emulator setelah screenshot selesai
-                    logger.info(f"🔌 [{u['name']}] Auto-kill emulator (tugas selesai)")
-                    run_command(f'"{LDCONSOLE}" quit --index {u["index"]}')
+                    absen_sore(pancingan_user)
+                logger.info(f"✅ [Job] Selesai {job_type}: Pancingan")
+                pancingan_index = pancingan_user['index']
             except Exception as e:
-                logger.error(f"💀 [CRASH] {job_type} {u['name']} GAGAL: {e}", exc_info=True)
-        # Safety: kill Pancingan jika belum di-kill (misal semua user lain skip/gagal)
-        if pancingan_index is not None:
+                logger.error(f"💀 [CRASH] {job_type} Pancingan GAGAL: {e}", exc_info=True)
+
+        # === STEP 2: SUAMI + ISTRI (PARALEL) ===
+        parallel_users = [u for u in sorted_users if u['name'] != 'Pancingan' and is_user_enabled(u['name'])]
+
+        def _user_worker(user):
+            """Worker thread untuk satu user (Suami atau Istri)."""
+            name = user['name']
+            try:
+                # Safe mode: jangan kill proses saat paralel (bisa kill emulator saudara)
+                user['_safe_mode'] = True
+                # Inject kill Pancingan callback (siapa duluan boot, dia kill)
+                if pancingan_index is not None:
+                    user['_on_boot_callback'] = _kill_pancingan_callback
+
+                logger.info(f"🚀 [Job] Memulai {job_type}: {name}")
+                if job_type == 'Absen Pagi':
+                    absen_pagi(user)
+                else:
+                    absen_sore(user)
+                logger.info(f"✅ [Job] Selesai {job_type}: {name}")
+
+                ss = _take_dashboard_screenshot(user)
+                if ss:
+                    with screenshots_lock:
+                        screenshots.append(ss)
+                logger.info(f"🔌 [{name}] Auto-kill emulator (tugas selesai)")
+                run_command(f'"{LDCONSOLE}" quit --index {user["index"]}')
+            except Exception as e:
+                logger.error(f"💀 [CRASH] {job_type} {name} GAGAL: {e}", exc_info=True)
+
+        threads = []
+        for u in parallel_users:
+            t = threading.Thread(target=_user_worker, args=(u,), name=f"Govem-{u['name']}")
+            t.start()
+            threads.append(t)
+            logger.info(f"🧵 [Parallel] Thread {u['name']} started")
+
+        # Tunggu semua thread selesai
+        for t in threads:
+            t.join()
+
+        # Safety: kill Pancingan jika belum di-kill
+        if pancingan_index is not None and not pancingan_killed.is_set():
             logger.info(f"🔌 [Pancingan] Auto-kill emulator (cleanup)")
             run_command(f'"{LDCONSOLE}" quit --index {pancingan_index}')
 
@@ -1424,7 +1456,7 @@ def run_scheduler(target_users, force_reset=False):
             captured_users = list(users)  # capture untuk closure
             def make_pagi_batch(u_list):
                 def job():
-                    threading.Thread(target=_run_batch_sequential, args=('Absen Pagi', u_list)).start()
+                    threading.Thread(target=_run_batch, args=('Absen Pagi', u_list)).start()
                 return job
             sched.at(time_str).do(make_pagi_batch(captured_users))
     
@@ -1436,7 +1468,7 @@ def run_scheduler(target_users, force_reset=False):
             captured_users = list(users)  # capture untuk closure
             def make_sore_batch(u_list):
                 def job():
-                    threading.Thread(target=_run_batch_sequential, args=('Absen Sore', u_list)).start()
+                    threading.Thread(target=_run_batch, args=('Absen Sore', u_list)).start()
                 return job
             sched.at(time_str).do(make_sore_batch(captured_users))
 
@@ -1497,10 +1529,10 @@ def run_scheduler(target_users, force_reset=False):
     # JALANKAN CATCH-UP SECARA SEQUENTIAL (Pancingan dulu, baru Suami, baru Istri)
     if catchup_pagi:
         logger.info(f"🚀 CATCH-UP PAGI: {', '.join(u['name'] for u in catchup_pagi)}")
-        threading.Thread(target=_run_batch_sequential, args=('Absen Pagi', catchup_pagi)).start()
+        threading.Thread(target=_run_batch, args=('Absen Pagi', catchup_pagi)).start()
     if catchup_sore:
         logger.info(f"🚀 CATCH-UP SORE: {', '.join(u['name'] for u in catchup_sore)}")
-        threading.Thread(target=_run_batch_sequential, args=('Absen Sore', catchup_sore)).start()
+        threading.Thread(target=_run_batch, args=('Absen Sore', catchup_sore)).start()
     
     try:
         while True:
