@@ -7,4 +7,4 @@ REM  Klik kanan icon untuk cek status / exit
 REM =============================================
 
 cd /d "D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\_Govem"
-start "" pythonw Govem_Tray.pyw
+start "" "D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\python\pythonw.exe" Govem_Tray.pyw

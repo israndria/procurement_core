@@ -491,8 +491,56 @@ def open_app(idx):
         
         logger.info(f"⚠️ [Emu {idx}] Attempt {attempt+1}: Aplikasi belum terdeteksi.")
     
-    # GAGAL TOTAL setelah 2 attempts
-    logger.info(f"❌ [Emu {idx}] GAGAL membuka {PACKAGE_NAME} setelah 2 percobaan. ABORT.")
+    # NUCLEAR RETRY: Quit emulator → relaunch → coba 1x lagi
+    logger.info(f"💀 [Emu {idx}] NUCLEAR RETRY: Quit emulator & relaunch...")
+    run_command(f'"{LDCONSOLE}" quit --index {idx}')
+    time.sleep(5)
+
+    # RAM flush sebelum relaunch
+    try:
+        from ram_optimizer import ensure_ram_available
+        ensure_ram_available(min_mb=1500, max_wait_seconds=20, aggressive=True)
+    except Exception:
+        pass
+
+    run_command(f'"{LDCONSOLE}" launch --index {idx}')
+    time.sleep(1)
+    run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+
+    # Tunggu boot
+    for i in range(30):
+        try:
+            res_boot = run_command([LDCONSOLE, "adb", "--index", str(idx), "--command", "shell getprop sys.boot_completed"], timeout=10)
+            if "1" in res_boot:
+                logger.info(f"✅ [Emu {idx}] Boot OK setelah nuclear restart! ({i*2}s)")
+                time.sleep(10)
+                break
+        except:
+            pass
+        time.sleep(2)
+    else:
+        logger.info(f"❌ [Emu {idx}] GAGAL boot setelah nuclear restart. ABORT.")
+        return False
+
+    run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+
+    # Final attempt: buka app
+    run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
+    time.sleep(2)
+    run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
+    logger.info(f"⏳ [Emu {idx}] Nuclear retry: Menunggu app...")
+
+    for i in range(15):
+        cmd_focus = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell dumpsys window windows"]
+        res = run_command(cmd_focus, timeout=10)
+        if PACKAGE_NAME in res:
+            logger.info(f"✅ [Emu {idx}] Aplikasi AKHIRNYA terdeteksi setelah nuclear restart!")
+            time.sleep(3)
+            return True
+        time.sleep(2)
+        if i % 5 == 0: logger.info(f"   ... [Emu {idx}] Nuclear Loading ({i*2}s)")
+
+    logger.info(f"❌ [Emu {idx}] GAGAL membuka {PACKAGE_NAME} setelah nuclear restart. ABORT.")
     return False
 
 def set_location(user):
@@ -1077,10 +1125,14 @@ def absen_pagi(user):
 
     launch_emulator(idx, on_boot_callback=user.get('_on_boot_callback'))
     if not open_app(idx):
-        logger.info(f"❌ [{name}] [Pagi] Gagal membuka aplikasi. Abort.")
+        logger.info(f"❌ [{name}] [Pagi] Gagal membuka aplikasi.")
+        # Istri: tetap coba aktivitas meskipun absen gagal
+        if name == 'Istri':
+            logger.info(f"⚠️ [{name}] Absen gagal, tapi tetap coba isi aktivitas...")
+            trigger_activity_istri(user)
         return
     set_location(user)
-    
+
     # Jalankan Sequence 1-4
     for i, (rx, ry, action) in enumerate(RAW_SEQUENCE_PAGI):
         logger.info(f"   ▶️ [{name}] [Pagi] Step {i+1}...")
@@ -1090,22 +1142,22 @@ def absen_pagi(user):
         else:
              click(sx, sy, idx)
         time.sleep(5)
-    
+
     # Step 5
     if final_x:
         logger.info(f"   ▶️ [{name}] [Pagi] Step 5 (Final): Click {final_x}, {final_y}")
         click(final_x, final_y, idx)
         logger.info(f"✅ [{name}] Absen Pagi Selesai.")
-        
+
         # CATAT SEJARAH
         save_history_entry(name, 'pagi')
-        
+
         # CHAIN REACTION: Jika Istri, lanjut isi Aktivitas setelah absen pagi
         if name == 'Istri':
             trigger_activity_istri(user)
             # PREVENTIF: Absen pagi ULANG setelah isi aktivitas
             _re_absen(user, 'pagi', final_x, final_y)
-            
+
     else:
         logger.info(f"⚠ [{name}] Step 5 dilewati (Manual).")
 

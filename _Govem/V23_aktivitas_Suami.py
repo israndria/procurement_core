@@ -546,7 +546,7 @@ def minimize_emulator(idx):
         pass
 
 # --- HYBRID RUNNER ---
-def run_hybrid_automation(idx, background_mode=True):
+def run_hybrid_automation(idx, background_mode=True, skip_nav=False):
     if DRY_RUN:
         print("\n⏸️ === DRY RUN MODE === (tidak ada ADB yang dieksekusi)")
 
@@ -595,12 +595,15 @@ def run_hybrid_automation(idx, background_mode=True):
 
         # STEP 1: NAVIGASI ke Form (HANYA iterasi pertama)
         # Setelah save, form auto-reset — langsung isi tanpa navigasi ulang
-        if i == 0:
+        if i == 0 and not skip_nav:
             print("   🧭 Navigasi Dashboard → Form...")
             adb_click(serial, STEP1_TAP_1[0], STEP1_TAP_1[1])
             time.sleep(2)
             adb_click(serial, STEP1_TAP_2[0], STEP1_TAP_2[1])
             time.sleep(3)
+        elif i == 0 and skip_nav:
+            print("   ⏩ Skip navigasi (sudah di form)")
+            time.sleep(1)
         else:
             print("   (Form auto-reset, langsung isi)")
             time.sleep(1)

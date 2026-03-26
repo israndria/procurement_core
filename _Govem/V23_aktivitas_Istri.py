@@ -285,7 +285,7 @@ def minimize_emulator(idx):
 # =============================================
 # MAIN AUTOMATION (mirror Suami's run_hybrid_automation)
 # =============================================
-def run_istri_automation(background_mode=True, override_hari=None):
+def run_istri_automation(background_mode=True, override_hari=None, skip_nav=False):
     idx = ISTRI_IDX
 
     if DRY_RUN:
@@ -319,13 +319,16 @@ def run_istri_automation(background_mode=True, override_hari=None):
     for i, act in enumerate(aktivitas_list):
         log_info(f"  {i+1}. [SKP{act['skp']} J{act['jenis']}] {act['teks'][:70]}")
 
-    # RESTART APP (Force Clean State)
-    log_info("Restarting App...")
-    run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
-    time.sleep(2)
-    run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
-    log_info("Menunggu aplikasi siap (25s)...")
-    time.sleep(25)
+    # RESTART APP (Force Clean State) — skip jika manual trigger dari form
+    if not skip_nav:
+        log_info("Restarting App...")
+        run_command(f'"{LDCONSOLE}" killapp --index {idx} --packagename {PACKAGE_NAME}')
+        time.sleep(2)
+        run_command(f'"{LDCONSOLE}" runapp --index {idx} --packagename {PACKAGE_NAME}')
+        log_info("Menunggu aplikasi siap (25s)...")
+        time.sleep(25)
+    else:
+        log_info("Skip restart app (manual trigger dari form)")
 
     if DRY_RUN:
         log_info("[DRY RUN] Preview selesai.")
@@ -343,12 +346,15 @@ def run_istri_automation(background_mode=True, override_hari=None):
 
         # STEP 1: NAVIGASI ke Form (HANYA iterasi pertama)
         # Setelah save, form auto-reset — langsung isi tanpa navigasi ulang
-        if i == 0:
+        if i == 0 and not skip_nav:
             log_info("  Navigasi Dashboard → Form...")
             adb_click(serial, STEP1_TAP_1[0], STEP1_TAP_1[1])
             time.sleep(2)
             adb_click(serial, STEP1_TAP_2[0], STEP1_TAP_2[1])
             time.sleep(3)
+        elif i == 0 and skip_nav:
+            log_info("  ⏩ Skip navigasi (sudah di form)")
+            time.sleep(1)
         else:
             log_info("  (Form auto-reset, langsung isi)")
             time.sleep(1)

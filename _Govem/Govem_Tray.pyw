@@ -173,16 +173,17 @@ def run_manual_engine(mode, user_idx):
         sys.path.insert(0, SCRIPT_DIR)
         import Govem_Engine
         user = Govem_Engine.USERS[user_idx]
-        
+
         if mode == 'pagi':
             Govem_Engine.absen_pagi(user)
         elif mode == 'sore':
             Govem_Engine.absen_sore(user)
         elif mode == 'aktivitas':
+            # Manual trigger: skip_nav=True (user sudah di form aktivitas)
             if user_idx == 0:
-                Govem_Engine.trigger_activity(user) # Suami
+                Govem_Engine.trigger_activity(user, skip_nav=True)
             else:
-                Govem_Engine.trigger_activity_istri(user) # Istri
+                Govem_Engine.trigger_activity_istri(user, skip_nav=True)
         elif mode == 'pancingan':
              # Pancingan logic (absen_pagi/sore is same: Launch Only)
              Govem_Engine.absen_pagi(user)
@@ -247,8 +248,35 @@ def setup_tray():
         item('📝 Isi Aktivitas - ISTRI', manual_akt_istri),
     )
     
+    def optimize_ram(icon, item):
+        """Menu: Bersihkan RAM."""
+        try:
+            sys.path.insert(0, SCRIPT_DIR)
+            from ram_optimizer import flush_standby_ram, get_ram_report, kill_heavy_processes
+            before_report = get_ram_report()
+            flush_standby_ram()
+            killed = kill_heavy_processes()
+            import time as _t; _t.sleep(2)
+            after_report = get_ram_report()
+            killed_info = f"\nKilled: {', '.join(killed)}" if killed else ""
+            icon.notify(f"Sebelum: {before_report}\nSesudah: {after_report}{killed_info}", "RAM Optimizer")
+        except Exception as e:
+            icon.notify(f"Error: {e}", "RAM Optimizer")
+
+    def check_ram_status(icon, item):
+        """Menu: Cek status RAM."""
+        try:
+            sys.path.insert(0, SCRIPT_DIR)
+            from ram_optimizer import get_ram_report
+            icon.notify(get_ram_report(), "RAM Status")
+        except Exception as e:
+            icon.notify(f"Error: {e}", "RAM Status")
+
     # Submenu Settings
     settings_menu = pystray.Menu(
+        item('🧹 Bersihkan RAM', optimize_ram),
+        item('📊 Cek RAM', check_ram_status),
+        pystray.Menu.SEPARATOR,
         item('🗑️ Hapus Autostart (Windows Boot)', remove_autostart),
     )
     
