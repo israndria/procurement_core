@@ -153,15 +153,29 @@ def run_command(command, timeout=30):
     if DRY_RUN:
         return ""
     try:
-        creationflags = 0x08000000 if os.name == 'nt' else 0
+        creationflags = 0
+        if os.name == 'nt':
+            creationflags = 0x08000000 # CREATE_NO_WINDOW
+            
         if isinstance(command, list):
-            result = subprocess.run(command, capture_output=True, text=True, shell=False, creationflags=creationflags, timeout=timeout)
+            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False, creationflags=creationflags)
         else:
-            result = subprocess.run(command, capture_output=True, text=True, shell=True, creationflags=creationflags, timeout=timeout)
-        return result.stdout.strip()
-    except subprocess.TimeoutExpired:
-        log_error(f"⚠️ Command Timeout ({timeout}s): {command}")
-        return ""
+            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True, creationflags=creationflags)
+        
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+            return stdout.strip()
+        except subprocess.TimeoutExpired:
+            # FORCE KILL seluruh process tree (penting untuk ldconsole/adb yang suka hang)
+            pid = proc.pid
+            try:
+                if os.name == 'nt':
+                    subprocess.run(f'taskkill /F /T /PID {pid}', shell=True, creationflags=0x08000000, timeout=5, capture_output=True)
+                else:
+                    proc.kill()
+            except Exception:
+                pass
+            return ""
     except Exception as e:
         log_error(f"Error executing command: {e}")
         return ""
@@ -196,7 +210,7 @@ def connect_adb_smart(idx, launch_if_needed=False):
             time.sleep(1)
             run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize', timeout=10)
     
-    # FIX PORT BLEEDING: Hanya connect ke port sendiri!
+    # FIX PORT BLEEDING: Hanya connect ke port sejati (5555 + idx*2)
     target_port = 5555 + (idx*2)
     target_serial = f"127.0.0.1:{target_port}"
 
