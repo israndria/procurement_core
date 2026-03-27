@@ -337,7 +337,7 @@ def connect_adb_smart(idx, launch_if_needed=False):
     else:
         print("   🔇 Skip launch (background mode - assuming emulator already running)")
 
-    possible_ports = [5554 + (idx*2), 5556, 5558, 5560, 5562, 5564]
+    possible_ports = [5555 + (idx*2), 5557, 5559, 5561, 5563, 5565]
     detected_serial = None
 
     print("   🔍 Scanning Ports...")
@@ -350,14 +350,11 @@ def connect_adb_smart(idx, launch_if_needed=False):
              if f"127.0.0.1:{p}" in devices and "device" in devices:
                  detected_serial = f"127.0.0.1:{p}"
                  break
-             if f"emulator-{p}" in devices and "device" in devices:
-                 detected_serial = f"emulator-{p}"
-                 break
         if detected_serial: break
         time.sleep(1)
 
     if not detected_serial:
-        detected_serial = f"127.0.0.1:{5554 + (idx*2)}"
+        detected_serial = f"127.0.0.1:{5555 + (idx*2)}"
 
     print(f"   ✅ Terhubung ke: {detected_serial}")
     return detected_serial
@@ -639,16 +636,16 @@ def run_hybrid_automation(idx, background_mode=True, skip_nav=False):
         
         clean_text = text.replace("'", "").replace('"', "")
         adb_input_text(serial, clean_text, idx)
-        time.sleep(1)
+        time.sleep(2.5)
 
         # Hide Keyboard
         run_command([ADB, "-s", serial, "shell", "input", "keyevent", "111"])
-        time.sleep(0.3)
+        time.sleep(3.0)
 
         # STEP 3: Pilih SKP (ADB tap langsung)
         print(f"   📋 Memilih SKP {skp_num}...")
         adb_click(serial, SKP_DROPDOWN_XY[0], SKP_DROPDOWN_XY[1])
-        time.sleep(0.8)
+        time.sleep(2.0)
 
         if skp_num >= 5:
             # SKP 5/6 perlu scroll
@@ -660,16 +657,16 @@ def run_hybrid_automation(idx, background_mode=True, skip_nav=False):
         else:
             coords = SKP_COORDS[skp_num]
             adb_click(serial, coords[0], coords[1])
-        time.sleep(0.8)
+        time.sleep(2.5) # Increased from 2.0
 
         # STEP 4: Pilih Jenis (ADB tap langsung)
         jenis_label = "Apel" if jenis_num == 2 else "Aktifitas"
         print(f"   🎯 Memilih Jenis {jenis_num} ({jenis_label})...")
         adb_click(serial, JENIS_DROPDOWN_XY[0], JENIS_DROPDOWN_XY[1])
-        time.sleep(0.8)
+        time.sleep(2.5) # Increased from 2.0
         jenis_coords = JENIS_COORDS[jenis_num]
         adb_click(serial, jenis_coords[0], jenis_coords[1])
-        time.sleep(0.8)
+        time.sleep(2.5)
 
         # STEP 5: Simpan (direct ADB tap)
         print("   💾 Simpan & Tunggu Animasi (6s)...")

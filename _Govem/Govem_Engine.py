@@ -488,29 +488,24 @@ def restart_adb_bridge(idx):
     logger.info(f"✅ [Emu {idx}] ADB bridge restarted ({addr}).")
 
 def check_app_running(idx):
-    """Cek apakah app sedang running — multi-method untuk mengurangi false negative.
-    
-    False negative menyebabkan retry loop (kill app → reopen → cek → false → kill lagi).
-    Kita pakai 3 method: dumpsys activity, pidof, dan ps grep.
-    Return True jika SALAH SATU method mendeteksi app running.
+    """Cek apakah app sedang running — via DIRECT ADB (bypass ldconsole).
+
+    ldconsole adb sering hang untuk Emu 1 saat parallel operation.
+    Direct ADB jauh lebih reliable.
     """
-    # Method 1: dumpsys activity top (RINGAN, cepat, tapi kadang miss app yang baru launch)
+    # Method 1: dumpsys activity top
     try:
-        cmd = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell dumpsys activity top"]
-        res = run_command(cmd, timeout=8)
+        res = _direct_adb(idx, "dumpsys activity top", timeout=8)
         if res and PACKAGE_NAME in res:
             logger.info(f"   [Emu {idx}] App terdeteksi via dumpsys activity top")
             return True
     except Exception:
         pass
 
-    # Method 2: pidof (SANGAT RINGAN — tapi output bisa multi-PID atau ada newline)
+    # Method 2: pidof
     try:
-        cmd2 = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell pidof {PACKAGE_NAME}"]
-        res2 = run_command(cmd2, timeout=5)
+        res2 = _direct_adb(idx, f"pidof {PACKAGE_NAME}", timeout=5)
         if res2 and res2.strip():
-            # pidof bisa return "1234" atau "1234 5678" (multi-process)
-            # Cukup cek ada angka = proses ada
             parts = res2.strip().split()
             if any(p.isdigit() for p in parts):
                 logger.info(f"   [Emu {idx}] App terdeteksi via pidof (PID: {res2.strip()})")
@@ -518,9 +513,10 @@ def check_app_running(idx):
     except Exception:
         pass
 
-    # Method 3: ps grep (FALLBACK — lebih reliable, sedikit lebih berat)
+    # Method 3: ps grep (note: pipe doesn't work in split, use single command)
     try:
-        cmd3 = [LDCONSOLE, "adb", "--index", str(idx), "--command", f"shell ps -A | grep {PACKAGE_NAME}"]
+        serial = _get_adb_serial(idx)
+        cmd3 = f'"{ADB}" -s {serial} shell ps -A | grep {PACKAGE_NAME}'
         res3 = run_command(cmd3, timeout=8)
         if res3 and PACKAGE_NAME in res3:
             logger.info(f"   [Emu {idx}] App terdeteksi via ps grep")
