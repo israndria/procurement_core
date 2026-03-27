@@ -487,6 +487,16 @@ def restart_adb_bridge(idx):
     time.sleep(2)
     logger.info(f"✅ [Emu {idx}] ADB bridge restarted ({addr}).")
 
+def _get_adb_serial(idx):
+    """Dapatkan ADB serial langsung (bypass ldconsole adb wrapper)."""
+    return f"127.0.0.1:{5555 + idx * 2}"
+
+def _direct_adb(idx, cmd, timeout=10):
+    """Jalankan ADB shell command langsung ke emulator — lebih reliable dari ldconsole adb."""
+    serial = _get_adb_serial(idx)
+    result = run_command(f'"{ADB}" -s {serial} shell {cmd}', timeout=timeout)
+    return result
+
 def check_app_running(idx):
     """Cek apakah app sedang running — via DIRECT ADB (bypass ldconsole).
 
