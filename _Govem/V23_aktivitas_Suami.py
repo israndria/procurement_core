@@ -275,19 +275,19 @@ def map_events_to_template(events, is_jumat):
 # =============================================
 # CORE FUNCTIONS (unchanged from v1.0)
 # =============================================
-def run_command(command):
+def run_command(command, timeout=30):
     if DRY_RUN:
         return ""
     try:
-        creationflags = 0
-        if os.name == 'nt':
-            creationflags = 0x08000000 # CREATE_NO_WINDOW
-
+        creationflags = 0x08000000 if os.name == 'nt' else 0
         if isinstance(command, list):
-            result = subprocess.run(command, capture_output=True, text=True, shell=False, creationflags=creationflags)
+            result = subprocess.run(command, capture_output=True, text=True, shell=False, creationflags=creationflags, timeout=timeout)
         else:
-            result = subprocess.run(command, capture_output=True, text=True, shell=True, creationflags=creationflags)
+            result = subprocess.run(command, capture_output=True, text=True, shell=True, creationflags=creationflags, timeout=timeout)
         return result.stdout.strip()
+    except subprocess.TimeoutExpired:
+        print(f"⚠️ Command Timeout ({timeout}s): {command}")
+        return ""
     except Exception as e:
         print(f"Error executing command: {e}")
         return ""
@@ -320,8 +320,8 @@ def connect_adb_smart(idx, launch_if_needed=False):
         # Loop minimize sampai emulator running
         for attempt in range(30):
             time.sleep(1)
-            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
-            s = run_command(f'"{LDCONSOLE}" list2')
+            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize', timeout=10)
+            s = run_command(f'"{LDCONSOLE}" list2', timeout=10)
             for line in s.splitlines():
                 parts = line.split(",")
                 if len(parts) > 4 and parts[0] == str(idx) and parts[4] == "1":
@@ -331,33 +331,28 @@ def connect_adb_smart(idx, launch_if_needed=False):
                 continue
             break
         # Extra minimize untuk memastikan
-        for _ in range(3):
+        for _ in range(2):
             time.sleep(1)
-            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
+            run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize', timeout=10)
     else:
         print("   🔇 Skip launch (background mode - assuming emulator already running)")
 
-    possible_ports = [5555 + (idx*2), 5557, 5559, 5561, 5563, 5565]
-    detected_serial = None
+    # FIX PORT BLEEDING: Hanya connect ke port sendiri!
+    target_port = 5555 + (idx*2)
+    target_serial = f"127.0.0.1:{target_port}"
 
-    print("   🔍 Scanning Ports...")
-    for p in possible_ports:
-        run_command(f'"{ADB}" connect 127.0.0.1:{p}')
+    print(f"   🔍 Connecting to {target_serial}...")
+    run_command(f'"{ADB}" connect {target_serial}', timeout=10)
 
-    for i in range(10):
-        devices = run_command(f'"{ADB}" devices')
-        for p in possible_ports:
-             if f"127.0.0.1:{p}" in devices and "device" in devices:
-                 detected_serial = f"127.0.0.1:{p}"
-                 break
-        if detected_serial: break
+    for i in range(15):
+        devices = run_command(f'"{ADB}" devices', timeout=10)
+        if target_serial in devices and "device" in devices:
+            print(f"   ✅ Terhubung ke: {target_serial}")
+            return target_serial
         time.sleep(1)
 
-    if not detected_serial:
-        detected_serial = f"127.0.0.1:{5555 + (idx*2)}"
-
-    print(f"   ✅ Terhubung ke: {detected_serial}")
-    return detected_serial
+    print(f"   ⚠️ Warning: {target_serial} tidak terdeteksi di 'adb devices' (lanjut saja).")
+    return target_serial
 
 def adb_click(serial, x, y):
     run_command([ADB, "-s", serial, "shell", "input", "tap", str(x), str(y)])

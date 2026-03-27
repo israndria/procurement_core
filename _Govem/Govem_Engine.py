@@ -249,34 +249,42 @@ def launch_emulator(idx, on_boot_callback=None, safe_mode=False):
     except Exception as e:
         logger.warning(f"⚠️ RAM optimizer error (lanjut tanpa optimasi): {e}")
 
+    # Ensure cleanMode 1 (Disable Ads/Popups) — crucial for stabilization
+    run_command(f'"{LDCONSOLE}" globalsetting --cleanmode 1', timeout=10)
+
     run_command(f'"{LDCONSOLE}" launch --index {idx}')
     # Minimize sekali setelah launch (cukup 1x, tidak perlu spam)
     time.sleep(1)
     run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
 
     # Tunggu boot tanpa spam minimize (window sudah diminimize di atas)
-    logger.info(f"⏳ [Emu {idx}] Menunggu sistem Android siap (LDConsole)...")
+    logger.info(f"⏳ [Emu {idx}] Menunggu sistem Android siap (Direct ADB)...")
     boot_ready = False
     max_retries = 30  # 30 x 2s = 60 detik max
 
+    # PREEMPTIVE: Connect ADB early
+    target_serial = _get_adb_serial(idx)
+    run_command(f'"{ADB}" connect {target_serial}', timeout=5)
+
     for i in range(max_retries):
         try:
-            cmd_boot = [LDCONSOLE, "adb", "--index", str(idx), "--command", "shell getprop sys.boot_completed"]
-            res_boot = run_command(cmd_boot, timeout=10)
+            # Pakai _direct_adb (lebih reliable daripada ldconsole adb wrapper)
+            res_boot = _direct_adb(idx, "getprop sys.boot_completed", timeout=8)
 
-            if "1" in res_boot:
-                logger.info(f"✅ [Emu {idx}] Sistem Siap! Boot Time: {i*2}s (minimized)")
+            if res_boot and "1" in res_boot:
+                logger.info(f"✅ [Emu {idx}] Sistem Siap! Boot Time: {i*2}s (Direct ADB)")
                 if on_boot_callback:
                     on_boot_callback()
                     on_boot_callback = None
-                time.sleep(10)  # Tunggu launcher stabil
+                time.sleep(5)  # Tunggu launcher stabil
                 boot_ready = True
                 break
         except Exception as e:
-            logger.info(f"⚠️ [Emu {idx}] Boot check error: {e}")
+            if i % 5 == 0: logger.info(f"⚠️ [Emu {idx}] Boot check error: {e}")
 
         time.sleep(2)
-        if i % 5 == 0:
+        if i % 10 == 0:
+            run_command(f'"{ADB}" connect {target_serial}', timeout=5)
             logger.info(f"   ... [Emu {idx}] Waiting Boot ({i*2}s)")
 
     if not boot_ready:
@@ -289,13 +297,13 @@ def launch_emulator(idx, on_boot_callback=None, safe_mode=False):
         # Tunggu boot kedua (max 90 detik)
         for i in range(45):
             try:
-                res_boot = run_command([LDCONSOLE, "adb", "--index", str(idx), "--command", "shell getprop sys.boot_completed"], timeout=10)
-                if "1" in res_boot:
+                res_boot = _direct_adb(idx, "getprop sys.boot_completed", timeout=10)
+                if res_boot and "1" in res_boot:
                     logger.info(f"✅ [Emu {idx}] Boot OK setelah restart! ({i*2}s)")
                     if on_boot_callback:
                         on_boot_callback()
                         on_boot_callback = None
-                    time.sleep(10)
+                    time.sleep(5)
                     boot_ready = True
                     break
             except:
@@ -320,13 +328,12 @@ def launch_emulator(idx, on_boot_callback=None, safe_mode=False):
 
 def dismiss_popup(idx):
     """
-    Ganti logika dismiss popup dengan DELAY MANUAL 60 DETIK.
-    Mencegah salah klik (seperti klik search bar) dan memberi waktu user
-    untuk menutup iklan secara manual jika diperlukan.
+    Tunggu stabilisasi sebentar. cleanMode sudah aktif via globalsetting,
+    jadi tidak butuh 60s lagi. 15s cukup untuk OS siap terima input.
     """
-    logger.info(f"[{idx}] Menunggu 60 detik untuk stabilisasi & tutup iklan manual...")
-    time.sleep(60) 
-    logger.info(f"[{idx}] Waktu tunggu selesai. Lanjut...")
+    logger.info(f"[{idx}] Stabilisasi UI (15 detik)...")
+    time.sleep(15) 
+    logger.info(f"[{idx}] Siap.")
 
 
 def find_latest_record(search_path):
@@ -586,16 +593,26 @@ def open_app(idx):
     time.sleep(1)
     run_command(f'"{LDCONSOLE}" sortWnd --index {idx} --minimize')
 
-    # Tunggu boot
-    for i in range(30):
+    # Tunggu boot — pakai direct ADB (ldconsole adb unreliable post-relaunch)
+    _nuclear_serial = f"127.0.0.1:{5555 + idx * 2}"
+    # Bersihkan koneksi lama dulu (stale dari sebelum quit)
+    run_command(f'"{ADB}" disconnect {_nuclear_serial}', timeout=5)
+    for i in range(60):  # 60×2s = 120s (tambah timeout utk 3-emulator scenario)
         try:
-            res_boot = run_command([LDCONSOLE, "adb", "--index", str(idx), "--command", "shell getprop sys.boot_completed"], timeout=10)
-            if "1" in res_boot:
+            r_connect = run_command(f'"{ADB}" connect {_nuclear_serial}', timeout=5)
+            res_boot = run_command(f'"{ADB}" -s {_nuclear_serial} shell getprop sys.boot_completed', timeout=8)
+            if res_boot and "1" in res_boot.strip():
                 logger.info(f"✅ [Emu {idx}] Boot OK setelah nuclear restart! ({i*2}s)")
                 time.sleep(10)
                 break
-        except:
-            pass
+            if i % 5 == 0:
+                # Log diagnostic: apakah connect berhasil? apakah getprop ada output?
+                conn_ok = r_connect and ("connected" in r_connect or "already" in r_connect)
+                boot_val = repr(res_boot) if res_boot else "None"
+                logger.info(f"   ... [Emu {idx}] Nuclear Boot ({i*2}s) | connect={'OK' if conn_ok else 'NO'} | boot={boot_val}")
+        except Exception as exc:
+            if i % 5 == 0:
+                logger.info(f"   ... [Emu {idx}] Nuclear Boot ({i*2}s) | exc: {exc}")
         time.sleep(2)
     else:
         logger.info(f"❌ [Emu {idx}] GAGAL boot setelah nuclear restart. ABORT.")
@@ -1058,16 +1075,22 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
                 pass
 
 def _get_serial(idx):
-    """Get ADB serial for emulator index."""
-    possible_ports = [5554 + (idx*2), 5556, 5558, 5560]
-    devices = subprocess.run([ADB, "devices"], capture_output=True, text=True,
-                             creationflags=0x08000000 if os.name == 'nt' else 0).stdout
-    for p in possible_ports:
-        if f"emulator-{p}" in devices:
-            return f"emulator-{p}"
-        if f"127.0.0.1:{p}" in devices:
-            return f"127.0.0.1:{p}"
-    return None
+    """Dapatkan serial ADB yang tepat untuk index emulator (Anti-Bleeding)."""
+    # Port standard LDPlayer: Instance 0=5555, Instance 1=5557, dst.
+    target_port = 5555 + (idx * 2)
+    target_addr = f"127.0.0.1:{target_port}"
+    
+    # Cek apakah sudah terhubung sebagai list item
+    devices = run_command(f'"{ADB}" devices', timeout=5)
+    if target_addr in devices and "device" in devices:
+        return target_addr
+        
+    # Jika tidak ada, coba yang format 'emulator-XXXX'
+    emu_port = 5554 + (idx * 2)
+    if f"emulator-{emu_port}" in devices:
+        return f"emulator-{emu_port}"
+        
+    return target_addr # Fallback
 
 def trigger_activity(user_obj, skip_nav=False):
     """
