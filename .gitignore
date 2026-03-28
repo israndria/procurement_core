@@ -33,3 +33,11 @@ govem_config.ini
 # Separated Projects (punya repo sendiri / tidak relevan)
 Inaproc_Scraper/
 TOEFL_Prep_App/
+V20_Scrapper.py
+V20_Scrapper.bat
+V21_Katalog.bat
+_Govem/
+_Launcher/
+_Testing/
+V23_aktivitas_Suami.bat
+V23_aktivitas_Istri.bat
