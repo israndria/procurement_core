@@ -32,3 +32,7 @@ govem_config.ini
 
 # Separated Projects (punya repo sendiri)
 Inaproc_Scraper/
+
+# V22 InaprocOrder — data sensitif
+V22_InaprocOrder/session.json
+V22_InaprocOrder/edge_profile/
