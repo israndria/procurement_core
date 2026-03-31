@@ -18,6 +18,7 @@ import re
 import logging
 import os
 import sys
+import time
 import pandas as pd
 from io import StringIO
 from datetime import datetime
@@ -89,13 +90,24 @@ def fetch_html(opener, url, referer=None, data=None):
     headers = {
         "User-Agent": UA,
         "Referer": referer or url,
-        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
+        "Cache-Control": "max-age=0",
     }
     body = None
     if data:
         body = urllib.parse.urlencode(data).encode()
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
         headers["X-Requested-With"] = "XMLHttpRequest"
+        headers["Sec-Fetch-Dest"] = "empty"
+        headers["Sec-Fetch-Mode"] = "cors"
     req = urllib.request.Request(url, data=body, headers=headers)
     with opener.open(req, timeout=20) as r:
         return r.read().decode("utf-8", errors="replace")
@@ -103,6 +115,7 @@ def fetch_html(opener, url, referer=None, data=None):
 def get_session(opener, kode_lpse, endpoint):
     url = f"{BASE_URL}/{kode_lpse}/{endpoint}"
     html = fetch_html(opener, url)
+    time.sleep(2)  # jeda setelah GET halaman utama
     m = re.search(r"authenticityToken = '([a-f0-9]+)'", html)
     return m.group(1) if m else ""
 
@@ -112,6 +125,7 @@ def get_list_paket(opener, token, kode_lpse, endpoint, tahun):
     semua = []
     start = 0
     PAGE = 100
+    MAX_RETRY = 3
     while True:
         data = {
             "draw": str(start // PAGE + 1),
@@ -119,18 +133,25 @@ def get_list_paket(opener, token, kode_lpse, endpoint, tahun):
             "length": str(PAGE),
             "authenticityToken": token,
         }
-        try:
-            raw = fetch_html(opener, url, referer=referer, data=data)
-            parsed = json.loads(raw)
-            rows = parsed.get("data", [])
-            if not rows:
+        for attempt in range(MAX_RETRY):
+            try:
+                raw = fetch_html(opener, url, referer=referer, data=data)
+                parsed = json.loads(raw)
+                rows = parsed.get("data", [])
                 break
-            semua.extend(rows)
-            start += PAGE
-            if len(rows) < PAGE:
-                break
-        except Exception as e:
-            log.warning(f"  get_list_paket error start={start}: {e}")
+            except Exception as e:
+                if attempt < MAX_RETRY - 1:
+                    log.warning(f"  Retry {attempt+1}/{MAX_RETRY} get_list start={start}: {e}")
+                    time.sleep(5 * (attempt + 1))  # backoff: 5s, 10s, 15s
+                else:
+                    log.error(f"  get_list_paket gagal start={start}: {e}")
+                    return semua
+        if not rows:
+            break
+        semua.extend(rows)
+        start += PAGE
+        time.sleep(1)  # jeda antar halaman
+        if len(rows) < PAGE:
             break
     return semua
 
@@ -285,10 +306,13 @@ def main():
     log.info(f"Scrape {kategori} tahun {tahun} -> tabel '{tabel}' | {len(targets)} LPSE")
 
     total_ok = total_err = 0
-    for lpse in targets:
+    for i, lpse in enumerate(targets):
         ok, err = scrape_satu_lpse(lpse["kode"], lpse["nama"], endpoint, tabel, tahun)
         total_ok  += ok
         total_err += err
+        if i < len(targets) - 1:
+            log.info("  Jeda 5 detik sebelum LPSE berikutnya...")
+            time.sleep(5)
 
     log.info(f"=== SELESAI: total {total_ok} OK, {total_err} error ===")
     if total_ok == 0 and total_err > 0:
