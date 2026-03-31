@@ -5,10 +5,8 @@ import os
 import time
 import io
 import re
-
-# --- LIBRARY SELENIUM ---
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
+import urllib.request
+import hashlib
 
 # --- LIBRARY GOOGLE ---
 from google.auth.transport.requests import Request
@@ -111,29 +109,34 @@ def delete_existing_events_by_source(service, source_url):
         return False
 
 # --- FUNGSI DATABASE (CRUD) ---
-def update_local_database(df_result):
+def compute_hash(df_jadwal: pd.DataFrame) -> str:
+    content = df_jadwal[['Tahap', 'Mulai', 'Sampai', 'Perubahan']].to_csv(index=False)
+    return hashlib.md5(content.encode()).hexdigest()
+
+def update_local_database(df_result, hash_map: dict = None):
     new_data = []
     now_str = get_indonesian_timestamp()
-    
+
     grouped = df_result.groupby('Source')
     for url, group in grouped:
         pokja = group.iloc[0]['Anggota_Pokja']
         nama_pkt = group.iloc[0]['Nama_Paket']
         new_data.append({
-            'url': url, 
-            'members': pokja, 
+            'url': url,
+            'members': pokja,
             'nama_paket': nama_pkt,
-            'last_sync': now_str
+            'last_sync': now_str,
+            'content_hash': hash_map.get(url, '') if hash_map else ''
         })
-    
+
     df_new = pd.DataFrame(new_data)
-    
+
     if os.path.exists(DB_FILE_PATH):
         try:
             df_old = pd.read_csv(DB_FILE_PATH)
-            if 'last_sync' not in df_old.columns: df_old['last_sync'] = "-"
-            if 'nama_paket' not in df_old.columns: df_old['nama_paket'] = "Unknown"
-            
+            for col in ['last_sync', 'nama_paket', 'content_hash']:
+                if col not in df_old.columns: df_old[col] = ''
+
             df_old.set_index('url', inplace=True)
             df_new.set_index('url', inplace=True)
             df_old.update(df_new)
@@ -144,7 +147,7 @@ def update_local_database(df_result):
             df_final = df_new
     else:
         df_final = df_new
-    
+
     df_final.to_csv(DB_FILE_PATH, index=False)
     return len(df_final)
 
@@ -163,92 +166,87 @@ def clear_all_database():
         return True
     return False
 
-# --- FUNGSI SCRAPING (SELENIUM) ---
-def get_name_from_header_text(driver, tender_id):
+# --- FUNGSI SCRAPING (urllib — tanpa Chrome/Selenium) ---
+def fetch_jadwal_urllib(url: str, members: str) -> pd.DataFrame | None:
+    """Ambil tabel jadwal langsung via urllib — ringan, tanpa browser."""
+    referer = url.replace('/jadwal', '/pengumuman')
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer':    referer,
+        'Accept':     'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    })
     try:
-        match = re.search(rf"\[\s*{tender_id}\s*\]\s*(.*?)(?=<|\n)", driver.page_source, re.IGNORECASE)
-        if match: return match.group(1).strip()
-    except: pass
-    return None
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            html = resp.read().decode('utf-8', errors='replace')
+    except Exception as e:
+        st.error(f"Gagal fetch {url}: {e}")
+        return None
+
+    tender_id  = url.split('/')[-2]
+    nama_final = f"Tender {tender_id}"
+    title_m    = re.search(r'\[[\d]+\]\s*(.+?)(?:\s*</title>|\s*$)', html, re.IGNORECASE)
+    if title_m: nama_final = title_m.group(1).strip()
+
+    try:
+        dfs = pd.read_html(io.StringIO(html), flavor='lxml')
+    except Exception as e:
+        st.error(f"Gagal parse HTML {url}: {e}")
+        return None
+
+    target_df = None
+    for t in dfs:
+        if any('tahap' in str(c).lower() for c in t.columns):
+            target_df = t; break
+
+    if target_df is None:
+        st.warning(f"Tabel jadwal tidak ditemukan: {url}")
+        return None
+
+    cols      = target_df.columns
+    c_tahap   = next((c for c in cols if 'tahap'     in str(c).lower()), None)
+    c_mulai   = next((c for c in cols if 'mulai'     in str(c).lower()), None)
+    c_sampai  = next((c for c in cols if 'sampai'    in str(c).lower()), None)
+    c_ubah    = next((c for c in cols if 'perubahan' in str(c).lower()), None)
+
+    if not c_tahap or not c_mulai: return None
+
+    sel_cols  = [c for c in [c_tahap, c_mulai, c_sampai, c_ubah] if c]
+    df_clean  = target_df[sel_cols].copy()
+    df_clean.columns = ['Tahap', 'Mulai'] + (['Sampai'] if c_sampai else []) + (['Perubahan'] if c_ubah else [])
+    if 'Sampai'    not in df_clean.columns: df_clean['Sampai']    = df_clean['Mulai']
+    if 'Perubahan' not in df_clean.columns: df_clean['Perubahan'] = '0'
+    df_clean['Perubahan']    = df_clean['Perubahan'].fillna('0')
+    df_clean['Source']       = url
+    df_clean['Nama_Paket']   = nama_final
+    df_clean['Anggota_Pokja'] = members
+    df_clean = df_clean.dropna(subset=['Tahap'])
+    return df_clean
+
 
 def start_driver_and_process_slots(slot_data):
-    options = uc.ChromeOptions()
-    options.add_argument("--no-first-run")
-    options.add_argument("--password-store=basic")
-    
-    driver = None
-    all_data = []
+    """Proses semua slot URL — tanpa Chrome, pakai urllib."""
+    all_data   = []
+    hash_map   = {}
     status_text = st.empty()
     progress_bar = st.progress(0)
-    
-    try:
-        status_text.info("🚀 Memulai Chrome...")
-        driver = uc.Chrome(options=options, version_main=144)
-        total = len(slot_data)
-        
-        for i, item in enumerate(slot_data):
-            url = item['url']
-            members = item['members']
-            url_tujuan = url
-            url_pintu_depan = url.replace("/jadwal", "/pengumuman")
-            tender_id = url.split('/')[-2]
-            nama_final = f"Tender {tender_id}" 
+    total = len(slot_data)
 
-            status_text.write(f"🔄 ({i+1}/{total}) Cek: {tender_id}...")
-            progress_bar.progress((i) / total)
-            
-            try:
-                driver.get(url_pintu_depan); time.sleep(2)
-                driver.execute_cdp_cmd('Network.enable', {})
-                driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {"headers": {"Referer": url_pintu_depan}})
-                driver.get(url_tujuan); time.sleep(2)
-                
-                if "Akses Ditolak" in driver.page_source:
-                    driver.get(url_pintu_depan); time.sleep(2)
-                    driver.execute_script("var links=document.getElementsByTagName('a');for(var i=0;i<links.length;i++){if(links[i].textContent.includes('Jadwal')){links[i].click();break;}}")
-                    time.sleep(3)
+    for i, item in enumerate(slot_data):
+        url     = item['url']
+        members = item['members']
+        tender_id = url.split('/')[-2]
 
-                hasil_nama = get_name_from_header_text(driver, tender_id)
-                if hasil_nama and len(hasil_nama) > 5: nama_final = hasil_nama
+        status_text.write(f"🔄 ({i+1}/{total}) Memproses: {tender_id}...")
+        progress_bar.progress(i / total)
 
-                dfs = pd.read_html(io.StringIO(driver.page_source), flavor='lxml')
-                target_df = None
-                for t in dfs:
-                    if any('tahap' in str(c).lower() for c in t.columns): target_df = t; break
-                
-                if target_df is not None:
-                    cols = target_df.columns
-                    col_tahap = next((c for c in cols if 'tahap' in str(c).lower()), None)
-                    col_mulai = next((c for c in cols if 'mulai' in str(c).lower()), None)
-                    col_sampai = next((c for c in cols if 'sampai' in str(c).lower()), None)
-                    col_ubah = next((c for c in cols if 'perubahan' in str(c).lower()), None)
-                    
-                    if col_tahap and col_mulai:
-                        new_cols = ['Tahap', 'Mulai', 'Sampai']
-                        sel_cols = [col_tahap, col_mulai, col_sampai] if col_sampai else [col_tahap, col_mulai]
-                        if col_ubah: sel_cols.append(col_ubah); new_cols.append('Perubahan')
-                        df_clean = target_df[sel_cols].copy()
-                        if not col_sampai: 
-                            df_clean['Sampai'] = df_clean['Mulai']
-                            new_cols = ['Tahap', 'Mulai', 'Perubahan'] if col_ubah else ['Tahap', 'Mulai']
-                        df_clean.columns = new_cols
-                        if 'Perubahan' not in df_clean.columns: df_clean['Perubahan'] = '0'
-                        else: df_clean['Perubahan'] = df_clean['Perubahan'].fillna('0')
-                        if 'Sampai' not in df_clean.columns: df_clean['Sampai'] = df_clean['Mulai']
-                        df_clean['Source'] = url
-                        df_clean['Nama_Paket'] = nama_final
-                        df_clean['Anggota_Pokja'] = members
-                        df_clean = df_clean.dropna(subset=['Tahap'])
-                        all_data.append(df_clean)
-            except Exception as e: st.error(f"Error {tender_id}: {e}")
-        
-        progress_bar.progress(1.0)
-        status_text.success("Selesai!")
-        
-    except Exception as e: st.error(f"Browser Error: {e}")
-    finally:
-        if driver: driver.quit()
-    return all_data
+        df = fetch_jadwal_urllib(url, members)
+        if df is not None:
+            all_data.append(df)
+            hash_map[url] = compute_hash(df)
+
+    progress_bar.progress(1.0)
+    status_text.success("✅ Selesai!")
+    return all_data, hash_map
 
 # --- FORMATTING OUTPUT ---
 def format_desc(url, perubahan_val, pokja_names):
@@ -270,10 +268,10 @@ def get_reminders(judul_tahap):
 # --- FUNGSI EKSEKUSI UTAMA ---
 def run_single_update(url_target, members_target):
     slot_data = [{'url': url_target, 'members': members_target}]
-    res = start_driver_and_process_slots(slot_data)
+    res, hash_map = start_driver_and_process_slots(slot_data)
     if res:
         df_res = pd.concat(res, ignore_index=True)
-        update_local_database(df_res)
+        update_local_database(df_res, hash_map)
         svc = get_service()
         for url, grp in df_res.groupby('Source'):
             delete_existing_events_by_source(svc, url)
@@ -282,14 +280,12 @@ def run_single_update(url_target, members_target):
                 de = parse_spse_date(r['Sampai'])
                 if ds:
                     if not de: de = ds + datetime.timedelta(hours=1)
-                    judul_event = f"{r['Tahap']} - {r['Nama_Paket']}"
-                    reminder_settings = get_reminders(r['Tahap'])
                     evt = {
-                        'summary': judul_event,
+                        'summary': f"{r['Tahap']} - {r['Nama_Paket']}",
                         'description': format_desc(r['Source'], r['Perubahan'], r['Anggota_Pokja']),
                         'start': {'dateTime': ds.isoformat(), 'timeZone': 'Asia/Jakarta'},
                         'end': {'dateTime': de.isoformat(), 'timeZone': 'Asia/Jakarta'},
-                        'reminders': reminder_settings
+                        'reminders': get_reminders(r['Tahap'])
                     }
                     try: svc.events().insert(calendarId=CALENDAR_ID, body=evt).execute()
                     except: pass
@@ -384,11 +380,11 @@ with tab_tambah:
     if st.button("🚀 EKSEKUSI PAKET BARU", type="primary", use_container_width=True):
         if slot_inputs:
             with st.status("Sedang Bekerja...", expanded=True) as s:
-                res = start_driver_and_process_slots(slot_inputs)
+                res, hash_map = start_driver_and_process_slots(slot_inputs)
                 if res:
                     df_res = pd.concat(res, ignore_index=True)
-                    update_local_database(df_res)
-                    
+                    update_local_database(df_res, hash_map)
+
                     svc = get_service()
                     for url, grp in df_res.groupby('Source'):
                         s.write(f"📅 Memproses: {grp.iloc[0]['Nama_Paket']}")

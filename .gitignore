@@ -22,6 +22,7 @@ credentials.json
 token.json
 secret_supabase.env
 *.csv
+!database_tender.csv
 
 # Logs & History
 _Govem/govem_scheduler.log
