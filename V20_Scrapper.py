@@ -78,6 +78,10 @@ DAFTAR_LPSE = [
 BASE_URL = "https://spse.inaproc.id"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
 
+def strip_html(text):
+    """Hapus tag HTML dari string (misal: badge Seleksi Ulang/Gagal)."""
+    return re.sub(r"<[^>]+>", "", str(text)).strip()
+
 try:
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 except:
@@ -284,9 +288,9 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
 
         try:
             kode_tender = str(row[0]).strip()
-            nama_paket  = str(row[1]).strip()
-            instansi    = str(row[2]).strip()
-            tahapan     = str(row[3]).strip()
+            nama_paket  = strip_html(row[1])
+            instansi    = strip_html(row[2])
+            tahapan     = strip_html(row[3])
             link_detail = f"{BASE_URL}/{kode_lpse}/{endpoint}/{kode_tender}/pengumumanlelang"
 
             if not nama_paket or nama_paket == "nan":
