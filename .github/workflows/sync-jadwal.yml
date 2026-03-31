@@ -10,6 +10,9 @@ on:
     - cron: '0 */3 * * *'   # Setiap 3 jam (00:00, 03:00, 06:00, ... UTC)
   workflow_dispatch:          # Trigger manual dari GitHub Actions tab
 
+permissions:
+  contents: write
+
 jobs:
   sync:
     name: 🔄 Sync Jadwal ke Google Calendar
