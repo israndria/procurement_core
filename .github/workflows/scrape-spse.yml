@@ -1,0 +1,56 @@
+name: 🏗️ Auto Scrape SPSE ke Supabase
+
+# ============================================================
+# Scrape semua paket tender SPSE Kalsel → simpan ke Supabase
+# Jalan setiap hari jam 01:00 UTC (08:00 WIB), atau manual
+# ============================================================
+
+on:
+  schedule:
+    - cron: '0 1 * * *'    # Setiap hari jam 01:00 UTC (08:00 WIB)
+  workflow_dispatch:         # Trigger manual dari GitHub Actions tab
+    inputs:
+      kode_lpse:
+        description: 'Kode LPSE (kosongkan = semua)'
+        required: false
+        default: ''
+      tahun:
+        description: 'Tahun anggaran'
+        required: false
+        default: '2026'
+      kategori:
+        description: 'Kategori: Tender / Non Tender / Pencatatan'
+        required: false
+        default: 'Tender'
+
+jobs:
+  scrape:
+    name: 🔄 Scrape SPSE → Supabase
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install \
+            supabase \
+            pandas \
+            lxml \
+            html5lib \
+            python-dotenv
+
+      - name: 🏗️ Jalankan scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SCRAPE_KODE_LPSE: ${{ github.event.inputs.kode_lpse || '' }}
+          SCRAPE_TAHUN: ${{ github.event.inputs.tahun || '2026' }}
+          SCRAPE_KATEGORI: ${{ github.event.inputs.kategori || 'Tender' }}
+        run: python scrape_spse.py
