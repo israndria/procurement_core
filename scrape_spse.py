@@ -12,7 +12,6 @@ Env vars yang dibutuhkan:
 
 import urllib.request
 import urllib.parse
-import http.cookiejar
 import json
 import re
 import logging
@@ -20,6 +19,7 @@ import os
 import sys
 import time
 import pandas as pd
+import cloudscraper
 from io import StringIO
 from datetime import datetime
 from dotenv import load_dotenv
@@ -52,9 +52,9 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- Konfigurasi ---
 CONFIG_KATEGORI = {
-    "Tender":      {"tabel": "tender",      "endpoint": "lelang"},
-    "Non Tender":  {"tabel": "non_tender",  "endpoint": "nontender"},
-    "Pencatatan":  {"tabel": "pencatatan",  "endpoint": "pencatatan"},
+    "Tender":      {"tabel": "tender",      "endpoint": "lelang",     "endpoint_dt": "lelang", "suffix": "pengumumanlelang"},
+    "Non Tender":  {"tabel": "non_tender",  "endpoint": "nontender",  "endpoint_dt": "pl",     "suffix": "pengumumanpl"},
+    "Pencatatan":  {"tabel": "pencatatan",  "endpoint": "pencatatan", "endpoint_dt": "nonspk", "suffix": "pengumuman"},
 }
 
 DAFTAR_LPSE = [
@@ -81,36 +81,28 @@ def strip_html(text):
     """Hapus tag HTML dari string (misal: badge Seleksi Ulang/Gagal)."""
     return re.sub(r"<[^>]+>", "", str(text)).strip()
 
-# --- HTTP helpers ---
+# --- HTTP helpers (cloudscraper — bypass Cloudflare TLS fingerprint) ---
 def buat_opener():
-    cj = http.cookiejar.CookieJar()
-    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    """Buat cloudscraper session — meniru TLS fingerprint Chrome agar lolos Cloudflare."""
+    return cloudscraper.create_scraper(
+        browser={"browser": "chrome", "platform": "windows", "mobile": False}
+    )
 
 def fetch_html(opener, url, referer=None, data=None):
+    """GET atau POST menggunakan cloudscraper session."""
     headers = {
-        "User-Agent": UA,
         "Referer": referer or url,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-User": "?1",
-        "Cache-Control": "max-age=0",
     }
-    body = None
     if data:
-        body = urllib.parse.urlencode(data).encode()
-        headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
+        headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
         headers["X-Requested-With"] = "XMLHttpRequest"
-        headers["Sec-Fetch-Dest"] = "empty"
-        headers["Sec-Fetch-Mode"] = "cors"
-    req = urllib.request.Request(url, data=body, headers=headers)
-    with opener.open(req, timeout=20) as r:
-        return r.read().decode("utf-8", errors="replace")
+        r = opener.post(url, data=data, headers=headers, timeout=20)
+    else:
+        headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        r = opener.get(url, headers=headers, timeout=20)
+    r.raise_for_status()
+    return r.text
 
 def get_session(opener, kode_lpse, endpoint):
     url = f"{BASE_URL}/{kode_lpse}/{endpoint}"
@@ -119,8 +111,8 @@ def get_session(opener, kode_lpse, endpoint):
     m = re.search(r"authenticityToken = '([a-f0-9]+)'", html)
     return m.group(1) if m else ""
 
-def get_list_paket(opener, token, kode_lpse, endpoint, tahun):
-    url = f"{BASE_URL}/{kode_lpse}/dt/{endpoint}?tahun={tahun}"
+def get_list_paket(opener, token, kode_lpse, endpoint, endpoint_dt, tahun):
+    url = f"{BASE_URL}/{kode_lpse}/dt/{endpoint_dt}?tahun={tahun}"
     referer = f"{BASE_URL}/{kode_lpse}/{endpoint}"
     semua = []
     start = 0
@@ -165,15 +157,15 @@ def parse_tabel1(html):
         pass
     return {}
 
-def get_detail_paket(opener, kode_lpse, endpoint, kode_tender):
+def get_detail_paket(opener, kode_lpse, endpoint, kode_tender, suffix="pengumumanlelang"):
     base_lelang   = f"{BASE_URL}/{kode_lpse}/{endpoint}/{kode_tender}"
     base_evaluasi = f"{BASE_URL}/{kode_lpse}/evaluasi/{kode_tender}"
     referer = f"{BASE_URL}/{kode_lpse}/{endpoint}"
     detail = {}
 
-    # Pengumuman
+    # Pengumuman (suffix: pengumumanlelang / pengumumanpl / pengumuman)
     try:
-        html = fetch_html(opener, f"{base_lelang}/pengumumanlelang", referer=referer)
+        html = fetch_html(opener, f"{base_lelang}/{suffix}", referer=referer)
         t = pd.read_html(StringIO(html))[0]
         kv = {}
         for _, row in t.iterrows():
@@ -188,7 +180,7 @@ def get_detail_paket(opener, kode_lpse, endpoint, kode_tender):
         detail["nilai_hps"]        = kv.get("Nilai HPS Paket", "0")
         detail["metode_pengadaan"] = kv.get("Metode Pengadaan", "-")
     except Exception as e:
-        log.warning(f"  pengumumanlelang {kode_tender}: {e}")
+        log.warning(f"  {suffix} {kode_tender}: {e}")
 
     # Pemenang
     detail["nama_pemenang"] = "Belum Ada Pemenang"
@@ -228,12 +220,12 @@ def get_detail_paket(opener, kode_lpse, endpoint, kode_tender):
 
     return detail
 
-def scrape_satu_lpse(kode_lpse, nama_lpse, endpoint, tabel, tahun):
+def scrape_satu_lpse(kode_lpse, nama_lpse, endpoint, endpoint_dt, suffix, tabel, tahun):
     log.info(f"=== Mulai: {nama_lpse} ({endpoint}, tahun {tahun}) ===")
     try:
         opener = buat_opener()
         token  = get_session(opener, kode_lpse, endpoint)
-        rows   = get_list_paket(opener, token, kode_lpse, endpoint, tahun)
+        rows   = get_list_paket(opener, token, kode_lpse, endpoint, endpoint_dt, tahun)
         log.info(f"  {len(rows)} paket ditemukan")
     except Exception as e:
         log.error(f"  Gagal ambil list: {e}")
@@ -250,13 +242,13 @@ def scrape_satu_lpse(kode_lpse, nama_lpse, endpoint, tabel, tahun):
             if not nama_paket or nama_paket == "nan":
                 continue
 
-            detail = get_detail_paket(opener, kode_lpse, endpoint, kode_tender)
+            detail = get_detail_paket(opener, kode_lpse, endpoint, kode_tender, suffix)
             data = {
                 "kode_tender":         kode_tender,
                 "nama_paket":          nama_paket,
                 "instansi":            instansi,
                 "tahapan":             tahapan,
-                "link_detail":         f"{BASE_URL}/{kode_lpse}/{endpoint}/{kode_tender}/pengumumanlelang",
+                "link_detail":         f"{BASE_URL}/{kode_lpse}/{endpoint}/{kode_tender}/{suffix}",
                 "jenis_pengadaan":     detail.get("jenis_pengadaan", "-"),
                 "satuan_kerja":        detail.get("satuan_kerja", "-"),
                 "nilai_pagu":          detail.get("nilai_pagu", "0"),
@@ -292,9 +284,11 @@ def main():
         log.error(f"Kategori tidak valid: {kategori}. Pilih: {list(CONFIG_KATEGORI)}")
         sys.exit(1)
 
-    config   = CONFIG_KATEGORI[kategori]
-    endpoint = config["endpoint"]
-    tabel    = config["tabel"]
+    config      = CONFIG_KATEGORI[kategori]
+    endpoint    = config["endpoint"]
+    endpoint_dt = config["endpoint_dt"]
+    suffix      = config["suffix"]
+    tabel       = config["tabel"]
 
     targets = DAFTAR_LPSE
     if filter_kode:
@@ -307,7 +301,7 @@ def main():
 
     total_ok = total_err = 0
     for i, lpse in enumerate(targets):
-        ok, err = scrape_satu_lpse(lpse["kode"], lpse["nama"], endpoint, tabel, tahun)
+        ok, err = scrape_satu_lpse(lpse["kode"], lpse["nama"], endpoint, endpoint_dt, suffix, tabel, tahun)
         total_ok  += ok
         total_err += err
         if i < len(targets) - 1:
