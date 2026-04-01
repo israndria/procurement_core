@@ -1,12 +1,12 @@
 import streamlit as st
 import urllib.request
 import urllib.parse
-import http.cookiejar
 import json
 import re
 import logging
 import subprocess
 import pandas as pd
+import cloudscraper
 from io import StringIO, BytesIO
 from supabase import create_client
 import os
@@ -26,10 +26,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 2. SETUP DATA ---
-_dir1 = os.path.dirname(os.path.abspath(__file__)) if '__file__' in dir() else os.getcwd()
-_env_path = os.path.join(_dir1, "secret_supabase.env")
-if not os.path.exists(_env_path):
-    _env_path = os.path.join(os.getcwd(), "secret_supabase.env")
+_kandidat = [
+    r"D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\secret_supabase.env",
+    os.path.join(os.getcwd(), "secret_supabase.env"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "secret_supabase.env"),
+]
+_env_path = next((p for p in _kandidat if os.path.exists(p)), _kandidat[0])
+_dir1 = os.path.dirname(_env_path)
 load_dotenv(dotenv_path=_env_path)
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
@@ -44,9 +47,9 @@ logging.basicConfig(
 log = logging.getLogger("scraper")
 
 CONFIG_KATEGORI = {
-    "Tender":     {"tabel": "tender",     "endpoint": "lelang"},
-    "Non Tender": {"tabel": "non_tender", "endpoint": "nontender"},
-    "Pencatatan": {"tabel": "pencatatan", "endpoint": "pencatatan"},
+    "Tender":     {"tabel": "tender",     "endpoint": "lelang",     "endpoint_dt": "lelang", "suffix": "pengumumanlelang"},
+    "Non Tender": {"tabel": "non_tender", "endpoint": "nontender",  "endpoint_dt": "pl",     "suffix": "pengumumanpl"},
+    "Pencatatan": {"tabel": "pencatatan", "endpoint": "pencatatan", "endpoint_dt": "nonspk", "suffix": "pengumuman"},
 }
 
 DAFTAR_LPSE = [
@@ -73,9 +76,11 @@ def strip_html(text):
     return re.sub(r"<[^>]+>", "", str(text)).strip()
 
 try:
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise ValueError(f"Env tidak terbaca. Path: {_env_path} | URL: {SUPABASE_URL}")
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-except:
-    st.error("Koneksi Supabase Gagal.")
+except Exception as _e:
+    st.error(f"Koneksi Supabase Gagal: {_e}")
     st.stop()
 
 # --- 3. UTILITY ---
@@ -107,34 +112,28 @@ def get_last_update(kode_lpse, kategori_selected):
 
 # --- 4. ENGINE SCRAPING ---
 def buat_opener():
-    cj = http.cookiejar.CookieJar()
-    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    """Buat cloudscraper session — meniru TLS fingerprint Chrome agar lolos Cloudflare."""
+    return cloudscraper.create_scraper(
+        browser={"browser": "chrome", "platform": "windows", "mobile": False}
+    )
 
 def fetch_html(opener, url, referer=None, data=None):
+    """GET atau POST menggunakan cloudscraper session.
+    Parameter 'opener' sekarang adalah cloudscraper session (bukan urllib opener).
+    """
     headers = {
-        "User-Agent": UA,
         "Referer": referer or url,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-User": "?1",
-        "Cache-Control": "max-age=0",
     }
-    body = None
     if data:
-        body = urllib.parse.urlencode(data).encode()
-        headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
+        headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
         headers["X-Requested-With"] = "XMLHttpRequest"
-        headers["Sec-Fetch-Dest"] = "empty"
-        headers["Sec-Fetch-Mode"] = "cors"
-    req = urllib.request.Request(url, data=body, headers=headers)
-    with opener.open(req, timeout=20) as r:
-        return r.read().decode("utf-8", errors="replace")
+        r = opener.post(url, data=data, headers=headers, timeout=20)
+    else:
+        headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        r = opener.get(url, headers=headers, timeout=20)
+    r.raise_for_status()
+    return r.text
 
 def get_session(opener, kode_lpse, endpoint):
     import time
@@ -144,9 +143,9 @@ def get_session(opener, kode_lpse, endpoint):
     m = re.search(r"authenticityToken = '([a-f0-9]+)'", html)
     return m.group(1) if m else ""
 
-def get_list_paket(opener, token, kode_lpse, endpoint, tahun):
+def get_list_paket(opener, token, kode_lpse, endpoint, endpoint_dt, tahun):
     import time
-    url = f"{BASE_URL}/{kode_lpse}/dt/{endpoint}?tahun={tahun}"
+    url = f"{BASE_URL}/{kode_lpse}/dt/{endpoint_dt}?tahun={tahun}"
     referer = f"{BASE_URL}/{kode_lpse}/{endpoint}"
     semua = []; start = 0; PAGE = 100; MAX_RETRY = 3
     while True:
@@ -178,13 +177,13 @@ def parse_tabel1(html):
     except: pass
     return {}
 
-def get_detail_paket(opener, kode_lpse, endpoint, kode_tender):
+def get_detail_paket(opener, kode_lpse, endpoint, kode_tender, suffix="pengumumanlelang"):
     base_lelang   = f"{BASE_URL}/{kode_lpse}/{endpoint}/{kode_tender}"
     base_evaluasi = f"{BASE_URL}/{kode_lpse}/evaluasi/{kode_tender}"
     referer = f"{BASE_URL}/{kode_lpse}/{endpoint}"
     detail = {}
     try:
-        html = fetch_html(opener, f"{base_lelang}/pengumumanlelang", referer=referer)
+        html = fetch_html(opener, f"{base_lelang}/{suffix}", referer=referer)
         t = pd.read_html(StringIO(html))[0]
         kv = {}
         for _, row in t.iterrows():
@@ -199,7 +198,7 @@ def get_detail_paket(opener, kode_lpse, endpoint, kode_tender):
         detail["nilai_hps"]        = kv.get("Nilai HPS Paket", "0")
         detail["metode_pengadaan"] = kv.get("Metode Pengadaan", "-")
     except Exception as e:
-        log.warning(f"  pengumumanlelang {kode_tender}: {e}")
+        log.warning(f"  {suffix} {kode_tender}: {e}")
 
     detail["nama_pemenang"] = "Belum Ada Pemenang"
     try:
@@ -233,12 +232,14 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
     if os.path.exists(STOP_FILE): return "⛔ Dibatalkan"
     config = CONFIG_KATEGORI[kategori_pilihan]
     tabel = config["tabel"]; endpoint = config["endpoint"]
+    endpoint_dt = config.get("endpoint_dt", endpoint)
+    suffix = config.get("suffix", "pengumumanlelang")
     nama_lpse = target["nama"]; kode_lpse = target["kode"]
     log.info(f"Mulai scrape: {nama_lpse} ({kategori_pilihan})")
     try:
         opener = buat_opener()
         token  = get_session(opener, kode_lpse, endpoint)
-        rows   = get_list_paket(opener, token, kode_lpse, endpoint, tahun_pilihan)
+        rows   = get_list_paket(opener, token, kode_lpse, endpoint, endpoint_dt, tahun_pilihan)
         log.info(f"  {nama_lpse}: {len(rows)} paket")
     except Exception as e:
         log.error(f"  {nama_lpse}: Gagal ambil list — {e}")
@@ -253,11 +254,11 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
             instansi    = strip_html(row[2])
             tahapan     = strip_html(row[3])
             if not nama_paket or nama_paket == "nan": continue
-            detail = get_detail_paket(opener, kode_lpse, endpoint, kode_tender)
+            detail = get_detail_paket(opener, kode_lpse, endpoint, kode_tender, suffix)
             data = {
                 "kode_tender": kode_tender, "nama_paket": nama_paket,
                 "instansi": instansi, "tahapan": tahapan,
-                "link_detail": f"{BASE_URL}/{kode_lpse}/{endpoint}/{kode_tender}/pengumumanlelang",
+                "link_detail": f"{BASE_URL}/{kode_lpse}/{endpoint}/{kode_tender}/{suffix}",
                 "jenis_pengadaan":    detail.get("jenis_pengadaan", "-"),
                 "satuan_kerja":       detail.get("satuan_kerja", "-"),
                 "nilai_pagu":         detail.get("nilai_pagu", "0"),
@@ -289,7 +290,7 @@ st.title("🏗️ SPSE Scraper V2.1")
 tab_scraper, tab_dashboard, tab_log = st.tabs(["🚀 Scraper", "📊 Dashboard", "📋 Log & Status"])
 
 # ============================================================
-# TAB 1: SCRAPER (existing)
+# TAB 1: SCRAPER
 # ============================================================
 with tab_scraper:
     col_thn, col_kat = st.columns([1, 2])
@@ -318,7 +319,7 @@ with tab_scraper:
     col_opts, _ = st.columns([2, 3])
     with col_opts:
         max_workers_input = st.slider("Parallel Workers", min_value=1, max_value=5, value=2)
-    st.info("ℹ️ V2.1 menggunakan urllib (tanpa Chrome).")
+    st.info("ℹ️ V2.1 menggunakan cloudscraper (bypass Cloudflare TLS fingerprint).")
 
     c_start, c_stop = st.columns([4, 1])
     with c_start:
@@ -327,7 +328,6 @@ with tab_scraper:
             if not target_dipilih:
                 st.warning("Pilih daerah!")
             else:
-                # Simpan snapshot kode_tender sebelum scrape (untuk deteksi paket baru)
                 tabel_aktif = CONFIG_KATEGORI[kategori_input]["tabel"]
                 try:
                     snap = supabase.table(tabel_aktif).select("kode_tender").execute()
@@ -348,7 +348,6 @@ with tab_scraper:
                         status_box.write(res)
 
                 if not os.path.exists(STOP_FILE):
-                    # Deteksi paket baru
                     try:
                         snap_sesudah = supabase.table(tabel_aktif).select("kode_tender,nama_paket,instansi").execute()
                         kode_sesudah = {r["kode_tender"] for r in snap_sesudah.data}
@@ -379,7 +378,6 @@ with tab_scraper:
 with tab_dashboard:
     st.subheader("📊 Dashboard Data Tender")
 
-    # Filter row
     fc1, fc2, fc3, fc4 = st.columns([1, 2, 2, 2])
     with fc1:
         dash_tahun = st.number_input("Tahun", min_value=2020, max_value=2030,
@@ -407,7 +405,6 @@ with tab_dashboard:
     df = load_dashboard(dash_kat, dash_tahun, dash_instansi, dash_search)
 
     if not df.empty:
-        # Metrics
         m1, m2, m3, m4 = st.columns(4)
         total = len(df)
         selesai = len(df[df["tahapan"].str.contains("Selesai", na=False)])
@@ -420,7 +417,6 @@ with tab_dashboard:
 
         st.write("---")
 
-        # Tabel
         kolom_tampil = ["kode_tender", "nama_paket", "instansi", "tahapan",
                         "nilai_hps", "nama_pemenang", "harga_kontrak", "kontrak_mulai", "link_detail"]
         kolom_ada = [c for c in kolom_tampil if c in df.columns]
@@ -438,7 +434,6 @@ with tab_dashboard:
             }
         )
 
-        # Export
         st.write("---")
         ex1, ex2 = st.columns(2)
         with ex1:
@@ -469,7 +464,6 @@ with tab_dashboard:
 with tab_log:
     st.subheader("📋 Log Scraper & Status Task Scheduler")
 
-    # Status Task Scheduler
     st.markdown("**Status Task Scheduler (`POKJA_ScrapeSpse`)**")
     try:
         ps_cmd = (
@@ -498,7 +492,6 @@ with tab_log:
 
     st.write("---")
 
-    # Live Log
     st.markdown("**Log Scraper (100 baris terakhir)**")
     try:
         if os.path.exists(LOG_FILE):
