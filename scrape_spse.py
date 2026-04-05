@@ -84,9 +84,14 @@ def strip_html(text):
 # --- HTTP helpers (cloudscraper — bypass Cloudflare TLS fingerprint) ---
 def buat_opener():
     """Buat cloudscraper session — meniru TLS fingerprint Chrome agar lolos Cloudflare."""
-    return cloudscraper.create_scraper(
+    scraper = cloudscraper.create_scraper(
         browser={"browser": "chrome", "platform": "windows", "mobile": False}
     )
+    # Support proxy via env var — untuk GitHub Actions + Tor (SCRAPE_PROXY=socks5h://127.0.0.1:9050)
+    proxy = os.environ.get('SCRAPE_PROXY')
+    if proxy:
+        scraper.proxies = {'http': proxy, 'https': proxy}
+    return scraper
 
 def fetch_html(opener, url, referer=None, data=None):
     """GET atau POST menggunakan cloudscraper session."""

@@ -1,1 +1,7 @@
 supabase
+pandas
+lxml
+html5lib
+python-dotenv
+cloudscraper
+requests[socks]
