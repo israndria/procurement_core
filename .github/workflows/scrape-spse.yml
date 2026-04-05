@@ -22,10 +22,6 @@ on:
         description: 'Kategori: Tender / Non Tender / Pencatatan'
         required: false
         default: 'Tender'
-      use_tor:
-        description: 'Gunakan Tor sebagai proxy (true/false) — aktifkan jika kena 403'
-        required: false
-        default: 'false'
 
 jobs:
   scrape:
@@ -42,14 +38,13 @@ jobs:
           python-version: '3.11'
 
       - name: 📦 Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: 🧅 Install & start Tor (opsional)
-        if: ${{ github.event.inputs.use_tor == 'true' }}
         run: |
-          sudo apt-get install -y tor
-          sudo service tor start
-          sleep 5
+          pip install \
+            supabase \
+            pandas \
+            lxml \
+            html5lib \
+            python-dotenv
 
       - name: 🏗️ Jalankan scraper
         env:
@@ -58,5 +53,4 @@ jobs:
           SCRAPE_KODE_LPSE: ${{ github.event.inputs.kode_lpse || '' }}
           SCRAPE_TAHUN: ${{ github.event.inputs.tahun || '2026' }}
           SCRAPE_KATEGORI: ${{ github.event.inputs.kategori || 'Tender' }}
-          SCRAPE_PROXY: ${{ github.event.inputs.use_tor == 'true' && 'socks5h://127.0.0.1:9050' || '' }}
         run: python scrape_spse.py
