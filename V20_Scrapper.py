@@ -26,14 +26,34 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 2. SETUP DATA ---
-_kandidat = [
-    r"D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\secret_supabase.env",
-    os.path.join(os.getcwd(), "secret_supabase.env"),
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "secret_supabase.env"),
-]
-_env_path = next((p for p in _kandidat if os.path.exists(p)), _kandidat[0])
+def _load_env_manual():
+    """Baca .env langsung tanpa load_dotenv."""
+    import pathlib
+    kandidat = [
+        pathlib.Path(__file__).resolve().parent / "secret_supabase.env",
+        pathlib.Path(os.getcwd()) / "secret_supabase.env",
+        pathlib.Path(r"D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\secret_supabase.env"),
+    ]
+    errs = []
+    for path in kandidat:
+        try:
+            with open(str(path), encoding="utf-8-sig") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, val = line.split("=", 1)
+                        os.environ[key.strip()] = val.strip().strip('"').strip("'")
+            return str(path)
+        except Exception as e:
+            errs.append(f"{path}: {e}")
+    raise FileNotFoundError(f"secret_supabase.env tidak ditemukan.\n" + "\n".join(errs))
+
+try:
+    _env_path = _load_env_manual()
+except FileNotFoundError as _fe:
+    st.error(str(_fe))
+    st.stop()
 _dir1 = os.path.dirname(_env_path)
-load_dotenv(dotenv_path=_env_path)
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 STOP_FILE = os.path.join(os.path.dirname(_env_path), "stop_signal.txt")
@@ -45,6 +65,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S", encoding="utf-8"
 )
 log = logging.getLogger("scraper")
+# Suppress noise dari httpx/httpcore (Supabase HTTP log)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 CONFIG_KATEGORI = {
     "Tender":     {"tabel": "tender",     "endpoint": "lelang",     "endpoint_dt": "lelang", "suffix": "pengumumanlelang"},
@@ -78,10 +101,19 @@ def strip_html(text):
 try:
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise ValueError(f"Env tidak terbaca. Path: {_env_path} | URL: {SUPABASE_URL}")
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 except Exception as _e:
     st.error(f"Koneksi Supabase Gagal: {_e}")
     st.stop()
+
+def _sb():
+    """Buat Supabase client baru dengan fresh httpx.Client() — hindari stale connection pool."""
+    import httpx
+    from supabase.lib.client_options import SyncClientOptions
+    return create_client(SUPABASE_URL, SUPABASE_KEY,
+                         options=SyncClientOptions(httpx_client=httpx.Client()))
+
+# Global untuk backward-compat (snapshot/notifikasi di Tab Scraper)
+supabase = _sb()
 
 # --- 3. UTILITY ---
 def toggle_all():
@@ -97,7 +129,47 @@ def parse_wib(tgl_raw):
         except: pass
     return None
 
-def get_last_update(kode_lpse, kategori_selected):
+def _query_last_update(kategori_selected):
+    """Query bulk last update dari Supabase. Dipanggil oleh get_all_last_update."""
+    nama_tabel = CONFIG_KATEGORI[kategori_selected]["tabel"]
+    hasil = {}
+    sb = _sb()
+    response = sb.table(nama_tabel) \
+        .select('link_detail,diambil_pada') \
+        .order('diambil_pada', desc=True).limit(1000).execute()
+    for r in response.data:
+        link = r.get("link_detail", "")
+        tgl  = r.get("diambil_pada")
+        if not link or not tgl: continue
+        for lpse in DAFTAR_LPSE:
+            kode = lpse["kode"]
+            if kode not in hasil and f"/{kode}/" in link:
+                wib = parse_wib(tgl)
+                hasil[kode] = f"🟢 {wib.strftime('%d/%m %H:%M')}" if wib else "⚪ Kosong"
+                break
+    return hasil
+
+def get_all_last_update(kategori_selected):
+    """Bulk query 1x untuk semua LPSE, dengan cache TTL 120 detik di session_state."""
+    import time
+    ck = f"_lu_{kategori_selected}"
+    ct = f"_lu_ts_{kategori_selected}"
+    now = time.time()
+    if ck in st.session_state and (now - st.session_state.get(ct, 0)) < 120:
+        return st.session_state[ck]
+    try:
+        hasil = _query_last_update(kategori_selected)
+    except Exception as e:
+        st.warning(f"⚠️ Gagal baca last update: {e}")
+        hasil = {}
+    st.session_state[ck] = hasil
+    st.session_state[ct] = now
+    return hasil
+
+def get_last_update(kode_lpse, kategori_selected, bulk_map=None):
+    if bulk_map is not None:
+        return bulk_map.get(kode_lpse, "⚪ Kosong")
+    # Fallback: query langsung (tidak dipakai di UI normal)
     nama_tabel = CONFIG_KATEGORI[kategori_selected]["tabel"]
     try:
         response = supabase.table(nama_tabel) \
@@ -228,24 +300,44 @@ def get_detail_paket(opener, kode_lpse, endpoint, kode_tender, suffix="pengumuma
     except Exception as e: log.warning(f"  jadwal {kode_tender}: {e}")
     return detail
 
-def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
+def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, incremental=False):
     if os.path.exists(STOP_FILE): return "⛔ Dibatalkan"
+    # Buat Supabase client + httpx client baru per thread — hindari konflik event loop Streamlit
+    import httpx
+    from supabase.lib.client_options import SyncClientOptions
+    sb = create_client(SUPABASE_URL, SUPABASE_KEY,
+                       options=SyncClientOptions(httpx_client=httpx.Client()))
     config = CONFIG_KATEGORI[kategori_pilihan]
     tabel = config["tabel"]; endpoint = config["endpoint"]
     endpoint_dt = config.get("endpoint_dt", endpoint)
     suffix = config.get("suffix", "pengumumanlelang")
     nama_lpse = target["nama"]; kode_lpse = target["kode"]
-    log.info(f"Mulai scrape: {nama_lpse} ({kategori_pilihan})")
+    mode_label = "[INCREMENTAL]" if incremental else "[FULL]"
+    log.info(f"Mulai scrape: {nama_lpse} ({kategori_pilihan}) {mode_label}")
+    import time as _time
     try:
         opener = buat_opener()
         token  = get_session(opener, kode_lpse, endpoint)
+        _time.sleep(1)  # jeda kecil sebelum get_list agar tidak langsung hit server
         rows   = get_list_paket(opener, token, kode_lpse, endpoint, endpoint_dt, tahun_pilihan)
-        log.info(f"  {nama_lpse}: {len(rows)} paket")
+        log.info(f"  {nama_lpse}: {len(rows)} paket ditemukan di SPSE")
     except Exception as e:
         log.error(f"  {nama_lpse}: Gagal ambil list — {e}")
         return f"❌ {nama_lpse}: Gagal ambil list"
 
-    ok = 0; err = 0
+    # Incremental: ambil snapshot DB (kode_tender + tahapan) untuk LPSE ini saja
+    db_map = {}
+    if incremental:
+        try:
+            snap = sb.table(tabel).select("kode_tender,tahapan") \
+                .ilike("link_detail", f"%/{kode_lpse}/%").execute()
+            db_map = {r["kode_tender"]: r["tahapan"] for r in snap.data}
+            log.info(f"  DB snapshot: {len(db_map)} paket tersimpan untuk {kode_lpse}")
+        except Exception as e:
+            log.warning(f"  Gagal ambil snapshot DB, fallback ke full: {e}")
+            incremental = False
+
+    ok = 0; err = 0; skip = 0; jml_baru = 0; jml_berubah = 0
     for row in rows:
         if os.path.exists(STOP_FILE): return f"🛑 {nama_lpse}: STOP"
         try:
@@ -254,6 +346,17 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
             instansi    = strip_html(row[2])
             tahapan     = strip_html(row[3])
             if not nama_paket or nama_paket == "nan": continue
+
+            # Incremental: skip jika sudah ada dan tahapan tidak berubah
+            if incremental and kode_tender in db_map:
+                if db_map[kode_tender] == tahapan:
+                    skip += 1
+                    continue
+                else:
+                    jml_berubah += 1
+            elif incremental:
+                jml_baru += 1
+
             detail = get_detail_paket(opener, kode_lpse, endpoint, kode_tender, suffix)
             data = {
                 "kode_tender": kode_tender, "nama_paket": nama_paket,
@@ -273,12 +376,16 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, supabase_client):
                 "kontrak_selesai":    detail.get("kontrak_selesai", "-"),
                 "diambil_pada":       datetime.now().isoformat(),
             }
-            supabase_client.table(tabel).upsert(data).execute()
+            sb.table(tabel).upsert(data).execute()
             ok += 1
         except Exception as e:
             err += 1
-            log.warning(f"  Error {row[0] if row else '?'}: {str(e)[:150]}")
-    msg = f"{nama_lpse}: ✅ {ok} data"
+            log.warning(f"  Error {row[0] if row else '?'}: [{type(e).__name__}] {str(e)[:150]}")
+
+    if incremental:
+        msg = f"{nama_lpse}: ✅ {ok} diproses ({jml_baru} baru, {jml_berubah} berubah), ⏭️ {skip} dilewati"
+    else:
+        msg = f"{nama_lpse}: ✅ {ok} data"
     if err: msg += f", ⚠️ {err} error"
     log.info(msg)
     return msg
@@ -306,6 +413,9 @@ with tab_scraper:
     c2.markdown("**DAERAH**")
     c3.markdown(f"**LAST UPDATE (Tabel: {CONFIG_KATEGORI[kategori_input]['tabel']})**")
 
+    # Bulk query 1x untuk semua LPSE
+    bulk_map = get_all_last_update(kategori_input)
+
     target_dipilih = []
     for lpse in DAFTAR_LPSE:
         col_a, col_b, col_c = st.columns([0.5, 4, 3])
@@ -313,12 +423,21 @@ with tab_scraper:
             st.session_state[f"chk_{lpse['kode']}"] = False
         if col_a.checkbox("", key=f"chk_{lpse['kode']}"): target_dipilih.append(lpse)
         col_b.markdown(lpse['nama'])
-        col_c.markdown(get_last_update(lpse['kode'], kategori_input))
+        col_c.markdown(get_last_update(lpse['kode'], kategori_input, bulk_map))
 
     st.write("---")
-    col_opts, _ = st.columns([2, 3])
+    col_opts, col_mode = st.columns([2, 3])
     with col_opts:
-        max_workers_input = st.slider("Parallel Workers", min_value=1, max_value=5, value=2)
+        max_workers_input = st.slider("Parallel Workers", min_value=1, max_value=3, value=1,
+                                      help="Non Tender & Pencatatan disarankan pakai 1 worker agar tidak kena rate limit Cloudflare (429)")
+    with col_mode:
+        mode_scrape = st.radio(
+            "Mode Scrape",
+            ["🔄 Full (semua paket)", "⚡ Incremental (baru & berubah)"],
+            horizontal=True, index=1,
+            help="Incremental: hanya fetch detail paket baru atau yang berubah tahapan. Lebih cepat."
+        )
+        incremental_mode = "Incremental" in mode_scrape
     st.info("ℹ️ V2.1 menggunakan cloudscraper (bypass Cloudflare TLS fingerprint).")
 
     c_start, c_stop = st.columns([4, 1])
@@ -330,7 +449,7 @@ with tab_scraper:
             else:
                 tabel_aktif = CONFIG_KATEGORI[kategori_input]["tabel"]
                 try:
-                    snap = supabase.table(tabel_aktif).select("kode_tender").execute()
+                    snap = _sb().table(tabel_aktif).select("kode_tender").execute()
                     st.session_state["snapshot_sebelum"] = {r["kode_tender"] for r in snap.data}
                 except: st.session_state["snapshot_sebelum"] = set()
 
@@ -338,18 +457,28 @@ with tab_scraper:
                     f"Menghisap data ke tabel: **{CONFIG_KATEGORI[kategori_input]['tabel']}**...",
                     expanded=True)
                 p_bar = status_box.progress(0)
+                hasil_list = []
                 with ThreadPoolExecutor(max_workers=max_workers_input) as executor:
-                    futures = [executor.submit(scrape_satu_lpse, t, tahun_input, kategori_input, supabase)
+                    futures = [executor.submit(scrape_satu_lpse, t, tahun_input, kategori_input, incremental_mode)
                                for t in target_dipilih]
                     done = 0
                     for f in futures:
                         res = f.result(); done += 1
                         p_bar.progress(int((done / len(futures)) * 100))
                         status_box.write(res)
+                        hasil_list.append(res)
+
+                # Simpan hasil ke session_state agar tetap tampil setelah selesai
+                st.session_state["hasil_scrape_terakhir"] = {
+                    "waktu": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                    "tabel": tabel_aktif,
+                    "mode": "Incremental" if incremental_mode else "Full",
+                    "hasil": hasil_list,
+                }
 
                 if not os.path.exists(STOP_FILE):
                     try:
-                        snap_sesudah = supabase.table(tabel_aktif).select("kode_tender,nama_paket,instansi").execute()
+                        snap_sesudah = _sb().table(tabel_aktif).select("kode_tender,nama_paket,instansi").execute()
                         kode_sesudah = {r["kode_tender"] for r in snap_sesudah.data}
                         kode_baru = kode_sesudah - st.session_state.get("snapshot_sebelum", set())
                         if kode_baru:
@@ -364,6 +493,10 @@ with tab_scraper:
                     status_box.update(label="Selesai!", state="complete", expanded=False)
                     st.balloons()
                     st.cache_data.clear()
+                    # Reset cache last_update agar langsung fresh setelah scrape
+                    for _k in list(st.session_state.keys()):
+                        if _k.startswith("_lu_ts_"):
+                            st.session_state[_k] = 0
                     import time; time.sleep(2)
                     st.rerun()
 
@@ -371,6 +504,13 @@ with tab_scraper:
         if st.button("⛔ STOP", type="secondary"):
             with open(STOP_FILE, "w") as f: f.write("STOP")
             st.toast("Stop signal sent.")
+
+    # Tampilkan hasil scraping terakhir (persisten setelah selesai)
+    if "hasil_scrape_terakhir" in st.session_state:
+        h = st.session_state["hasil_scrape_terakhir"]
+        with st.expander(f"📋 Hasil Scraping Terakhir — {h['waktu']} | Tabel: {h['tabel']} | Mode: {h['mode']}", expanded=True):
+            for baris in h["hasil"]:
+                st.markdown(baris)
 
 # ============================================================
 # TAB 2: DASHBOARD
@@ -389,12 +529,31 @@ with tab_dashboard:
     with fc4:
         dash_search = st.text_input("Cari nama paket...", key="dash_search")
 
-    @st.cache_data(ttl=300)
-    def load_dashboard(tabel, tahun, instansi_filter, search):
+    @st.cache_data(ttl=60)
+    def get_daftar_tahapan(tabel):
+        """Ambil daftar nilai unik tahapan dari DB untuk filter dropdown."""
         try:
-            q = supabase.table(tabel).select("*").ilike("tahun_anggaran", f"%{tahun}%")
+            r = _sb().table(tabel).select("tahapan").execute()
+            vals = sorted({row["tahapan"] for row in r.data if row.get("tahapan")})
+            return vals
+        except:
+            return []
+
+    daftar_tahapan = get_daftar_tahapan(dash_kat)
+    dash_tahapan = st.selectbox(
+        "Filter Tahapan",
+        ["Semua"] + daftar_tahapan,
+        key="dash_tahapan"
+    )
+
+    @st.cache_data(ttl=300)
+    def load_dashboard(tabel, tahun, instansi_filter, tahapan_filter, search):
+        try:
+            q = _sb().table(tabel).select("*").ilike("tahun_anggaran", f"%{tahun}%")
             if instansi_filter != "Semua":
                 q = q.ilike("instansi", f"%{instansi_filter}%")
+            if tahapan_filter != "Semua":
+                q = q.eq("tahapan", tahapan_filter)
             if search:
                 q = q.ilike("nama_paket", f"%{search}%")
             r = q.order("diambil_pada", desc=True).limit(500).execute()
@@ -402,7 +561,7 @@ with tab_dashboard:
         except Exception as e:
             return pd.DataFrame()
 
-    df = load_dashboard(dash_kat, dash_tahun, dash_instansi, dash_search)
+    df = load_dashboard(dash_kat, dash_tahun, dash_instansi, dash_tahapan, dash_search)
 
     if not df.empty:
         m1, m2, m3, m4 = st.columns(4)
@@ -473,18 +632,40 @@ with tab_log:
         )
         result = subprocess.run(
             ["powershell", "-Command", ps_cmd],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         if result.returncode == 0 and result.stdout.strip():
             info = json.loads(result.stdout)
-            sc1, sc2, sc3 = st.columns(3)
-            last_run = info.get("LastRunTime", "-")
-            next_run = info.get("NextRunTime", "-")
+            sc1, sc2, sc3, sc4 = st.columns([2, 2, 2, 1])
             last_result = info.get("LastTaskResult", -1)
             status_label = "✅ Sukses" if last_result == 0 else f"❌ Error (kode {last_result})"
-            sc1.metric("Last Run", str(last_run)[:16] if last_run else "-")
-            sc2.metric("Next Run", str(next_run)[:16] if next_run else "-")
+
+            def parse_ps_date(raw):
+                """Parse /Date(1234567890123+0700)/ dari PowerShell JSON ke string WIB."""
+                if not raw: return "-"
+                m = re.search(r"/Date\((\d+)", str(raw))
+                if m:
+                    ts = int(m.group(1)) / 1000  # ms → detik
+                    dt = datetime.utcfromtimestamp(ts) + timedelta(hours=7)
+                    return dt.strftime("%d/%m/%Y %H:%M")
+                return str(raw)[:16]
+
+            sc1.metric("Last Run", parse_ps_date(info.get("LastRunTime")))
+            sc2.metric("Next Run", parse_ps_date(info.get("NextRunTime")))
             sc3.metric("Status", status_label)
+            with sc4:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("▶️ Jalankan Sekarang", use_container_width=True):
+                    try:
+                        subprocess.run(
+                            ["powershell", "-Command", "Start-ScheduledTask -TaskName 'POKJA_ScrapeSpse'"],
+                            capture_output=True, text=True, timeout=10,
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        st.toast("✅ Task Scheduler dijalankan!", icon="🚀")
+                    except Exception as ex:
+                        st.error(f"Gagal trigger: {ex}")
         else:
             st.warning("Task Scheduler tidak ditemukan atau tidak bisa dibaca.")
     except Exception as e:
@@ -497,7 +678,10 @@ with tab_log:
         if os.path.exists(LOG_FILE):
             with open(LOG_FILE, encoding="utf-8") as f:
                 semua_baris = f.readlines()
-            tail = "".join(semua_baris[-100:])
+            # Filter baris noise dari httpx (HTTP Request: POST/GET ke supabase/spse)
+            FILTER_NOISE = ("HTTP Request:", "httpx", "httpcore")
+            bersih = [b for b in semua_baris if not any(n in b for n in FILTER_NOISE)]
+            tail = "".join(bersih[-100:])
             st.code(tail, language=None)
         else:
             st.info("Log belum ada.")
