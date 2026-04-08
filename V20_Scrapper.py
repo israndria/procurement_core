@@ -125,28 +125,29 @@ def parse_wib(tgl_raw):
     tgl_raw = tgl_raw.split('+')[0].replace("Z", "")
     for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
         try:
-            return datetime.strptime(tgl_raw, fmt) + timedelta(hours=7)
+            return datetime.strptime(tgl_raw, fmt)
         except: pass
     return None
 
 def _query_last_update(kategori_selected):
-    """Query bulk last update dari Supabase. Dipanggil oleh get_all_last_update."""
+    """Query last update per LPSE — 1 query kecil per LPSE agar tidak kena batas 1000 row Supabase."""
     nama_tabel = CONFIG_KATEGORI[kategori_selected]["tabel"]
     hasil = {}
     sb = _sb()
-    response = sb.table(nama_tabel) \
-        .select('link_detail,diambil_pada') \
-        .order('diambil_pada', desc=True).limit(1000).execute()
-    for r in response.data:
-        link = r.get("link_detail", "")
-        tgl  = r.get("diambil_pada")
-        if not link or not tgl: continue
-        for lpse in DAFTAR_LPSE:
-            kode = lpse["kode"]
-            if kode not in hasil and f"/{kode}/" in link:
-                wib = parse_wib(tgl)
+    for lpse in DAFTAR_LPSE:
+        kode = lpse["kode"]
+        try:
+            r = sb.table(nama_tabel) \
+                .select('diambil_pada') \
+                .ilike('link_detail', f'%/{kode}/%') \
+                .order('diambil_pada', desc=True).limit(1).execute()
+            if r.data and r.data[0].get('diambil_pada'):
+                wib = parse_wib(r.data[0]['diambil_pada'])
                 hasil[kode] = f"🟢 {wib.strftime('%d/%m %H:%M')}" if wib else "⚪ Kosong"
-                break
+            else:
+                hasil[kode] = "⚪ Kosong"
+        except:
+            hasil[kode] = "-"
     return hasil
 
 def get_all_last_update(kategori_selected):
