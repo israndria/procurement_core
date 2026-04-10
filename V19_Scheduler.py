@@ -337,38 +337,56 @@ def fetch_old_events_from_gcal(service, url):
     return old_events
 
 
-def fetch_jadwal_history_v19(url: str) -> str:
-    """Ambil history perubahan dari SPSE."""
+def fetch_jadwal_history_v19(url: str) -> dict:
+    """Ambil history perubahan per tahap dari SPSE via cloudscraper."""
     try:
-        parts = url.split('/')
-        base = '/'.join(parts[:4])
-        tender_id = parts[-2]
-        history_url = f"{base}/jadwal/{tender_id}/history"
+        import cloudscraper
+        scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows'})
         referer = url.replace('/jadwal', '/pengumuman')
-        req = urllib.request.Request(history_url, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer':    referer,
-        })
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            html = resp.read().decode('utf-8', errors='replace')
-        dfs = pd.read_html(io.StringIO(html), flavor='lxml')
-        if not dfs:
-            return ""
-        for df in dfs:
-            cols = [str(c).lower() for c in df.columns]
-            if any('tanggal' in c or 'edit' in c for c in cols):
-                if len(df) == 0:
-                    return ""
-                lines = []
-                for _, row in df.iterrows():
-                    vals = [str(v).strip() for v in row.values if pd.notna(v) and str(v).strip()]
-                    if len(vals) >= 4:
-                        no, mulai, sampai = vals[0], vals[2], vals[3]
-                        lines.append(f"{no}x : {mulai} - {sampai}")
-                return '\n'.join(lines) if lines else ""
+        r = scraper.get(url, headers={'Referer': referer}, timeout=20)
+        if r.status_code != 200:
+            return {}
+        rows = re.findall(r'<tr[^>]*>.*?</tr>', r.text, re.DOTALL)
+        if not rows:
+            return {}
+        base_url = '/'.join(url.split('/')[:3])
+        stage_history = {}
+        for row in rows:
+            cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', row, re.DOTALL)
+            if len(cells) < 5:
+                continue
+            tahap_name = re.sub(r'<[^>]+>', '', cells[1]).strip()
+            if not tahap_name or tahap_name.lower() in ('tahap', 'no'):
+                continue
+            history_links = re.findall(r'href="([^"]*history[^"]*)"', cells[4])
+            if not history_links:
+                continue
+            hlink = history_links[0]
+            full_url = hlink if hlink.startswith('http') else f"{base_url}{hlink}"
+            r2 = scraper.get(full_url, headers={'Referer': url}, timeout=15)
+            if r2.status_code != 200:
+                continue
+            tables = pd.read_html(io.StringIO(r2.text), flavor='lxml')
+            if not tables:
+                continue
+            for df in tables:
+                cols = [str(c).lower() for c in df.columns]
+                if any('tanggal' in c or 'edit' in c for c in cols):
+                    if len(df) == 0:
+                        continue
+                    lines = []
+                    for _, row_data in df.iterrows():
+                        vals = [str(v).strip() for v in row_data.values if pd.notna(v) and str(v).strip()]
+                        if len(vals) >= 4:
+                            no, tgl_edit, mulai, sampai = vals[0], vals[1], vals[2], vals[3]
+                            lines.append(f"{no}x : {mulai} - {sampai}, diedit pada tanggal : {tgl_edit}")
+                    if lines:
+                        stage_history[tahap_name.lower()] = '\n'.join(lines)
+                    break
+        return stage_history
     except Exception:
         pass
-    return ""
+    return {}
 
 
 def build_diff_info_v19(old_events, df_new):
@@ -430,9 +448,8 @@ def run_single_update(url_target, members_target):
 
         svc = get_service()
         for url, grp in df_res.groupby('Source'):
-            # Ambil info perubahan dari history SPSE
-            diff_info = fetch_jadwal_history_v19(url)
-            # Jika history SPSE kosong, tidak tampilkan diff (jangan bandingkan semua tahap)
+            # Ambil info perubahan per tahap dari history SPSE
+            stage_history = fetch_jadwal_history_v19(url)
 
             delete_existing_events_by_source(svc, url)
             for _, r in grp.iterrows():
@@ -440,9 +457,11 @@ def run_single_update(url_target, members_target):
                 de = parse_spse_date(r['Sampai'])
                 if ds:
                     if not de: de = ds + datetime.timedelta(hours=1)
+                    stage_key = str(r['Tahap']).strip().lower()
+                    stage_diff = stage_history.get(stage_key, '')
                     evt = {
                         'summary': f"{r['Tahap']} - {r['Nama_Paket']}",
-                        'description': format_desc(r['Source'], r['Perubahan'], r['Anggota_Pokja'], diff_info=diff_info),
+                        'description': format_desc(r['Source'], r['Perubahan'], r['Anggota_Pokja'], diff_info=stage_diff),
                         'start': {'dateTime': ds.isoformat(), 'timeZone': 'Asia/Jakarta'},
                         'end': {'dateTime': de.isoformat(), 'timeZone': 'Asia/Jakarta'},
                         'reminders': get_reminders(r['Tahap'])

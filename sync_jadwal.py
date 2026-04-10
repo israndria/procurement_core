@@ -239,55 +239,71 @@ def fetch_old_events(service, url: str) -> dict:
     return old_events
 
 
-def fetch_jadwal_history(url: str) -> str:
+def fetch_jadwal_history(url: str) -> dict:
     """
-    Ambil history perubahan dari SPSE.
-    URL jadwal: .../kalselprov/lelang/10116871000/jadwal
-    URL history: .../kalselprov/jadwal/10116871000/history
-    Format return: '1x : 13 April 2026 10:00 - 13 April 2026 10:59\n2x : ...'
+    Ambil history perubahan dari SPSE per tahap.
+    Returns dict: {stage_name_lower: "1x : ...\n2x : ..."}
     """
     try:
-        parts = url.split('/')
-        # parts = ['https:', '', 'spse.inaproc.id', 'kalselprov', 'lelang', '10116871000', 'jadwal']
-        base = '/'.join(parts[:4])  # https://spse.inaproc.id/kalselprov
-        tender_id = parts[-2]        # 10116871000
-        history_url = f"{base}/jadwal/{tender_id}/history"
-
+        import cloudscraper
+        scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows'})
         referer = url.replace('/jadwal', '/pengumuman')
-        req = urllib.request.Request(history_url, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer':    referer,
-        })
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            html = resp.read().decode('utf-8', errors='replace')
 
-        dfs = pd.read_html(io.StringIO(html), flavor='lxml')
-        if not dfs:
-            return ""
+        # Step 1: Fetch halaman jadwal, ekstrak tabel + link history
+        r = scraper.get(url, headers={'Referer': referer}, timeout=20)
+        if r.status_code != 200:
+            return {}
 
-        # Cari tabel yang punya kolom 'Tanggal Edit'
-        for df in dfs:
-            cols = [str(c).lower() for c in df.columns]
-            if any('tanggal' in c or 'edit' in c for c in cols):
-                if len(df) == 0:
-                    return ""
+        rows = re.findall(r'<tr[^>]*>.*?</tr>', r.text, re.DOTALL)
+        if not rows:
+            return {}
 
-                # Format per baris: "1x : 13 April 2026 10:00 - 13 April 2026 10:59"
-                lines = []
-                for _, row in df.iterrows():
-                    vals = [str(v).strip() for v in row.values if pd.notna(v) and str(v).strip()]
-                    if len(vals) >= 4:
-                        # vals[0]=No, vals[1]=Tanggal Edit, vals[2]=Mulai, vals[3]=Sampai
-                        no = vals[0]
-                        mulai = vals[2]
-                        sampai = vals[3]
-                        lines.append(f"{no}x : {mulai} - {sampai}")
+        base_url = '/'.join(url.split('/')[:3])
+        stage_history = {}
 
-                return '\n'.join(lines) if lines else ""
+        for row in rows:
+            cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', row, re.DOTALL)
+            if len(cells) < 5:
+                continue
+            tahap_name = re.sub(r'<[^>]+>', '', cells[1]).strip()
+            if not tahap_name or tahap_name.lower() in ('tahap', 'no'):
+                continue
 
+            # Extract history link dari cell Perubahan
+            history_links = re.findall(r'href="([^"]*history[^"]*)"', cells[4])
+            if not history_links:
+                continue
+
+            # Step 2: Fetch history page untuk tahap ini
+            hlink = history_links[0]
+            full_url = hlink if hlink.startswith('http') else f"{base_url}{hlink}"
+            r2 = scraper.get(full_url, headers={'Referer': url}, timeout=15)
+            if r2.status_code != 200:
+                continue
+
+            tables = pd.read_html(io.StringIO(r2.text), flavor='lxml')
+            if not tables:
+                continue
+
+            for df in tables:
+                cols = [str(c).lower() for c in df.columns]
+                if any('tanggal' in c or 'edit' in c for c in cols):
+                    if len(df) == 0:
+                        continue
+                    lines = []
+                    for _, row_data in df.iterrows():
+                        vals = [str(v).strip() for v in row_data.values if pd.notna(v) and str(v).strip()]
+                        if len(vals) >= 4:
+                            no, tgl_edit, mulai, sampai = vals[0], vals[1], vals[2], vals[3]
+                            lines.append(f"{no}x : {mulai} - {sampai}, diedit pada tanggal : {tgl_edit}")
+                    if lines:
+                        stage_history[tahap_name.lower()] = '\n'.join(lines)
+                    break
+
+        return stage_history
     except Exception as e:
         log(f"  ⚠️ Gagal fetch history: {e}")
-    return ""
+    return {}
 
 
 def build_diff_info(old_events: dict, df_new: pd.DataFrame) -> str:
@@ -350,8 +366,9 @@ def delete_events_by_url(service, url: str):
             break
 
 
-def insert_events(service, df: pd.DataFrame, url: str, members: str, diff_info: str = ''):
+def insert_events(service, df: pd.DataFrame, url: str, members: str, stage_history: dict = None):
     """Insert semua tahap sebagai event GCal."""
+    stage_history = stage_history or {}
     inserted = 0
     for _, row in df.iterrows():
         ds = parse_date(row['Mulai'])
@@ -360,9 +377,12 @@ def insert_events(service, df: pd.DataFrame, url: str, members: str, diff_info: 
             continue
         if not de:
             de = ds + datetime.timedelta(hours=1)
+        # Lookup stage-specific history
+        stage_key = str(row['Tahap']).strip().lower()
+        stage_diff = stage_history.get(stage_key, '')
         evt = {
             'summary':     f"{row['Tahap']} - {row['Nama_Paket']}",
-            'description': format_desc(url, row['Perubahan'], members, diff_info=diff_info),
+            'description': format_desc(url, row['Perubahan'], members, diff_info=stage_diff),
             'start':       {'dateTime': ds.isoformat(), 'timeZone': 'Asia/Jakarta'},
             'end':         {'dateTime': de.isoformat(), 'timeZone': 'Asia/Jakarta'},
             'reminders':   get_reminders(row['Tahap']),
@@ -448,14 +468,13 @@ def sync_all():
         else:
             log("  ➕ Entry baru — insert ke Google Calendar...")
 
-        # Ambil info perubahan dari history SPSE
-        diff_info = ""
+        # Ambil info perubahan per tahap dari history SPSE
+        stage_history = {}
         if old_hash:
-            diff_info = fetch_jadwal_history(url)
-            # Jika history SPSE kosong, tidak tampilkan diff (jangan bandingkan semua tahap)
+            stage_history = fetch_jadwal_history(url)
 
         delete_events_by_url(service, url)
-        n = insert_events(service, df_jadwal, url, members, diff_info=diff_info)
+        n = insert_events(service, df_jadwal, url, members, stage_history=stage_history)
         log(f"  📅 {n} event berhasil dimasukkan.")
 
         # Update database
