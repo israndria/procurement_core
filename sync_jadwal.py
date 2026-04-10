@@ -242,12 +242,16 @@ def fetch_old_events(service, url: str) -> dict:
 def fetch_jadwal_history(url: str) -> str:
     """
     Ambil history perubahan dari SPSE.
-    Format return: '1x : 13 April 2026 10:00 - 13 April 2026 10:59\n2x : 14 April 2026 09:00 - 14 April 2026 11:00'
+    URL jadwal: .../kalselprov/lelang/10116871000/jadwal
+    URL history: .../kalselprov/jadwal/10116871000/history
+    Format return: '1x : 13 April 2026 10:00 - 13 April 2026 10:59\n2x : ...'
     """
     try:
-        tender_id = url.split('/')[-2]
-        base_url = '/'.join(url.split('/')[:-2])
-        history_url = f"{base_url}/jadwal/{tender_id}/history"
+        parts = url.split('/')
+        # parts = ['https:', '', 'spse.inaproc.id', 'kalselprov', 'lelang', '10116871000', 'jadwal']
+        base = '/'.join(parts[:4])  # https://spse.inaproc.id/kalselprov
+        tender_id = parts[-2]        # 10116871000
+        history_url = f"{base}/jadwal/{tender_id}/history"
 
         referer = url.replace('/jadwal', '/pengumuman')
         req = urllib.request.Request(history_url, headers={
@@ -448,11 +452,7 @@ def sync_all():
         diff_info = ""
         if old_hash:
             diff_info = fetch_jadwal_history(url)
-            # Fallback: bandingkan event lama vs baru jika history kosong
-            if not diff_info:
-                old_events = fetch_old_events(service, url)
-                if old_events:
-                    diff_info = build_diff_info(old_events, df_jadwal)
+            # Jika history SPSE kosong, tidak tampilkan diff (jangan bandingkan semua tahap)
 
         delete_events_by_url(service, url)
         n = insert_events(service, df_jadwal, url, members, diff_info=diff_info)

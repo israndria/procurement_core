@@ -340,9 +340,10 @@ def fetch_old_events_from_gcal(service, url):
 def fetch_jadwal_history_v19(url: str) -> str:
     """Ambil history perubahan dari SPSE."""
     try:
-        tender_id = url.split('/')[-2]
-        base_url = '/'.join(url.split('/')[:-2])
-        history_url = f"{base_url}/jadwal/{tender_id}/history"
+        parts = url.split('/')
+        base = '/'.join(parts[:4])
+        tender_id = parts[-2]
+        history_url = f"{base}/jadwal/{tender_id}/history"
         referer = url.replace('/jadwal', '/pengumuman')
         req = urllib.request.Request(history_url, headers={
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -431,11 +432,7 @@ def run_single_update(url_target, members_target):
         for url, grp in df_res.groupby('Source'):
             # Ambil info perubahan dari history SPSE
             diff_info = fetch_jadwal_history_v19(url)
-            # Fallback: bandingkan event lama vs baru
-            if not diff_info:
-                old_events = fetch_old_events_from_gcal(svc, url)
-                if old_events:
-                    diff_info = build_diff_info_v19(old_events, grp)
+            # Jika history SPSE kosong, tidak tampilkan diff (jangan bandingkan semua tahap)
 
             delete_existing_events_by_source(svc, url)
             for _, r in grp.iterrows():
