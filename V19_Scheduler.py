@@ -82,7 +82,6 @@ def get_service():
             creds = Credentials.from_authorized_user_file(TOKEN_FILE_PATH, SCOPES)
         except Exception:
             # Token corrupt — hapus dan login ulang
-            st.warning("⚠️ Token Google Calendar corrupt, akan login ulang...")
             if os.path.exists(TOKEN_FILE_PATH):
                 os.remove(TOKEN_FILE_PATH)
             creds = None
@@ -91,22 +90,23 @@ def get_service():
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
-            except Exception as e:
-                st.error(f"❌ Token Google Calendar **expired/revoked**. Login ulang diperlukan.")
-                st.info(f"1. Hapus file: `{TOKEN_FILE_PATH}`")
-                st.info(f"2. Refresh halaman ini")
-                st.info(f"3. Login ulang di browser Google yang muncul")
-                st.stop()
+            except Exception:
+                # Token expired/revoked — hapus dan login ulang
+                st.warning("🔐 Token Google Calendar tidak valid. Login ulang diperlukan...")
+                if os.path.exists(TOKEN_FILE_PATH):
+                    os.remove(TOKEN_FILE_PATH)
+                creds = None
+
         if not creds or not creds.valid:
             if not os.path.exists(CRED_FILE_PATH):
                 st.error(f"File credentials.json tidak ditemukan di: {CRED_FILE_PATH}")
                 st.stop()
-            st.info("🔐 Login ulang ke Google Calendar diperlukan...")
+            st.info("🔐 Membuka halaman login Google Calendar...")
             flow = InstalledAppFlow.from_client_secrets_file(CRED_FILE_PATH, SCOPES)
             creds = flow.run_local_server(port=0)
             with open(TOKEN_FILE_PATH, 'w') as token:
                 token.write(creds.to_json())
-            st.success("✅ Login berhasil!")
+            st.success("✅ Login Google Calendar berhasil!")
     return build('calendar', 'v3', credentials=creds)
 
 def delete_existing_events_by_source(service, source_url):
@@ -292,12 +292,83 @@ def start_driver_and_process_slots(slot_data):
     return all_data, hash_map
 
 # --- FORMATTING OUTPUT ---
-def format_desc(url, perubahan_val, pokja_names):
-    try: jml = int(float(str(perubahan_val).replace(',','.'))) 
-    except: jml = 0
-    status = f"⚠️ PERINGATAN: {jml}x Perubahan" if jml > 0 else "✅ Aman"
+def format_desc(url, perubahan_val, pokja_names, diff_info=''):
+    try:
+        raw = str(perubahan_val).strip()
+        match = re.search(r'(\d+)', raw)
+        jml = int(match.group(1)) if match else 0
+    except:
+        jml = 0
+
+    if jml > 0:
+        status = f"⚠️ PERINGATAN: {jml}x Perubahan"
+    else:
+        status = "✅ Aman"
+
+    diff_block = ""
+    if diff_info:
+        diff_block = f"\n\n📋 PERUBAHAN TERDETEKSI:\n{diff_info}"
+
     pokja = f"\n\n👥 POKJA:\n{pokja_names}" if pokja_names else ""
-    return f"🔗 Link: {url}\n\n{status}{pokja}"
+    return f"🔗 Link: {url}\n\n{status}{diff_block}{pokja}"
+
+
+def fetch_old_events_from_gcal(service, url):
+    """Ambil event lama dari GCal sebelum dihapus."""
+    old_events = {}
+    page_token = None
+    while True:
+        try:
+            events_result = service.events().list(
+                calendarId=CALENDAR_ID, q=url, singleEvents=True, pageToken=page_token
+            ).execute()
+            events = events_result.get('items', [])
+            for ev in events:
+                if url in ev.get('description', ''):
+                    summary = ev.get('summary', '')
+                    start = ev.get('start', {}).get('dateTime', '')
+                    if summary and start:
+                        old_events[summary] = start
+            page_token = events_result.get('nextPageToken')
+            if not page_token:
+                break
+        except:
+            break
+    return old_events
+
+
+def build_diff_info_v19(old_events, df_new):
+    """Bandingkan event lama vs baru, return string info perubahan."""
+    if not old_events:
+        return ""
+
+    changes = []
+    change_num = 0
+    for _, row in df_new.iterrows():
+        summary = f"{row['Tahap']} - {row['Nama_Paket']}"
+        if summary in old_events:
+            old_start = old_events[summary]
+            try:
+                old_dt = datetime.datetime.fromisoformat(old_start.replace('+08:00', ''))
+                old_fmt = old_dt.strftime('%d %B %Y %H:%M')
+                for eng, indo in [('January','Januari'),('February','Februari'),('March','Maret'),
+                                   ('April','April'),('May','Mei'),('June','Juni'),
+                                   ('July','Juli'),('August','Agustus'),('September','September'),
+                                   ('October','Oktober'),('November','November'),('December','Desember')]:
+                    old_fmt = old_fmt.replace(eng, indo)
+            except:
+                old_fmt = old_start
+
+            new_start = row['Mulai']
+            new_sampai = row.get('Sampai', '')
+            if str(old_fmt) != str(new_start):
+                change_num += 1
+                info = f"  {change_num}. {row['Tahap']}: {old_fmt} → {new_start}"
+                if new_sampai and str(new_sampai) != str(new_start):
+                    info += f" s/d {new_sampai}"
+                changes.append(info)
+
+    return '\n'.join(changes) if changes else ""
 
 def get_reminders(judul_tahap):
     judul_lower = str(judul_tahap).lower()
@@ -325,6 +396,10 @@ def run_single_update(url_target, members_target):
 
         svc = get_service()
         for url, grp in df_res.groupby('Source'):
+            # Ambil event lama SEBELUM dihapus untuk diff info
+            old_events = fetch_old_events_from_gcal(svc, url)
+            diff_info = build_diff_info_v19(old_events, grp)
+
             delete_existing_events_by_source(svc, url)
             for _, r in grp.iterrows():
                 ds = parse_spse_date(r['Mulai'])
@@ -333,7 +408,7 @@ def run_single_update(url_target, members_target):
                     if not de: de = ds + datetime.timedelta(hours=1)
                     evt = {
                         'summary': f"{r['Tahap']} - {r['Nama_Paket']}",
-                        'description': format_desc(r['Source'], r['Perubahan'], r['Anggota_Pokja']),
+                        'description': format_desc(r['Source'], r['Perubahan'], r['Anggota_Pokja'], diff_info=diff_info),
                         'start': {'dateTime': ds.isoformat(), 'timeZone': 'Asia/Jakarta'},
                         'end': {'dateTime': de.isoformat(), 'timeZone': 'Asia/Jakarta'},
                         'reminders': get_reminders(r['Tahap'])
@@ -346,6 +421,45 @@ def run_single_update(url_target, members_target):
 # ============================================
 # 🖥️ UI TAB SYSTEM (STREAMLIT)
 # ============================================
+
+# --- Cek token sebelum render UI ---
+def check_gcal_token_quick():
+    """Cek apakah token Google Calendar valid tanpa login flow."""
+    if not os.path.exists(TOKEN_FILE_PATH):
+        return False
+    try:
+        creds = Credentials.from_authorized_user_file(TOKEN_FILE_PATH, SCOPES)
+        if creds and creds.valid:
+            return True
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            # Simpan token baru
+            with open(TOKEN_FILE_PATH, 'w') as f:
+                f.write(creds.to_json())
+            return True
+    except Exception:
+        pass
+    return False
+
+token_ok = check_gcal_token_quick()
+if not token_ok:
+    st.warning("🔐 Token Google Calendar tidak valid. Klik tombol di bawah untuk login ulang.")
+    if st.button("🔑 Login Ulang ke Google Calendar", type="primary", use_container_width=True):
+        # Hapus token lama
+        if os.path.exists(TOKEN_FILE_PATH):
+            os.remove(TOKEN_FILE_PATH)
+        if os.path.exists(CRED_FILE_PATH):
+            flow = InstalledAppFlow.from_client_secrets_file(CRED_FILE_PATH, SCOPES)
+            creds = flow.run_local_server(port=0)
+            with open(TOKEN_FILE_PATH, 'w') as token:
+                token.write(creds.to_json())
+            st.success("✅ Login berhasil! Halaman akan refresh...")
+            time.sleep(2)
+            st.rerun()
+        else:
+            st.error(f"File `credentials.json` tidak ditemukan di: {CRED_FILE_PATH}")
+    st.stop()  # Jangan render dashboard kalau token belum valid
+
 tab_monitor, tab_tambah = st.tabs(["👀 Pantau & Update", "➕ Tambah Paket"])
 
 # --- TAB 1: DASHBOARD ---
