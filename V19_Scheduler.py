@@ -7,6 +7,7 @@ import io
 import re
 import urllib.request
 import hashlib
+import subprocess
 
 # --- LIBRARY GOOGLE ---
 from google.auth.transport.requests import Request
@@ -166,6 +167,22 @@ def clear_all_database():
         return True
     return False
 
+def commit_db_to_github():
+    """Auto-commit database_tender.csv ke GitHub setelah update lokal."""
+    try:
+        cwd = BASE_DIR
+        subprocess.run(['git', 'add', 'database_tender.csv'], cwd=cwd, capture_output=True, timeout=10)
+        result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=cwd, capture_output=True, timeout=10)
+        if result.returncode == 0:
+            return  # Tidak ada perubahan, skip
+        subprocess.run(['git', 'commit', '-m', f'chore: update database_tender.csv via Streamlit [{get_indonesian_timestamp()}]'],
+                       cwd=cwd, capture_output=True, timeout=30)
+        subprocess.run(['git', 'push', 'origin', 'master'], cwd=cwd, capture_output=True, timeout=60)
+        return True
+    except Exception as e:
+        st.warning(f"⚠️ Auto-push ke GitHub gagal: {e}")
+        return False
+
 # --- FUNGSI SCRAPING (urllib — tanpa Chrome/Selenium) ---
 def fetch_jadwal_urllib(url: str, members: str) -> pd.DataFrame | None:
     """Ambil tabel jadwal langsung via urllib — ringan, tanpa browser."""
@@ -272,6 +289,14 @@ def run_single_update(url_target, members_target):
     if res:
         df_res = pd.concat(res, ignore_index=True)
         update_local_database(df_res, hash_map)
+
+        # Auto-commit ke GitHub agar Actions bisa track perubahan
+        st.info("🔄 Menyinkronkan database ke GitHub...")
+        if commit_db_to_github():
+            st.success("✅ Database tersinkron ke GitHub — Actions akan otomatis track perubahan.")
+        else:
+            st.warning("⚠️ Gagal sync ke GitHub, tapi data tetap tersimpan lokal & GCal sudah ter-update.")
+
         svc = get_service()
         for url, grp in df_res.groupby('Source'):
             delete_existing_events_by_source(svc, url)
