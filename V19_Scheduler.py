@@ -337,6 +337,39 @@ def fetch_old_events_from_gcal(service, url):
     return old_events
 
 
+def fetch_jadwal_history_v19(url: str) -> str:
+    """Ambil history perubahan dari SPSE."""
+    try:
+        tender_id = url.split('/')[-2]
+        base_url = '/'.join(url.split('/')[:-2])
+        history_url = f"{base_url}/jadwal/{tender_id}/history"
+        referer = url.replace('/jadwal', '/pengumuman')
+        req = urllib.request.Request(history_url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer':    referer,
+        })
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            html = resp.read().decode('utf-8', errors='replace')
+        dfs = pd.read_html(io.StringIO(html), flavor='lxml')
+        if not dfs:
+            return ""
+        for df in dfs:
+            cols = [str(c).lower() for c in df.columns]
+            if any('tanggal' in c or 'edit' in c for c in cols):
+                if len(df) == 0:
+                    return ""
+                lines = []
+                for _, row in df.iterrows():
+                    vals = [str(v).strip() for v in row.values if pd.notna(v) and str(v).strip()]
+                    if len(vals) >= 4:
+                        no, mulai, sampai = vals[0], vals[2], vals[3]
+                        lines.append(f"{no}x : {mulai} - {sampai}")
+                return '\n'.join(lines) if lines else ""
+    except Exception:
+        pass
+    return ""
+
+
 def build_diff_info_v19(old_events, df_new):
     """Bandingkan event lama vs baru, return string info perubahan."""
     if not old_events:
@@ -396,9 +429,13 @@ def run_single_update(url_target, members_target):
 
         svc = get_service()
         for url, grp in df_res.groupby('Source'):
-            # Ambil event lama SEBELUM dihapus untuk diff info
-            old_events = fetch_old_events_from_gcal(svc, url)
-            diff_info = build_diff_info_v19(old_events, grp)
+            # Ambil info perubahan dari history SPSE
+            diff_info = fetch_jadwal_history_v19(url)
+            # Fallback: bandingkan event lama vs baru
+            if not diff_info:
+                old_events = fetch_old_events_from_gcal(svc, url)
+                if old_events:
+                    diff_info = build_diff_info_v19(old_events, grp)
 
             delete_existing_events_by_source(svc, url)
             for _, r in grp.iterrows():

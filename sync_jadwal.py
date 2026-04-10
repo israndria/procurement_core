@@ -239,6 +239,53 @@ def fetch_old_events(service, url: str) -> dict:
     return old_events
 
 
+def fetch_jadwal_history(url: str) -> str:
+    """
+    Ambil history perubahan dari SPSE.
+    Format return: '1x : 13 April 2026 10:00 - 13 April 2026 10:59\n2x : 14 April 2026 09:00 - 14 April 2026 11:00'
+    """
+    try:
+        tender_id = url.split('/')[-2]
+        base_url = '/'.join(url.split('/')[:-2])
+        history_url = f"{base_url}/jadwal/{tender_id}/history"
+
+        referer = url.replace('/jadwal', '/pengumuman')
+        req = urllib.request.Request(history_url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer':    referer,
+        })
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            html = resp.read().decode('utf-8', errors='replace')
+
+        dfs = pd.read_html(io.StringIO(html), flavor='lxml')
+        if not dfs:
+            return ""
+
+        # Cari tabel yang punya kolom 'Tanggal Edit'
+        for df in dfs:
+            cols = [str(c).lower() for c in df.columns]
+            if any('tanggal' in c or 'edit' in c for c in cols):
+                if len(df) == 0:
+                    return ""
+
+                # Format per baris: "1x : 13 April 2026 10:00 - 13 April 2026 10:59"
+                lines = []
+                for _, row in df.iterrows():
+                    vals = [str(v).strip() for v in row.values if pd.notna(v) and str(v).strip()]
+                    if len(vals) >= 4:
+                        # vals[0]=No, vals[1]=Tanggal Edit, vals[2]=Mulai, vals[3]=Sampai
+                        no = vals[0]
+                        mulai = vals[2]
+                        sampai = vals[3]
+                        lines.append(f"{no}x : {mulai} - {sampai}")
+
+                return '\n'.join(lines) if lines else ""
+
+    except Exception as e:
+        log(f"  ⚠️ Gagal fetch history: {e}")
+    return ""
+
+
 def build_diff_info(old_events: dict, df_new: pd.DataFrame) -> str:
     """Bandingkan event lama vs baru, return string info perubahan."""
     if not old_events:
@@ -397,12 +444,15 @@ def sync_all():
         else:
             log("  ➕ Entry baru — insert ke Google Calendar...")
 
-        # Ambil event lama SEBELUM dihapus untuk build diff info
+        # Ambil info perubahan dari history SPSE
         diff_info = ""
         if old_hash:
-            old_events = fetch_old_events(service, url)
-            if old_events:
-                diff_info = build_diff_info(old_events, df_jadwal)
+            diff_info = fetch_jadwal_history(url)
+            # Fallback: bandingkan event lama vs baru jika history kosong
+            if not diff_info:
+                old_events = fetch_old_events(service, url)
+                if old_events:
+                    diff_info = build_diff_info(old_events, df_jadwal)
 
         delete_events_by_url(service, url)
         n = insert_events(service, df_jadwal, url, members, diff_info=diff_info)
