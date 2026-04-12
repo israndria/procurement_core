@@ -519,7 +519,8 @@ with tab_scraper:
 with tab_dashboard:
     st.subheader("📊 Dashboard Data Tender")
 
-    fc1, fc2, fc3, fc4 = st.columns([1, 2, 2, 2])
+    # --- Filter Row 1 ---
+    fc1, fc2, fc3, fc4, fc5 = st.columns([1, 2, 2, 2, 1])
     with fc1:
         dash_tahun = st.number_input("Tahun", min_value=2020, max_value=2030,
                                       value=datetime.now().year, key="dash_tahun")
@@ -529,7 +530,16 @@ with tab_dashboard:
         dash_instansi = st.selectbox("Instansi", ["Semua"] + [l["nama"] for l in DAFTAR_LPSE], key="dash_inst")
     with fc4:
         dash_search = st.text_input("Cari nama paket...", key="dash_search")
+    with fc5:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Reset Filter", use_container_width=True, key="btn_reset_filter"):
+            st.session_state["dash_inst"] = "Semua"
+            st.session_state["dash_tahapan"] = "Semua"
+            st.session_state["dash_search"] = ""
+            st.session_state["dash_page"] = 0
+            st.rerun()
 
+    # --- Filter Tahapan ---
     @st.cache_data(ttl=60)
     def get_daftar_tahapan(tabel):
         """Ambil daftar nilai unik tahapan dari DB untuk filter dropdown."""
@@ -547,12 +557,17 @@ with tab_dashboard:
         key="dash_tahapan"
     )
 
+    # --- Loading indicator saat query ---
     @st.cache_data(ttl=300)
-    def load_dashboard(tabel, tahun, instansi_filter, tahapan_filter, search):
+    def _load_dashboard_raw(tabel, tahun, instansi_filter, tahapan_filter, search):
+        """Query Supabase — return DataFrame."""
         try:
             q = _sb().table(tabel).select("*").ilike("tahun_anggaran", f"%{tahun}%")
             if instansi_filter != "Semua":
-                q = q.ilike("instansi", f"%{instansi_filter}%")
+                kode_map = {l["nama"]: l["kode"] for l in DAFTAR_LPSE}
+                kode = kode_map.get(instansi_filter, "")
+                if kode:
+                    q = q.ilike("link_detail", f"%/{kode}/%")
             if tahapan_filter != "Semua":
                 q = q.eq("tahapan", tahapan_filter)
             if search:
@@ -560,27 +575,148 @@ with tab_dashboard:
             r = q.order("diambil_pada", desc=True).limit(500).execute()
             return pd.DataFrame(r.data) if r.data else pd.DataFrame()
         except Exception as e:
-            return pd.DataFrame()
+            return pd.DataFrame({"_error": [str(e)]})
+
+    # Wrapper dengan spinner
+    def load_dashboard(tabel, tahun, instansi_filter, tahapan_filter, search):
+        with st.spinner("⏳ Memuat data dari Supabase..."):
+            return _load_dashboard_raw(tabel, tahun, instansi_filter, tahapan_filter, search)
 
     df = load_dashboard(dash_kat, dash_tahun, dash_instansi, dash_tahapan, dash_search)
 
-    if not df.empty:
-        m1, m2, m3, m4 = st.columns(4)
-        total = len(df)
-        selesai = len(df[df["tahapan"].str.contains("Selesai", na=False)])
-        berkontrak = len(df[df["pemenang_berkontrak"].ne("Belum Ada Kontrak") & df["pemenang_berkontrak"].notna()])
-        ada_pemenang = len(df[df["nama_pemenang"].ne("Belum Ada Pemenang") & df["nama_pemenang"].notna()])
-        m1.metric("Total Paket", total)
-        m2.metric("Tender Selesai", selesai)
-        m3.metric("Ada Pemenang", ada_pemenang)
-        m4.metric("Sudah Berkontrak", berkontrak)
+    if not df.empty and "_error" not in df.columns:
+        # --- Metrics kontekstual sesuai tabel ---
+        metrik_defs = {
+            "tender": [
+                ("Total Paket", len(df)),
+                ("Tender Selesai", len(df[df["tahapan"].str.contains("Selesai", na=False)])),
+                ("Ada Pemenang", len(df[df["nama_pemenang"].ne("Belum Ada Pemenang") & df["nama_pemenang"].notna()])),
+                ("Sudah Berkontrak", len(df[df["pemenang_berkontrak"].ne("Belum Ada Kontrak") & df["pemenang_berkontrak"].notna()])),
+            ],
+            "non_tender": [
+                ("Total Paket", len(df)),
+                ("Selesai", len(df[df["tahapan"].str.contains("Selesai", na=False)])),
+                ("Ada Pemenang", len(df[df["nama_pemenang"].ne("Belum Ada Pemenang") & df["nama_pemenang"].notna()])),
+                ("Sudah Berkontrak", len(df[df["pemenang_berkontrak"].ne("Belum Ada Kontrak") & df["pemenang_berkontrak"].notna()])),
+            ],
+            "pencatatan": [
+                ("Total Paket", len(df)),
+                ("Selesai", len(df[df["tahapan"].str.contains("Selesai", na=False)])),
+                ("Ada Penyedia", len(df[df["nama_pemenang"].ne("Belum Ada Pemenang") & df["nama_pemenang"].notna()])),
+                ("Nilai Pagu Total", None),  # special
+            ],
+        }
+        metrics = metrik_defs.get(dash_kat, metrik_defs["tender"])
+
+        n_cols = len(metrics)
+        m_cols = st.columns(n_cols)
+        for i, (label, val) in enumerate(metrics):
+            if label == "Nilai Pagu Total":
+                try:
+                    total_pagu = pd.to_numeric(df["nilai_pagu"].str.replace(".", "", regex=False), errors="coerce").sum()
+                    m_cols[i].metric(label, f"Rp {total_pagu:,.0f}" if total_pagu else "-")
+                except:
+                    m_cols[i].metric(label, "-")
+            else:
+                m_cols[i].metric(label, val)
 
         st.write("---")
 
+        # --- Chart visual (pure HTML/CSS — hindari matplotlib/altair crash di Python 3.13) ---
+        def _html_bar_chart(data_dict, color="#667eea", max_val=None):
+            """Buat horizontal bar chart pakai HTML/CSS murni."""
+            if not data_dict:
+                return ""
+            if max_val is None:
+                max_val = max(data_dict.values()) if data_dict.values() else 1
+            html = '<div style="display:flex;flex-direction:column;gap:4px;">'
+            for label, value in data_dict.items():
+                pct = (value / max_val * 100) if max_val > 0 else 0
+                short_label = str(label)[:30] + ("..." if len(str(label)) > 30 else "")
+                html += f'''
+                <div style="display:flex;align-items:center;gap:8px;font-size:11px;">
+                    <span style="min-width:120px;max-width:120px;text-align:right;overflow:hidden;text-ellipsis;white-space:nowrap;" title="{str(label)}">{short_label}</span>
+                    <div style="flex:1;background:#f0f0f0;border-radius:4px;height:18px;overflow:hidden;">
+                        <div style="width:{pct}%;background:{color};height:100%;border-radius:4px;min-width:{'20px' if value > 0 else '0'};"></div>
+                    </div>
+                    <span style="min-width:40px;font-weight:bold;">{value:,}</span>
+                </div>'''
+            html += "</div>"
+            return html
+
+        chart_col1, chart_col2 = st.columns(2)
+
+        with chart_col1:
+            st.markdown("**📦 Distribusi per Instansi**")
+            if "instansi" in df.columns and not df["instansi"].empty:
+                instansi_counts = df["instansi"].value_counts().head(10)
+                chart_html = _html_bar_chart(
+                    {str(k): int(v) for k, v in instansi_counts.items()},
+                    color="#667eea"
+                )
+                st.markdown(chart_html, unsafe_allow_html=True)
+            else:
+                st.info("Data instansi tidak tersedia.")
+
+        with chart_col2:
+            st.markdown("**📋 Distribusi per Tahapan**")
+            if "tahapan" in df.columns and not df["tahapan"].empty:
+                tahapan_counts = df["tahapan"].value_counts().head(8)
+                chart_html = _html_bar_chart(
+                    {str(k): int(v) for k, v in tahapan_counts.items()},
+                    color="#f093fb"
+                )
+                st.markdown(chart_html, unsafe_allow_html=True)
+            else:
+                st.info("Data tahapan tidak tersedia.")
+
+        st.write("---")
+
+        # --- Pagination ---
+        PAGE_SIZE_OPTIONS = [50, 100, 200, 500]
+        if "dash_page_size" not in st.session_state:
+            st.session_state["dash_page_size"] = 50
+        if "dash_page" not in st.session_state:
+            st.session_state["dash_page"] = 0
+
+        pg_col1, pg_col2, pg_col3 = st.columns([2, 2, 2])
+        with pg_col1:
+            page_size = st.selectbox("Baris per halaman", PAGE_SIZE_OPTIONS,
+                                     index=PAGE_SIZE_OPTIONS.index(st.session_state["dash_page_size"]),
+                                     key="sel_page_size")
+            st.session_state["dash_page_size"] = page_size
+
+        total_rows = len(df)
+        total_pages = max(1, (total_rows + page_size - 1) // page_size)
+        current_page = min(st.session_state.get("dash_page", 0), total_pages - 1)
+
+        start_idx = current_page * page_size
+        end_idx = min(start_idx + page_size, total_rows)
+        df_page = df.iloc[start_idx:end_idx]
+
+        with pg_col2:
+            st.markdown(f"<br>", unsafe_allow_html=True)
+            st.markdown(f"**Halaman {current_page + 1} dari {total_pages}** (Total: {total_rows} baris)")
+
+        with pg_col3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            pg_btn1, pg_btn2 = st.columns(2)
+            with pg_btn1:
+                if st.button("⬅️ Prev", disabled=current_page == 0, use_container_width=True):
+                    st.session_state["dash_page"] = current_page - 1
+                    st.rerun()
+            with pg_btn2:
+                if st.button("Next ➡️", disabled=current_page >= total_pages - 1, use_container_width=True):
+                    st.session_state["dash_page"] = current_page + 1
+                    st.rerun()
+
+        st.write("---")
+
+        # --- Dataframe ---
         kolom_tampil = ["kode_tender", "nama_paket", "instansi", "tahapan",
                         "nilai_hps", "nama_pemenang", "harga_kontrak", "kontrak_mulai", "link_detail"]
-        kolom_ada = [c for c in kolom_tampil if c in df.columns]
-        df_tampil = df[kolom_ada].copy()
+        kolom_ada = [c for c in kolom_tampil if c in df_page.columns]
+        df_tampil = df_page[kolom_ada].copy()
 
         st.dataframe(
             df_tampil,
@@ -612,7 +748,10 @@ with tab_dashboard:
             except:
                 st.caption("Excel export butuh openpyxl")
     else:
-        st.info("Belum ada data. Jalankan scraper dulu di tab Scraper.")
+        if not df.empty and "_error" in df.columns:
+            st.error(f"❌ Gagal memuat data: {df['_error'].iloc[0]}")
+        else:
+            st.info("Belum ada data. Jalankan scraper dulu di tab Scraper.")
 
     if st.button("🔄 Refresh Dashboard"):
         st.cache_data.clear()
@@ -624,70 +763,156 @@ with tab_dashboard:
 with tab_log:
     st.subheader("📋 Log Scraper & Status Task Scheduler")
 
-    st.markdown("**Status Task Scheduler (`POKJA_ScrapeSpse`)**")
-    try:
-        ps_cmd = (
-            "Get-ScheduledTaskInfo -TaskName 'POKJA_ScrapeSpse' | "
-            "Select-Object LastRunTime, NextRunTime, LastTaskResult | "
-            "ConvertTo-Json"
-        )
-        result = subprocess.run(
-            ["powershell", "-Command", ps_cmd],
-            capture_output=True, text=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            info = json.loads(result.stdout)
-            sc1, sc2, sc3, sc4 = st.columns([2, 2, 2, 1])
-            last_result = info.get("LastTaskResult", -1)
-            status_label = "✅ Sukses" if last_result == 0 else f"❌ Error (kode {last_result})"
+    # --- Bagian 1: Ringkasan Scrape Terakhir ---
+    if "hasil_scrape_terakhir" in st.session_state:
+        st.markdown("**📊 Ringkasan Scrape Terakhir**")
+        h = st.session_state["hasil_scrape_terakhir"]
+        summ_cols = st.columns(4)
+        summ_cols[0].metric("⏰ Waktu Scrape", h.get("waktu", "-"))
+        summ_cols[1].metric("📁 Tabel", h.get("tabel", "-"))
+        summ_cols[2].metric("🔧 Mode", h.get("mode", "-"))
 
-            def parse_ps_date(raw):
-                """Parse /Date(1234567890123+0700)/ dari PowerShell JSON ke string WIB."""
-                if not raw: return "-"
-                m = re.search(r"/Date\((\d+)", str(raw))
-                if m:
-                    ts = int(m.group(1)) / 1000  # ms → detik
-                    dt = datetime.utcfromtimestamp(ts) + timedelta(hours=7)
-                    return dt.strftime("%d/%m/%Y %H:%M")
-                return str(raw)[:16]
+        # Hitung LPSE sukses/gagal dari hasil
+        hasil_list = h.get("hasil", [])
+        sukses_count = sum(1 for x in hasil_list if x.startswith("✅") or "✅" in x)
+        gagal_count = len(hasil_list) - sukses_count
+        summ_cols[3].metric("🖥️ LPSE", f"{sukses_count} ✅ / {gagal_count} ❌")
 
-            sc1.metric("Last Run", parse_ps_date(info.get("LastRunTime")))
-            sc2.metric("Next Run", parse_ps_date(info.get("NextRunTime")))
-            sc3.metric("Status", status_label)
-            with sc4:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("▶️ Jalankan Sekarang", use_container_width=True):
-                    try:
-                        subprocess.run(
-                            ["powershell", "-Command", "Start-ScheduledTask -TaskName 'POKJA_ScrapeSpse'"],
-                            capture_output=True, text=True, timeout=10,
-                            creationflags=subprocess.CREATE_NO_WINDOW
-                        )
-                        st.toast("✅ Task Scheduler dijalankan!", icon="🚀")
-                    except Exception as ex:
-                        st.error(f"Gagal trigger: {ex}")
-        else:
-            st.warning("Task Scheduler tidak ditemukan atau tidak bisa dibaca.")
-    except Exception as e:
-        st.warning(f"Tidak bisa baca Task Scheduler: {e}")
+        # Detail per LPSE di expander
+        with st.expander("📋 Detail per LPSE", expanded=False):
+            for baris in hasil_list:
+                emoji = "✅" if ("✅" in baris) else ("⛔" if "⛔" in baris else ("🛑" if "🛑" in baris else "⚠️"))
+                st.markdown(f"{emoji} {baris}")
+        st.write("---")
+
+    # --- Bagian 2: Task Scheduler Monitor (dengan cache) ---
+    st.markdown("**⏰ Status Task Scheduler (`POKJA_ScrapeSpse`)**")
+
+    def get_scheduler_info_cached():
+        """Query Task Scheduler Info dengan cache TTL 30 detik di session_state."""
+        import time
+        cache_key = "_scheduler_info"
+        cache_ts = "_scheduler_ts"
+        now = time.time()
+        if cache_key in st.session_state and (now - st.session_state.get(cache_ts, 0)) < 30:
+            return st.session_state[cache_key]
+        try:
+            ps_cmd = (
+                "Get-ScheduledTaskInfo -TaskName 'POKJA_ScrapeSpse' | "
+                "Select-Object LastRunTime, NextRunTime, LastTaskResult | "
+                "ConvertTo-Json"
+            )
+            result = subprocess.run(
+                ["powershell", "-Command", ps_cmd],
+                capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                info = json.loads(result.stdout)
+                st.session_state[cache_key] = info
+                st.session_state[cache_ts] = now
+                return info
+        except:
+            pass
+        return None
+
+    scheduler_info = get_scheduler_info_cached()
+    if scheduler_info:
+        def parse_ps_date(raw):
+            """Parse /Date(1234567890123+0700)/ dari PowerShell JSON ke string WIB."""
+            if not raw: return "-"
+            m = re.search(r"/Date\((\d+)", str(raw))
+            if m:
+                ts = int(m.group(1)) / 1000  # ms → detik
+                dt = datetime.utcfromtimestamp(ts) + timedelta(hours=7)
+                return dt.strftime("%d/%m/%Y %H:%M")
+            return str(raw)[:16]
+
+        last_result = scheduler_info.get("LastTaskResult", -1)
+        status_label = "✅ Sukses" if last_result == 0 else f"❌ Error (kode {last_result})"
+
+        sc1, sc2, sc3, sc4 = st.columns([2, 2, 2, 1])
+        sc1.metric("Last Run", parse_ps_date(scheduler_info.get("LastRunTime")))
+        sc2.metric("Next Run", parse_ps_date(scheduler_info.get("NextRunTime")))
+        sc3.metric("Status", status_label)
+        with sc4:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("▶️ Jalankan", use_container_width=True):
+                try:
+                    subprocess.run(
+                        ["powershell", "-Command", "Start-ScheduledTask -TaskName 'POKJA_ScrapeSpse'"],
+                        capture_output=True, text=True, timeout=10,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    st.toast("✅ Task Scheduler dijalankan!")
+                    # Invalidate cache agar langsung refresh
+                    st.session_state.pop("_scheduler_info", None)
+                    st.session_state.pop("_scheduler_ts", None)
+                    import time; time.sleep(1)
+                    st.rerun()
+                except Exception as ex:
+                    st.error(f"Gagal trigger: {ex}")
+    else:
+        st.warning("Task Scheduler tidak ditemukan atau tidak bisa dibaca.")
 
     st.write("---")
 
-    st.markdown("**Log Scraper (100 baris terakhir)**")
+    # --- Bagian 3: Log Viewer (dengan slider, search, auto-refresh) ---
+    st.markdown("**📜 Log Scraper**")
+
+    # Kontrol log
+    log_ctrl1, log_ctrl2, log_ctrl3, log_ctrl4 = st.columns([2, 2, 1, 2])
+
+    with log_ctrl1:
+        log_lines = st.slider("Baris log", min_value=50, max_value=500, value=100, step=50,
+                              key="log_lines_slider")
+
+    with log_ctrl2:
+        log_search = st.text_input("🔍 Cari di log...", key="log_search_text")
+
+    with log_ctrl3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        auto_refresh = st.checkbox("Auto-refresh", key="log_auto_refresh")
+
+    with log_ctrl4:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Refresh Log", use_container_width=True):
+            st.rerun()
+
+    # Auto-refresh mechanism
+    if auto_refresh:
+        import time
+        if "_log_last_refresh" not in st.session_state:
+            st.session_state["_log_last_refresh"] = time.time()
+        elif time.time() - st.session_state["_log_last_refresh"] >= 10:
+            st.session_state["_log_last_refresh"] = time.time()
+            st.rerun()
+
     try:
         if os.path.exists(LOG_FILE):
             with open(LOG_FILE, encoding="utf-8") as f:
                 semua_baris = f.readlines()
-            # Filter baris noise dari httpx (HTTP Request: POST/GET ke supabase/spse)
+
+            # Filter noise
             FILTER_NOISE = ("HTTP Request:", "httpx", "httpcore")
             bersih = [b for b in semua_baris if not any(n in b for n in FILTER_NOISE)]
-            tail = "".join(bersih[-100:])
-            st.code(tail, language=None)
+
+            # Ambil tail sesuai slider
+            tail_lines = bersih[-log_lines:] if len(bersih) > log_lines else bersih
+
+            # Filter search jika ada
+            if log_search:
+                tail_lines = [b for b in tail_lines if log_search.lower() in b.lower()]
+
+            tail = "".join(tail_lines)
+            if tail:
+                st.code(tail, language=None)
+            else:
+                st.info("Tidak ada log yang cocok dengan filter.")
+
+            # Info jumlah baris
+            st.caption(f"Menampilkan {len(tail_lines)} dari {len(bersih)} baris (setelah filter noise)")
         else:
             st.info("Log belum ada.")
     except Exception as e:
         st.error(f"Gagal baca log: {e}")
-
-    if st.button("🔄 Refresh Log"):
-        st.rerun()
