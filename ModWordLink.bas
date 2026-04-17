@@ -8,9 +8,10 @@ Attribute VB_Name = "ModWordLink"
 ' v1.4: Path dinamis - tidak perlu hardcode, otomatis detect dari lokasi Excel
 ' Struktur folder: @ POKJA 2026\<Paket>\file.xlsm  →  @ POKJA 2026\V19_Scheduler\WPy64-313110\
 
-Private Const WORD_BA As String = "1. Full Dokumen BA PK v1.docx"
-Private Const WORD_REVIU As String = "2. Isi Reviu PK v1.docx"
-Private Const WORD_DOKPIL As String = "3. Dokpil Full PK v1.docx"
+' Pattern whitelist - cocok untuk semua varian nama (PK, PLJK, PLPK, dll)
+Private Const PATTERN_BA As String = "1. Full Dokumen"
+Private Const PATTERN_REVIU As String = "2. Isi Reviu"
+Private Const PATTERN_DOKPIL As String = "3. Dokpil"
 
 Private Const SHEET_BA As String = "satu_data"
 Private Const SHEET_REVIU As String = "list_reviu"
@@ -23,50 +24,52 @@ Private m_LastPrinter As String
 ' ===== BUKA (merge + tampilkan Word) =====
 
 Public Sub BukaBA()
-    RunMerge "buka", WORD_BA, SHEET_BA
+    RunMerge "buka", FindWordFile(PATTERN_BA), SHEET_BA
 End Sub
 
 Public Sub BukaReviu()
-    RunMerge "buka", WORD_REVIU, SHEET_REVIU
+    RunMerge "buka", FindWordFile(PATTERN_REVIU), SHEET_REVIU
 End Sub
 
 Public Sub BukaDokpil()
-    RunMerge "buka", WORD_DOKPIL, SHEET_DOKPIL
+    RunMerge "buka", FindWordFile(PATTERN_DOKPIL), SHEET_DOKPIL
 End Sub
 
 ' ===== PRINT PDF (semua pakai RunPDF) =====
 
 Public Sub PrintBAReviuPDF()
-    RunPDF "pdf_bareviu", WORD_BA, SHEET_BA, "BA_REVIU_DPP"
+    RunPDF "pdf_bareviu", FindWordFile(PATTERN_BA), SHEET_BA, "BA_REVIU_DPP"
 End Sub
 
 Public Sub PrintIsiReviuPDF()
-    RunPDF "pdf_all", WORD_REVIU, SHEET_REVIU, "Isi_Reviu"
+    RunPDF "pdf_all", FindWordFile(PATTERN_REVIU), SHEET_REVIU, "Isi_Reviu"
 End Sub
 
 Public Sub PrintDokpilPDF()
-    RunPDF "pdf_dokpil", WORD_DOKPIL, SHEET_DOKPIL, "DOKPIL"
+    RunPDF "pdf_dokpil", FindWordFile(PATTERN_DOKPIL), SHEET_DOKPIL, "DOKPIL"
 End Sub
 
 Public Sub PrintUndanganPDF()
-    RunPDF "pdf", WORD_BA, SHEET_BA, "Undangan"
+    RunPDF "pdf", FindWordFile(PATTERN_BA), SHEET_BA, "Undangan"
 End Sub
 
 Public Sub PrintPembuktianPDF()
-    RunPDF "pdf_pembuktian", WORD_BA, SHEET_BA, "BA Pembuktian & Nego"
+    RunPDF "pdf_pembuktian", FindWordFile(PATTERN_BA), SHEET_BA, "BA Pembuktian & Nego"
 End Sub
 
 Public Sub PrintREvaluasiPDF()
-    RunPDF "pdf_revaluasi", WORD_BA, SHEET_BA, "REvaluasi"
+    RunPDF "pdf_revaluasi", FindWordFile(PATTERN_BA), SHEET_BA, "REvaluasi"
 End Sub
 
 Public Sub PrintPembuktianTimpangPDF()
-    RunPDF "pdf_pembuktian_timpang", WORD_BA, SHEET_BA, "BA Pembuktian Timpang"
+    RunPDF "pdf_pembuktian_timpang", FindWordFile(PATTERN_BA), SHEET_BA, "BA Pembuktian Timpang"
 End Sub
 
 ' ===== CORE: Panggil Python script (non-blocking) =====
 
 Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, statusLabel As String)
+    If wordFile = "" Then Exit Sub
+
     ' Tentukan apakah mode ini mendukung printer langsung
     ' Mode kompleks (pembuktian) hanya PDF karena butuh stitching multi-source
     Dim supportsPrinter As Boolean
@@ -265,9 +268,11 @@ ErrHandler:
 End Function
 
 Private Sub RunMerge(mode As String, wordFile As String, sheetName As String)
+    If wordFile = "" Then Exit Sub
+
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
-    
+
     If Dir(wordPath) = "" Then
         MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
         Exit Sub
@@ -298,6 +303,28 @@ End Sub
 
 Private Function Q(s As String) As String
     Q = Chr(34) & s & Chr(34)
+End Function
+
+' Cari file .docx di folder Excel yang namanya diawali dengan pattern tertentu
+' Mendukung berbagai varian nama (BA PK, BA PLJK, BA PLPK, dll)
+Private Function FindWordFile(pattern As String) As String
+    Dim folder As String
+    folder = ThisWorkbook.Path
+
+    Dim f As String
+    f = Dir(folder & "\*.docx")
+    Do While f <> ""
+        If Left(f, Len(pattern)) = pattern Then
+            FindWordFile = f
+            Exit Function
+        End If
+        f = Dir()
+    Loop
+
+    MsgBox "File Word tidak ditemukan." & vbCrLf & _
+           "Pastikan ada file .docx yang diawali dengan: """ & pattern & """", _
+           vbExclamation, "File Tidak Ditemukan"
+    FindWordFile = ""
 End Function
 
 Private Function ScriptDir() As String
