@@ -19,7 +19,7 @@ PYTHON_EXE = os.path.join(BASE_DIR, "python", "python.exe")
 PYTHONW_EXE = os.path.join(BASE_DIR, "python", "pythonw.exe")
 
 # ===== EXCEL TEMPLATE =====
-EXCEL_TEMPLATE = "@ BA PK 2026 (Improved) v.1.xlsm"
+EXCEL_TEMPLATE = "@ BA PK 2026 (Improved) v1.4.xlsm"
 
 # ===== SHEET NAMES (mail merge target) =====
 # PENTING: harus sinkron dengan VBA Private Const di ModWordLink.bas
@@ -30,9 +30,9 @@ SHEET_DOKPIL = "list_dokpil"
 # ===== WORD TEMPLATE → SHEET MAPPING =====
 # (nama_file_word, sheet_name)
 WORD_SHEET_MAP = [
-    ("1. Full Dokumen BA PK v.1.docx", SHEET_BA),
-    ("2. Isi Reviu PK v.1.docx",       SHEET_REVIU),
-    ("3. Dokpil Full PK v.1.docx",      SHEET_DOKPIL),
+    ("1. Full Dokumen BA PK v1.docx", SHEET_BA),
+    ("2. Isi Reviu PK v1.docx",       SHEET_REVIU),
+    ("3. Dokpil Full PK v1.docx",      SHEET_DOKPIL),
 ]
 
 # Keyword mapping: untuk detect sheet dari nama file Word (dipakai relink)
