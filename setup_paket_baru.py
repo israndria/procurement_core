@@ -141,10 +141,14 @@ def setup_paket_baru(folder_name=None):
             print(f"  Isi: {len(files_exist)} file")
             for f in files_exist[:5]:
                 print(f"    - {f}")
-        jawab = input("\nLanjutkan? File yang sudah ada tidak akan di-overwrite. (y/n): ").strip().lower()
-        if jawab != 'y':
-            print("[BATAL]")
-            return
+        import sys
+        if sys.stdin.isatty():
+            jawab = input("\nLanjutkan? File yang sudah ada tidak akan di-overwrite. (y/n): ").strip().lower()
+            if jawab != 'y':
+                print("[BATAL]")
+                return
+        else:
+            print("[AUTO] Non-interaktif — lanjut, file existing tidak di-overwrite.")
     else:
         os.makedirs(target_dir)
     
