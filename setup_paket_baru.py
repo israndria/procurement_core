@@ -127,7 +127,10 @@ def setup_paket_baru(folder_name=None):
     if not folder_name:
         print("[BATAL] Nama folder kosong.")
         return
-    
+
+    # Sanitize: ganti karakter tidak valid Windows dengan "-"
+    folder_name = re.sub(r'[<>:"/\\|?*]', '-', folder_name).strip()
+
     target_dir = os.path.join(OUTPUT_BASE, folder_name)
     
     # Cek folder existing
