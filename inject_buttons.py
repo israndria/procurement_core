@@ -21,6 +21,7 @@ def inject_buttons(filepath):
         "ModNavigator",     # Navigasi sheet, input data tender, daftar isi
         "ModKodeUnik",      # Generate kode unik otomatis
         "ModAutoFit",       # Auto-fit baris
+        "ModDraftPaket",    # Load draft paket dari Supabase + autofill
     ]
 
     # Verify semua .bas file ada
@@ -61,13 +62,52 @@ def inject_buttons(filepath):
                     print(f"  {name} lama dihapus")
                     break
 
+        # Baca secret Supabase untuk substitusi placeholder di ModDraftPaket.bas
+        import re as _re
+        from dotenv import load_dotenv
+        import pathlib
+        env_path = pathlib.Path(script_dir) / "secret_supabase.env"
+        load_dotenv(env_path)
+        sb_url = os.environ.get("SUPABASE_URL", "").strip('"')
+        sb_key = os.environ.get("SUPABASE_KEY", "").strip('"')
+
         # 2. Import semua .bas files
+        import tempfile
         for mod_name, bas_path in bas_files.items():
-            imported = vb_project.VBComponents.Import(bas_path)
+            with open(bas_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            # Substitusi placeholder secret (hanya ModDraftPaket)
+            if "%%SUPABASE_URL%%" in content or "%%SUPABASE_KEY%%" in content:
+                content = content.replace("%%SUPABASE_URL%%", sb_url)
+                content = content.replace("%%SUPABASE_KEY%%", sb_key)
+                tmp = tempfile.NamedTemporaryFile(suffix=".bas", delete=False,
+                                                   mode="w", encoding="utf-8")
+                tmp.write(content)
+                tmp.close()
+                actual_path = tmp.name
+            else:
+                actual_path = bas_path
+            imported = vb_project.VBComponents.Import(actual_path)
+            if actual_path != bas_path:
+                os.unlink(actual_path)
             print(f"  [OK] Imported: {imported.Name} ({imported.CodeModule.CountOfLines} baris)")
         
         # 2b. Inject Workbook_Open auto-relink ke ThisWorkbook module
         auto_relink_code = (
+            "' Worksheet_Change untuk Sheet '1. Input Data'\n"
+            "' Ketika cell E2 (selector paket) berubah → autofill semua field\n"
+            "Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)\n"
+            "    If Sh.Name = \"1. Input Data\" Then\n"
+            "        If Not Intersect(Target, Sh.Range(\"E2\")) Is Nothing Then\n"
+            "            Dim val As String\n"
+            "            val = Trim(CStr(Sh.Range(\"E2\").Value))\n"
+            "            If val <> \"\" Then\n"
+            "                ModDraftPaket.PilihDraftPaket val\n"
+            "            End If\n"
+            "        End If\n"
+            "    End If\n"
+            "End Sub\n"
+            "\n"
             "Private Sub Workbook_Open()\n"
             "    ' Auto-relink jika path Excel berubah (misal pindah PC/drive)\n"
             "    On Error Resume Next\n"
@@ -143,6 +183,8 @@ def inject_buttons(filepath):
         BLACK = (40, 40, 40)
         GREEN = (40, 167, 69)
         RED_PDF = (200, 35, 51)
+        PURPLE = (102, 51, 153)
+        TEAL = (0, 128, 128)
 
         sheet_buttons = [
             ("1. Input Data", [
@@ -153,7 +195,9 @@ def inject_buttons(filepath):
                 ("btnPrintPembuktian", "Print BA Pembuktian",   "PrintPembuktianPDF", 4, 7, BLACK),
                 ("btnREvaluasi",       "Print REvaluasi",      "PrintREvaluasiPDF", 4, 8, BLACK),
                 ("btnPembuktianTimpang", "Print Timpang",      "PrintPembuktianTimpangPDF", 5, 6, BLACK),
-                ("btnRelink",            "Relink Template",    "RelinkTemplate",           5, 8, (255, 140, 0)),
+                ("btnMuatDraft",     "Muat Draft Paket",       "MuatDraftPaket",   5, 7, PURPLE),
+                ("btnKodeUnik",      "Kode Unik Surat",        "GenerateKodeUnik", 5, 8, TEAL),
+                ("btnRelink",        "Relink Template",        "RelinkTemplate",   6, 8, (255, 140, 0)),
             ]),
             ("database_reviu", [
                 ("btnBukaReviu",   "Buka Reviu",      "BukaReviu",        2, 7, BLUE_WORD),
