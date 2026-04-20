@@ -18,7 +18,7 @@ Private Const SHEET_INPUT As String = "1. Input Data"
 Private Const CELL_SELECTOR As String = "E2"   ' Dropdown pilih paket
 
 ' Kolom yang di-fetch (efisien, tidak perlu semua)
-Private Const SB_SELECT As String = "kode_tender,nama_tender,mak,kode_rup,nilai_pagu,nilai_hps,kode_pokja,nomor_pp,nomor_surat_dinas,nama_dinas,nama_ppk,jangka_waktu,sumber_anggaran,anggota_1,anggota_2,anggota_3"
+Private Const SB_SELECT As String = "kode_tender,nama_tender,mak,kode_rup,nilai_pagu,nilai_hps,kode_pokja,nomor_pp,nomor_surat_dinas,nama_dinas,nama_ppk,jangka_waktu,sumber_anggaran,anggota_1,anggota_2,anggota_3,bidang"
 
 ' Cache data in-memory (Collection of Dictionary-like arrays)
 Private m_DataCache As Collection
@@ -163,8 +163,10 @@ Public Sub PilihDraftPaket(selectedLabel As String)
                 Else
                     .Range("E15").Value = CStr(item(11))
                 End If
-                ' SKPD/OPD → F17 (singkatan dinas)
+                ' Nama Dinas lengkap → F17 (SKPD/OPD)
                 .Range("F17").Value = CStr(item(9))
+                ' Bidang (khusus PUPR: Bina Marga/SDA/CK) → E17, kosong jika bukan PUPR
+                .Range("E17").Value = CStr(item(16))
                 ' Nama PPK → E19 + F19 (gelar), NIP → E20, Nomor SK → E21
                 Dim ppkNama As String: ppkNama = Trim(CStr(item(10)))
                 Dim komaPos As Long: komaPos = InStr(ppkNama, ",")
@@ -313,7 +315,7 @@ Private Function ParseDraftJSON(json As String) As Collection
         Dim obj As String
         obj = Mid(json, braceStart, braceEnd - braceStart + 1)
 
-        Dim item(15) As Variant
+        Dim item(16) As Variant
         item(0)  = ExtractJSONVal(obj, "kode_pokja")
         item(1)  = ExtractJSONVal(obj, "nama_tender")
         item(2)  = ExtractJSONVal(obj, "mak")
@@ -330,6 +332,7 @@ Private Function ParseDraftJSON(json As String) As Collection
         item(13) = ExtractJSONVal(obj, "anggota_1")
         item(14) = ExtractJSONVal(obj, "anggota_2")
         item(15) = ExtractJSONVal(obj, "anggota_3")
+        item(16) = ExtractJSONVal(obj, "bidang")
 
         col.Add item
         pos = braceEnd + 1
