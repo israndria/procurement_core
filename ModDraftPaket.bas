@@ -28,7 +28,7 @@ Private m_LastLoad As Date
 ' ============================================================
 ' FUNGSI UTAMA: Load dari Supabase, buat dropdown
 ' ============================================================
-Public Sub MuatDraftPaket()
+Public Sub MuatDraftPaket(Optional bFromOpen As Boolean = False)
     Dim ws As Worksheet
     On Error GoTo ErrHandler
     Set ws = ThisWorkbook.Sheets(SHEET_INPUT)
@@ -103,9 +103,28 @@ Public Sub MuatDraftPaket()
         .ShowError = False
     End With
 
-    ws.Range(CELL_SELECTOR).Value = ""  ' Reset pilihan
-    MsgBox m_DataCache.Count & " paket berhasil dimuat." & vbCrLf & _
-           "Pilih paket di cell " & CELL_SELECTOR & " untuk mengisi data.", vbInformation, "Draft Paket Dimuat"
+    ' Simpan nilai E2 yang sudah dipilih sebelum rebuild dropdown
+    Dim savedLabel As String
+    savedLabel = Trim(CStr(ws.Range(CELL_SELECTOR).Value))
+
+    If savedLabel = "" Then
+        ' Belum ada pilihan — tampilkan MsgBox panduan
+        ws.Range(CELL_SELECTOR).Value = ""
+        MsgBox m_DataCache.Count & " paket berhasil dimuat." & vbCrLf & _
+               "Pilih paket di cell " & CELL_SELECTOR & " untuk mengisi data.", vbInformation, "Draft Paket Dimuat"
+    ElseIf bFromOpen Then
+        ' Dipanggil dari Workbook_Open — restore dropdown saja, tidak parse ulang
+        ' (data sudah ada di sheet dari sesi sebelumnya)
+        Application.EnableEvents = False
+        ws.Range(CELL_SELECTOR).Value = savedLabel
+        Application.EnableEvents = True
+    Else
+        ' Dipanggil manual (klik tombol) — parse ulang untuk refresh data
+        Application.EnableEvents = False
+        ws.Range(CELL_SELECTOR).Value = savedLabel
+        Application.EnableEvents = True
+        PilihDraftPaket savedLabel
+    End If
     Exit Sub
 
 ErrHandler:
@@ -197,7 +216,8 @@ Public Sub PilihDraftPaket(selectedLabel As String)
             ' ── Parse PDF → isi database_reviu + database_dokpil ──────────────
             Dim kodeTender As String: kodeTender = CStr(item(6))
             Dim kodePokja2 As String: kodePokja2 = CStr(item(0))
-            ParsaDanIsiDariPDF kodeTender, kodePokja2
+            Dim bidang2 As String: bidang2 = CStr(item(16))
+            ParsaDanIsiDariPDF kodeTender, kodePokja2, bidang2
             Exit For
         End If
     Next i
@@ -207,7 +227,7 @@ End Sub
 ' ============================================================
 ' PARSE PDF: Cari Draft_Pokja_XXX.pdf → panggil Python → isi sheet
 ' ============================================================
-Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String)
+Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String, Optional bidang As String = "")
     Dim folderWorkbook As String
     folderWorkbook = ThisWorkbook.Path
 
@@ -223,6 +243,26 @@ Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String)
         ' Tidak ada PDF — tetap tampilkan _HasilParse dengan info PDF tidak ditemukan
         TampilkanHasilParseNoPDF folderWorkbook
         Exit Sub
+    End If
+
+    ' Cek apakah nama PDF cocok dengan kode pokja yang dipilih
+    Dim namaFilePDF As String
+    namaFilePDF = Mid(pathPDF, InStrRev(pathPDF, "\") + 1)
+    Dim kodePokjaFormatted As String
+    On Error Resume Next
+    kodePokjaFormatted = Format(CLng(kodePokja), "000")
+    On Error GoTo 0
+    Dim pdfCocok As Boolean
+    pdfCocok = (InStr(LCase(namaFilePDF), LCase(kodePokja)) > 0) Or _
+               (kodePokjaFormatted <> "" And InStr(namaFilePDF, kodePokjaFormatted) > 0)
+    If Not pdfCocok Then
+        Dim konfirmasi As Integer
+        konfirmasi = MsgBox("Paket yang dipilih: " & kodePokja & vbCrLf & _
+                            "PDF yang ditemukan: " & namaFilePDF & vbCrLf & vbCrLf & _
+                            "PDF ini kemungkinan bukan untuk paket yang dipilih." & vbCrLf & _
+                            "Lanjutkan parse dengan PDF ini?", _
+                            vbQuestion + vbYesNo, "Konfirmasi PDF")
+        If konfirmasi = vbNo Then Exit Sub
     End If
 
     ' Panggil Python parse_reviu.py
@@ -265,6 +305,7 @@ Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String)
     Open argFile For Output As #fArg
     Print #fArg, Replace(pathPDF, "\", "/")
     Print #fArg, Replace(folderWorkbook, "\", "/")
+    Print #fArg, bidang
     Close #fArg
 
     ' Gunakan junction C:\pokja2026 agar path tidak mengandung @
@@ -433,8 +474,13 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
     Set wsHP = ThisWorkbook.Sheets("_HasilParse")
     On Error GoTo 0
     If wsHP Is Nothing Then
-        Set wsHP = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        Set wsHP = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
         wsHP.Name = "_HasilParse"
+    Else
+        ' Pindah ke posisi paling kiri jika belum di sana
+        If wsHP.Index <> 1 Then
+            wsHP.Move Before:=ThisWorkbook.Sheets(1)
+        End If
     End If
     wsHP.Visible = xlSheetVisible
     wsHP.Cells.Clear
@@ -548,8 +594,10 @@ Private Sub TampilkanHasilParseNoPDF(folderWb As String)
     Set wsHP = ThisWorkbook.Sheets("_HasilParse")
     On Error GoTo 0
     If wsHP Is Nothing Then
-        Set wsHP = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        Set wsHP = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
         wsHP.Name = "_HasilParse"
+    Else
+        If wsHP.Index <> 1 Then wsHP.Move Before:=ThisWorkbook.Sheets(1)
     End If
     wsHP.Visible = xlSheetVisible
     wsHP.Cells.Clear

@@ -56,18 +56,28 @@ def fetch_cara_pembayaran():
         }
     ]
 
-def deteksi_cara_pembayaran(semua_teks, daftar_cp):
-    teks_lower = semua_teks.lower()
+def deteksi_cara_pembayaran(daftar_cp, bidang=""):
+    """
+    Deteksi cara pembayaran berdasarkan bidang paket (dari Supabase).
+    - Bina Marga (jalan/jembatan) → Monthly Certificate (MC)
+    - Semua bidang lain (SDA, CK, irigasi, bangunan, drainase,
+      pendidikan, perdagangan, dll) → Termin
+    """
+    bidang_lower = (bidang or "").lower().strip()
+
+    # Kata kunci yang mengindikasikan Bina Marga / pekerjaan jalan
+    KEYWORD_BINAMARGA = [
+        "bina marga", "jalan", "jembatan", "perkerasan", "rigid", "flexible",
+        "hotmix", "aspal", "overlay"
+    ]
+    is_binamarga = any(kw in bidang_lower for kw in KEYWORD_BINAMARGA)
+    id_pilih = "monthly_certificate" if is_binamarga else "termin"
+
     for cp in daftar_cp:
-        if cp["id"] == "termin":
-            for kw in cp["keyword"]:
-                if kw.lower() in teks_lower:
-                    return cp["id"], cp["teks"]
-    # Default MC
-    for cp in daftar_cp:
-        if cp["id"] == "monthly_certificate":
+        if cp["id"] == id_pilih:
             return cp["id"], cp["teks"]
-    return "monthly_certificate", daftar_cp[0]["teks"]
+
+    return daftar_cp[0]["id"], daftar_cp[0]["teks"]
 
 # ─── Helpers teks ────────────────────────────────────────────────────────────
 def bersihkan(s):
@@ -78,7 +88,7 @@ def normalisasi_pengalaman(s):
     return int(m.group(1)) if m else 0
 
 # ─── Parser utama PDF ────────────────────────────────────────────────────────
-def parse_pdf(path_pdf):
+def parse_pdf(path_pdf, bidang=""):
     try:
         import pdfplumber
     except ImportError:
@@ -166,9 +176,34 @@ def parse_pdf(path_pdf):
                         set_val("reviu", "E2", maksud)
                         break
 
-        # ── E6/E7: SBU — tidak ada di PDF standar KAK, tandai "perlu_keputusan" ─
-        set_val("reviu", "E6", "", "perlu_keputusan")
-        set_val("reviu", "E7", "", "perlu_keputusan")
+        # ── E6/E7: SBU — cari di PDF, fallback "perlu_keputusan" ─────────────
+        # Pola umum di KAK: "SBU : BS001" atau "Kode SBU BS 001" atau "BS001"
+        sbu_found = []
+        for teks in semua_halaman:
+            # Cari pola kode SBU: kombinasi 2 huruf + 3 digit (misal BS001, SI001, SP002)
+            hits = re.findall(
+                r'\bSBU\b[^A-Z0-9]*([A-Z]{2}\d{3})\b'   # "SBU BS001"
+                r'|\bKode\s+SBU[^A-Z0-9]*([A-Z]{2}\d{3})\b'  # "Kode SBU BS001"
+                r'|\b([A-Z]{2}\d{3})\b(?=[^)]*(?:SBU|Subkualifikasi|Bangunan Sipil|Bangunan Gedung))',
+                teks
+            )
+            for h in hits:
+                kode = (h[0] or h[1] or h[2]).strip()
+                if kode and kode not in sbu_found:
+                    sbu_found.append(kode)
+            if sbu_found:
+                break
+
+        if len(sbu_found) >= 2:
+            set_val("reviu", "E6", sbu_found[0])   # KBLI 2020
+            set_val("reviu", "E7", sbu_found[1])   # KBLI 2015
+        elif len(sbu_found) == 1:
+            set_val("reviu", "E6", sbu_found[0])
+            set_val("reviu", "E7", "", "perlu_keputusan")
+        else:
+            # Tidak ditemukan di PDF — perlu diisi manual
+            set_val("reviu", "E6", "", "perlu_keputusan")
+            set_val("reviu", "E7", "", "perlu_keputusan")
 
         # ── E9-E26: Tabel Peralatan ───────────────────────────────────────────
         alat_list = []
@@ -335,7 +370,7 @@ def parse_pdf(path_pdf):
 
         # ── database_dokpil E16: Cara Pembayaran ─────────────────────────────
         daftar_cp = fetch_cara_pembayaran()
-        id_cp, teks_cp = deteksi_cara_pembayaran(semua_teks, daftar_cp)
+        id_cp, teks_cp = deteksi_cara_pembayaran(daftar_cp, bidang)
         hasil["dokpil"]["E16"]["nilai"] = teks_cp
         hasil["dokpil"]["E16"]["id_cp"] = id_cp
         hasil["dokpil"]["E16"]["status"] = "terisi"
@@ -345,18 +380,21 @@ def parse_pdf(path_pdf):
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 def main():
-    # Mode --argfile: baca path_pdf dan folder_output dari file teks
+    # Mode --argfile: baca path_pdf, folder_output, bidang dari file teks
+    bidang = ""
     if len(sys.argv) >= 3 and sys.argv[1] == "--argfile":
         argfile = sys.argv[2]
         with open(argfile, encoding="utf-8") as f:
             lines = [l.rstrip("\n").rstrip("\r") for l in f.readlines()]
         path_pdf = lines[0] if len(lines) > 0 else ""
         folder_output = lines[1] if len(lines) > 1 else ""
+        bidang = lines[2] if len(lines) > 2 else ""
     elif len(sys.argv) >= 3:
         path_pdf = sys.argv[1]
         folder_output = sys.argv[2]
+        bidang = sys.argv[3] if len(sys.argv) > 3 else ""
     else:
-        print("Usage: python parse_reviu.py <path_pdf> <folder_output>")
+        print("Usage: python parse_reviu.py <path_pdf> <folder_output> [bidang]")
         sys.exit(1)
 
     if not os.path.exists(path_pdf):
@@ -366,7 +404,7 @@ def main():
             json.dump(out, f, ensure_ascii=False, indent=2)
         sys.exit(0)
 
-    hasil, err = parse_pdf(path_pdf)
+    hasil, err = parse_pdf(path_pdf, bidang)
     if err:
         hasil = {"error": err, "reviu": {}, "dokpil": {}}
 

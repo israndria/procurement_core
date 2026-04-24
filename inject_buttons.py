@@ -111,7 +111,7 @@ def inject_buttons(filepath):
             "Private Sub Workbook_Open()\n"
             "    ' Auto-load daftar draft paket dari Supabase\n"
             "    On Error Resume Next\n"
-            "    ModDraftPaket.MuatDraftPaket\n"
+            "    ModDraftPaket.MuatDraftPaket True\n"
             "    On Error GoTo 0\n"
             "    ' Auto-relink jika path Excel berubah (misal pindah PC/drive)\n"
             "    On Error Resume Next\n"
@@ -311,4 +311,8 @@ def inject_buttons(filepath):
 
 
 if __name__ == "__main__":
-    inject_buttons(r"D:\Dokumen\@ POKJA 2026\Paket Experiment\@ BA PK 2026 (Improved) v1.4.xlsm")
+    import sys
+    if len(sys.argv) > 1:
+        inject_buttons(sys.argv[1])
+    else:
+        inject_buttons(r"D:\Dokumen\@ POKJA 2026\Paket Experiment\@ BA PK 2026 (Improved) v1.4.xlsm")
