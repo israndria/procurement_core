@@ -257,13 +257,35 @@ Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String)
     ' Hapus JSON lama
     If FileExists(outJSON) Then Kill outJSON
 
-    ' Jalankan Python (synchronous via WScript.Shell)
-    Dim cmd As String
-    cmd = """" & pythonExe & """ """ & scriptPY & """ """ & pathPDF & """ """ & folderWorkbook & """"
+    ' Tulis argumen ke file temp pakai forward slash
+    ' (backslash di dalam string Python bisa jadi escape, misal \1 → karakter kontrol)
+    Dim argFile As String
+    argFile = Environ("TEMP") & "\_parse_reviu_args.txt"
+    Dim fArg As Integer: fArg = FreeFile
+    Open argFile For Output As #fArg
+    Print #fArg, Replace(pathPDF, "\", "/")
+    Print #fArg, Replace(folderWorkbook, "\", "/")
+    Close #fArg
+
+    ' Gunakan junction C:\pokja2026 agar path tidak mengandung @
+    ' (@ menyebabkan cmd.exe gagal parse; junction dibuat sekali saat pertama kali)
+    Dim junctionBase As String
+    junctionBase = "C:\pokja2026"
+    If Dir(junctionBase, vbDirectory) = "" Then
+        CreateObject("WScript.Shell").Run "cmd /c mklink /J """ & junctionBase & """ ""D:\Dokumen\@ POKJA 2026""", 0, True
+    End If
+    Dim pyExeJunction As String: pyExeJunction = junctionBase & "\V19_Scheduler\WPy64-313110\python\python.exe"
+    Dim pyScriptJunction As String: pyScriptJunction = junctionBase & "\V19_Scheduler\WPy64-313110\parse_reviu.py"
+
+    ' Jalankan via PowerShell (bukan cmd.exe) agar path dengan spasi dan angka aman
+    Dim psCmd As String
+    psCmd = "powershell.exe -NoProfile -WindowStyle Hidden -Command """ & _
+            "& '" & pyExeJunction & "' '" & pyScriptJunction & "' --argfile '" & argFile & "'"""
+
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
     Dim ret As Long
-    ret = wsh.Run("cmd /c " & cmd, 0, True)  ' 0=hidden, True=tunggu selesai
+    ret = wsh.Run(psCmd, 0, True)
 
     If Not FileExists(outJSON) Then
         MsgBox "Parse PDF gagal. Cek apakah pdfplumber terinstall." & vbCrLf & "Kode return: " & ret, vbExclamation

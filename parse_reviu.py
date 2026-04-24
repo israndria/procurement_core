@@ -4,7 +4,7 @@ parse_reviu.py — Parse Draft_Pokja_XXX.pdf → isi database_reviu + database_d
 Dipanggil dari VBA ModDraftPaket via WScript.Shell:
   python parse_reviu.py "<path_pdf>" "<kode_pokja>" "<folder_output>"
 
-Output: <folder_output>\_parse_reviu.json
+Output: <folder_output>/_parse_reviu.json
 """
 
 import sys
@@ -345,12 +345,19 @@ def parse_pdf(path_pdf):
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 def main():
-    if len(sys.argv) < 3:
+    # Mode --argfile: baca path_pdf dan folder_output dari file teks
+    if len(sys.argv) >= 3 and sys.argv[1] == "--argfile":
+        argfile = sys.argv[2]
+        with open(argfile, encoding="utf-8") as f:
+            lines = [l.rstrip("\n").rstrip("\r") for l in f.readlines()]
+        path_pdf = lines[0] if len(lines) > 0 else ""
+        folder_output = lines[1] if len(lines) > 1 else ""
+    elif len(sys.argv) >= 3:
+        path_pdf = sys.argv[1]
+        folder_output = sys.argv[2]
+    else:
         print("Usage: python parse_reviu.py <path_pdf> <folder_output>")
         sys.exit(1)
-
-    path_pdf = sys.argv[1]
-    folder_output = sys.argv[2]
 
     if not os.path.exists(path_pdf):
         out = {"error": f"File PDF tidak ditemukan: {path_pdf}", "reviu": {}, "dokpil": {}}
