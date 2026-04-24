@@ -99,15 +99,22 @@ def get_service():
 # ============================================================
 # SCRAPING (tanpa Selenium)
 # ============================================================
-_scraper = cloudscraper.create_scraper()
+import requests as _requests
+_session = _requests.Session()
+_session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8',
+})
 
 def fetch_jadwal(url: str) -> pd.DataFrame | None:
     """
-    Ambil tabel jadwal dari halaman SPSE menggunakan cloudscraper
-    (bypass Cloudflare/bot detection di GitHub Actions IP).
+    Ambil tabel jadwal dari halaman publik SPSE (/lelang/{id}/jadwal).
+    Endpoint ini tidak butuh session/cookie — bisa diakses dari GitHub Actions.
     """
     try:
-        resp = _scraper.get(url, timeout=30)
+        referer = url.replace('/jadwal', '/pengumuman')
+        resp = _session.get(url, headers={'Referer': referer}, timeout=30)
         resp.raise_for_status()
         html = resp.text
     except Exception as e:

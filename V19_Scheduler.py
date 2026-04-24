@@ -533,7 +533,27 @@ tab_monitor, tab_tambah = st.tabs(["👀 Pantau & Update", "➕ Tambah Paket"])
 
 # --- TAB 1: DASHBOARD ---
 with tab_monitor:
-    col_reset_1, col_reset_2 = st.columns([8, 2])
+    col_reset_1, col_sync_all, col_reset_2 = st.columns([6, 2, 2])
+    with col_sync_all:
+        if st.button("🔄 Sync Semua", use_container_width=True, help="Jalankan sync_jadwal.py — update semua paket ke GCal"):
+            import subprocess, sys
+            _sync_script = os.path.join(BASE_DIR, "sync_jadwal.py")
+            _python_exe  = sys.executable
+            with st.spinner("Menjalankan sync..."):
+                _proc = subprocess.run(
+                    [_python_exe, _sync_script],
+                    capture_output=True, text=True, timeout=120,
+                    cwd=BASE_DIR,
+                )
+            _output = (_proc.stdout + _proc.stderr).strip()
+            if _proc.returncode == 0:
+                st.toast("Sync selesai!", icon="✅")
+            else:
+                st.toast("Sync selesai (ada error)", icon="⚠️")
+            if _output:
+                with st.expander("📋 Log Sync", expanded=True):
+                    st.code(_output, language=None)
+            st.rerun()
     with col_reset_2:
         if st.button("🗑️ Reset Database", type="primary", use_container_width=True, help="Hapus semua data (Reset Tahun)"):
             if clear_all_database():
