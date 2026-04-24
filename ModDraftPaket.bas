@@ -193,10 +193,504 @@ Public Sub PilihDraftPaket(selectedLabel As String)
             End With
             ' Isi anggota pokja dari sheet "0. Data Nama Pokja & PPK" berdasarkan Kode Pokja
             IsiAnggotaPokja ws, CStr(item(13)), CStr(item(14)), CStr(item(15))
+
+            ' ── Parse PDF → isi database_reviu + database_dokpil ──────────────
+            Dim kodeTender As String: kodeTender = CStr(item(6))
+            Dim kodePokja2 As String: kodePokja2 = CStr(item(0))
+            ParsaDanIsiDariPDF kodeTender, kodePokja2
             Exit For
         End If
     Next i
 End Sub
+
+
+' ============================================================
+' PARSE PDF: Cari Draft_Pokja_XXX.pdf → panggil Python → isi sheet
+' ============================================================
+Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String)
+    Dim folderWorkbook As String
+    folderWorkbook = ThisWorkbook.Path
+
+    ' Cari file Draft_Pokja_*.pdf di folder workbook
+    Dim pathPDF As String
+    pathPDF = CariDraftPDF(folderWorkbook, kodePokja)
+    If pathPDF = "" Then
+        ' Coba subfolder satu level di atas
+        pathPDF = CariDraftPDF(folderWorkbook & "\..", kodePokja)
+    End If
+
+    If pathPDF = "" Then
+        ' Tidak ada PDF — tetap tampilkan _HasilParse dengan info PDF tidak ditemukan
+        TampilkanHasilParseNoPDF folderWorkbook
+        Exit Sub
+    End If
+
+    ' Panggil Python parse_reviu.py
+    Dim pythonExe As String
+    pythonExe = folderWorkbook & "\..\..\V19_Scheduler\WPy64-313110\python\python.exe"
+    If Not FileExists(pythonExe) Then
+        ' Coba path relatif jika workbook ada di subfolder paket
+        pythonExe = folderWorkbook & "\..\V19_Scheduler\WPy64-313110\python\python.exe"
+    End If
+
+    Dim scriptPY As String
+    scriptPY = folderWorkbook & "\parse_reviu.py"
+    If Not FileExists(scriptPY) Then
+        scriptPY = folderWorkbook & "\..\V19_Scheduler\WPy64-313110\parse_reviu.py"
+    End If
+
+    ' Tentukan python exe dari BASE_DIR standar
+    Dim baseDir As String
+    baseDir = CariBaseDir(folderWorkbook)
+    pythonExe = baseDir & "\python\python.exe"
+    scriptPY  = baseDir & "\parse_reviu.py"
+
+    If Not FileExists(pythonExe) Or Not FileExists(scriptPY) Then
+        MsgBox "Python atau parse_reviu.py tidak ditemukan." & vbCrLf & _
+               "Python: " & pythonExe & vbCrLf & "Script: " & scriptPY, vbExclamation
+        Exit Sub
+    End If
+
+    Dim outJSON As String
+    outJSON = folderWorkbook & "\_parse_reviu.json"
+
+    ' Hapus JSON lama
+    If FileExists(outJSON) Then Kill outJSON
+
+    ' Jalankan Python (synchronous via WScript.Shell)
+    Dim cmd As String
+    cmd = """" & pythonExe & """ """ & scriptPY & """ """ & pathPDF & """ """ & folderWorkbook & """"
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    Dim ret As Long
+    ret = wsh.Run("cmd /c " & cmd, 0, True)  ' 0=hidden, True=tunggu selesai
+
+    If Not FileExists(outJSON) Then
+        MsgBox "Parse PDF gagal. Cek apakah pdfplumber terinstall." & vbCrLf & "Kode return: " & ret, vbExclamation
+        Exit Sub
+    End If
+
+    ' Baca JSON
+    Dim jsonTeks As String
+    jsonTeks = BacaFile(outJSON)
+
+    ' Cek error
+    Dim errMsg As String
+    errMsg = ExtractJSONVal(jsonTeks, "error")
+    If errMsg <> "" Then
+        MsgBox "Error saat parsing PDF: " & errMsg, vbExclamation
+        Exit Sub
+    End If
+
+    ' Isi database_reviu
+    IsiDatabaseReviu jsonTeks
+
+    ' Isi database_dokpil
+    IsiDatabaseDokpil jsonTeks
+
+    ' Tampilkan sheet _HasilParse (hanya 1x MsgBox)
+    TampilkanHasilParse jsonTeks, folderWorkbook
+End Sub
+
+
+' ============================================================
+' ISI database_reviu dari JSON
+' ============================================================
+Private Sub IsiDatabaseReviu(jsonTeks As String)
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("database_reviu")
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+
+    ' Mapping cell → path JSON (format: "reviu.EXX.nilai")
+    Dim cells(25) As String, paths(25) As String
+    cells(0)  = "E2":  paths(0)  = "E2"
+    cells(1)  = "E6":  paths(1)  = "E6"
+    cells(2)  = "E7":  paths(2)  = "E7"
+    cells(3)  = "E9":  paths(3)  = "E9"
+    cells(4)  = "E10": paths(4)  = "E10"
+    cells(5)  = "E11": paths(5)  = "E11"
+    cells(6)  = "E12": paths(6)  = "E12"
+    cells(7)  = "E13": paths(7)  = "E13"
+    cells(8)  = "E14": paths(8)  = "E14"
+    cells(9)  = "E15": paths(9)  = "E15"
+    cells(10) = "E16": paths(10) = "E16"
+    cells(11) = "E17": paths(11) = "E17"
+    cells(12) = "E18": paths(12) = "E18"
+    cells(13) = "E19": paths(13) = "E19"
+    cells(14) = "E20": paths(14) = "E20"
+    cells(15) = "E21": paths(15) = "E21"
+    cells(16) = "E22": paths(16) = "E22"
+    cells(17) = "E23": paths(17) = "E23"
+    cells(18) = "E24": paths(18) = "E24"
+    cells(19) = "E25": paths(19) = "E25"
+    cells(20) = "E26": paths(20) = "E26"
+    cells(21) = "E27": paths(21) = "E27"
+    cells(22) = "E28": paths(22) = "E28"
+    cells(23) = "E29": paths(23) = "E29"
+    cells(24) = "E30": paths(24) = "E30"
+    cells(25) = "E31": paths(25) = "E31"
+
+    Dim i As Integer
+    For i = 0 To 25
+        Dim blok As String
+        blok = ExtractJSONBlok(jsonTeks, "reviu", paths(i))
+        Dim status As String: status = ExtractJSONVal(blok, "status")
+        Dim nilai As String:  nilai  = ExtractJSONVal(blok, "nilai")
+        ' Hanya isi jika terisi (tidak timpa perlu_keputusan / tidak_ada)
+        If status = "terisi" And nilai <> "" Then
+            ws.Range(cells(i)).Value = nilai
+        End If
+    Next i
+
+    ' E32, E33, E34 (string panjang, bisa ada newline)
+    Dim blok32 As String: blok32 = ExtractJSONBlok(jsonTeks, "reviu", "E32")
+    If ExtractJSONVal(blok32, "status") = "terisi" Then
+        ws.Range("E32").Value = ExtractJSONVal(blok32, "nilai")
+    End If
+    Dim blok33 As String: blok33 = ExtractJSONBlok(jsonTeks, "reviu", "E33")
+    If ExtractJSONVal(blok33, "status") = "terisi" Then
+        ' Ganti \n literal dengan newline Excel
+        Dim uraian As String: uraian = ExtractJSONVal(blok33, "nilai")
+        uraian = Join(Split(uraian, "\n"), Chr(10))
+        ws.Range("E33").Value = uraian
+    End If
+    Dim blok34 As String: blok34 = ExtractJSONBlok(jsonTeks, "reviu", "E34")
+    If ExtractJSONVal(blok34, "status") = "terisi" Then
+        ws.Range("E34").Value = ExtractJSONVal(blok34, "nilai")
+    End If
+End Sub
+
+
+' ============================================================
+' ISI database_dokpil dari JSON
+' ============================================================
+Private Sub IsiDatabaseDokpil(jsonTeks As String)
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("database_dokpil")
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+
+    Dim dokpilCells(9) As String
+    dokpilCells(0) = "E6":  dokpilCells(1) = "E7"
+    dokpilCells(2) = "E8":  dokpilCells(3) = "E9"
+    dokpilCells(4) = "E10": dokpilCells(5) = "E11"
+    dokpilCells(6) = "E12": dokpilCells(7) = "E13"
+    dokpilCells(8) = "E14": dokpilCells(9) = "E15"
+
+    Dim i As Integer
+    For i = 0 To 9
+        Dim blok As String
+        blok = ExtractJSONBlok(jsonTeks, "dokpil", dokpilCells(i))
+        Dim status As String: status = ExtractJSONVal(blok, "status")
+        Dim nilai As String:  nilai  = ExtractJSONVal(blok, "nilai")
+        If status = "terisi" And nilai <> "" Then
+            ws.Range(dokpilCells(i)).Value = nilai
+        ElseIf status = "tidak_ada" Then
+            ws.Range(dokpilCells(i)).Value = ""
+        End If
+    Next i
+
+    ' E16: Cara Pembayaran
+    Dim blok16 As String: blok16 = ExtractJSONBlok(jsonTeks, "dokpil", "E16")
+    If ExtractJSONVal(blok16, "status") = "terisi" Then
+        ws.Range("E16").Value = ExtractJSONVal(blok16, "nilai")
+    End If
+End Sub
+
+
+' ============================================================
+' TAMPILKAN _HasilParse — sheet checklist, MsgBox hanya 1x
+' ============================================================
+Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
+    ' Buat/ambil sheet _HasilParse
+    Dim wsHP As Worksheet
+    On Error Resume Next
+    Set wsHP = ThisWorkbook.Sheets("_HasilParse")
+    On Error GoTo 0
+    If wsHP Is Nothing Then
+        Set wsHP = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        wsHP.Name = "_HasilParse"
+    End If
+    wsHP.Visible = xlSheetVisible
+    wsHP.Cells.Clear
+
+    ' Header
+    With wsHP
+        .Range("A1").Value = "Field"
+        .Range("B1").Value = "Status"
+        .Range("C1").Value = "Nilai / Keterangan"
+        .Range("D1").Value = "Navigasi"
+        .Range("A1:D1").Font.Bold = True
+        .Range("A1:D1").Interior.Color = RGB(68, 114, 196)
+        .Range("A1:D1").Font.Color = RGB(255, 255, 255)
+    End With
+
+    Dim baris As Integer: baris = 2
+    Dim jmlTerisi As Integer: jmlTerisi = 0
+    Dim jmlKosong As Integer: jmlKosong = 0
+    Dim jmlKeputusan As Integer: jmlKeputusan = 0
+    Dim jmlTidakAda As Integer: jmlTidakAda = 0
+
+    ' ─── Bagian database_reviu ────────────────────────────────────────────────
+    TulisHeaderBagian wsHP, baris, "DATABASE REVIU"
+    baris = baris + 1
+
+    Dim revKeys(27) As String
+    revKeys(0)  = "E2":  revKeys(1)  = "E6":  revKeys(2)  = "E7"
+    revKeys(3)  = "E9":  revKeys(4)  = "E10": revKeys(5)  = "E11"
+    revKeys(6)  = "E12": revKeys(7)  = "E13": revKeys(8)  = "E14"
+    revKeys(9)  = "E15": revKeys(10) = "E16": revKeys(11) = "E17"
+    revKeys(12) = "E18": revKeys(13) = "E19": revKeys(14) = "E20"
+    revKeys(15) = "E21": revKeys(16) = "E22": revKeys(17) = "E23"
+    revKeys(18) = "E24": revKeys(19) = "E25": revKeys(20) = "E26"
+    revKeys(21) = "E27": revKeys(22) = "E28": revKeys(23) = "E29"
+    revKeys(24) = "E30": revKeys(25) = "E31": revKeys(26) = "E32"
+    revKeys(27) = "E33" ' E34 ditambah di bawah
+
+    Dim k As Integer
+    For k = 0 To 27
+        Dim blok As String: blok = ExtractJSONBlok(jsonTeks, "reviu", revKeys(k))
+        TulisBarisHasil wsHP, baris, blok, revKeys(k), "database_reviu", _
+                        jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
+        baris = baris + 1
+    Next k
+    ' E34
+    Dim blok34 As String: blok34 = ExtractJSONBlok(jsonTeks, "reviu", "E34")
+    TulisBarisHasil wsHP, baris, blok34, "E34", "database_reviu", _
+                    jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
+    baris = baris + 1
+
+    ' ─── Bagian database_dokpil ───────────────────────────────────────────────
+    baris = baris + 1
+    TulisHeaderBagian wsHP, baris, "DATABASE DOKPIL"
+    baris = baris + 1
+
+    Dim dpKeys(10) As String
+    dpKeys(0) = "E6":  dpKeys(1) = "E7":  dpKeys(2) = "E8"
+    dpKeys(3) = "E9":  dpKeys(4) = "E10": dpKeys(5) = "E11"
+    dpKeys(6) = "E12": dpKeys(7) = "E13": dpKeys(8) = "E14"
+    dpKeys(9) = "E15": dpKeys(10) = "E16"
+
+    Dim j As Integer
+    For j = 0 To 10
+        Dim blokD As String: blokD = ExtractJSONBlok(jsonTeks, "dokpil", dpKeys(j))
+        TulisBarisHasil wsHP, baris, blokD, dpKeys(j), "database_dokpil", _
+                        jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
+        baris = baris + 1
+    Next j
+
+    ' Format kolom
+    wsHP.Columns("A").ColumnWidth = 35
+    wsHP.Columns("B").ColumnWidth = 20
+    wsHP.Columns("C").ColumnWidth = 60
+    wsHP.Columns("D").ColumnWidth = 15
+    wsHP.Range("C2:C" & baris).WrapText = False
+
+    ' Cek apakah MsgBox sudah pernah ditampilkan (flag di A1 comment)
+    Dim sudahTampil As Boolean
+    sudahTampil = False
+    If wsHP.Range("A1").Comment Is Nothing Then
+        sudahTampil = False
+    Else
+        sudahTampil = (wsHP.Range("A1").Comment.Text = "SHOWN")
+    End If
+
+    If Not sudahTampil Then
+        ' Ringkasan MsgBox 1x
+        Dim msg As String
+        msg = "Hasil parsing Draft PDF selesai:" & vbCrLf & vbCrLf
+        msg = msg & "  Terisi otomatis : " & jmlTerisi & " field" & vbCrLf
+        msg = msg & "  Perlu keputusan : " & jmlKeputusan & " field (SBU)" & vbCrLf
+        msg = msg & "  Tidak ada di PDF: " & jmlTidakAda & " field" & vbCrLf
+        msg = msg & "  Belum terisi    : " & jmlKosong & " field" & vbCrLf & vbCrLf
+        msg = msg & "Lihat sheet '_HasilParse' untuk detail dan navigasi ke cell yang perlu diisi manual."
+        MsgBox msg, vbInformation, "Parse Draft PDF"
+
+        ' Tandai sudah ditampilkan
+        On Error Resume Next
+        wsHP.Range("A1").AddComment "SHOWN"
+        On Error GoTo 0
+    End If
+
+    ' Aktifkan sheet _HasilParse
+    wsHP.Activate
+    wsHP.Range("A1").Select
+End Sub
+
+Private Sub TampilkanHasilParseNoPDF(folderWb As String)
+    Dim wsHP As Worksheet
+    On Error Resume Next
+    Set wsHP = ThisWorkbook.Sheets("_HasilParse")
+    On Error GoTo 0
+    If wsHP Is Nothing Then
+        Set wsHP = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        wsHP.Name = "_HasilParse"
+    End If
+    wsHP.Visible = xlSheetVisible
+    wsHP.Cells.Clear
+    wsHP.Range("A1").Value = "INFO"
+    wsHP.Range("B1").Value = "File Draft_Pokja_XXX.pdf tidak ditemukan di folder paket."
+    wsHP.Range("C1").Value = "Jalankan 'Download Dokumen' di Asisten Pokja terlebih dahulu, atau salin PDF ke folder yang sama dengan file Excel."
+    wsHP.Columns("A:C").AutoFit
+    wsHP.Activate
+End Sub
+
+Private Sub TulisHeaderBagian(ws As Worksheet, baris As Integer, judul As String)
+    ws.Range("A" & baris & ":D" & baris).Merge
+    ws.Range("A" & baris).Value = judul
+    ws.Range("A" & baris).Font.Bold = True
+    ws.Range("A" & baris).Interior.Color = RGB(189, 215, 238)
+End Sub
+
+Private Sub TulisBarisHasil(ws As Worksheet, baris As Integer, blok As String, _
+                             cellAddr As String, namaSheet As String, _
+                             ByRef jmlTerisi As Integer, ByRef jmlKosong As Integer, _
+                             ByRef jmlKeputusan As Integer, ByRef jmlTidakAda As Integer)
+    Dim status As String: status = ExtractJSONVal(blok, "status")
+    Dim label  As String: label  = ExtractJSONVal(blok, "label")
+    Dim nilai  As String: nilai  = ExtractJSONVal(blok, "nilai")
+
+    Dim statusTeks As String
+    Dim warna As Long
+
+    Select Case status
+        Case "terisi"
+            statusTeks = "Terisi Otomatis"
+            warna = RGB(198, 239, 206)  ' Hijau muda
+            jmlTerisi = jmlTerisi + 1
+        Case "perlu_keputusan"
+            statusTeks = "Perlu Keputusan"
+            warna = RGB(255, 235, 156)  ' Kuning
+            jmlKeputusan = jmlKeputusan + 1
+        Case "tidak_ada"
+            statusTeks = "Tidak Ada di PDF"
+            warna = RGB(217, 217, 217)  ' Abu
+            jmlTidakAda = jmlTidakAda + 1
+        Case Else
+            statusTeks = "Belum Terisi"
+            warna = RGB(255, 199, 206)  ' Merah muda
+            jmlKosong = jmlKosong + 1
+    End Select
+
+    With ws
+        .Cells(baris, 1).Value = label & " (" & cellAddr & ")"
+        .Cells(baris, 2).Value = statusTeks
+        .Cells(baris, 2).Interior.Color = warna
+        .Cells(baris, 3).Value = Left(nilai, 120)
+
+        ' Hyperlink navigasi ke cell target
+        If status <> "tidak_ada" Then
+            On Error Resume Next
+            Dim wsTarget As Worksheet
+            Set wsTarget = ThisWorkbook.Sheets(namaSheet)
+            If Not wsTarget Is Nothing Then
+                ws.Hyperlinks.Add Anchor:=ws.Cells(baris, 4), _
+                    Address:="", _
+                    SubAddress:="'" & namaSheet & "'!" & cellAddr, _
+                    TextToDisplay:="Buka " & cellAddr
+            End If
+            On Error GoTo 0
+        End If
+    End With
+End Sub
+
+
+' ============================================================
+' HELPERS: Cari file PDF, path, baca file
+' ============================================================
+Private Function CariDraftPDF(folder As String, kodePokja As String) As String
+    CariDraftPDF = ""
+    ' Pattern: Draft_Pokja_086.pdf atau Draft_Pokja_86.pdf
+    Dim patterns(2) As String
+    patterns(0) = folder & "\Draft_Pokja_" & Format(CLng(kodePokja), "000") & ".pdf"
+    patterns(1) = folder & "\Draft_Pokja_" & kodePokja & ".pdf"
+    patterns(2) = folder & "\Draft_Pokja*.pdf"
+
+    Dim i As Integer
+    For i = 0 To 1
+        If FileExists(patterns(i)) Then
+            CariDraftPDF = patterns(i)
+            Exit Function
+        End If
+    Next i
+
+    ' Wildcard: ambil file pertama yang match
+    Dim found As String
+    found = Dir(patterns(2))
+    If found <> "" Then
+        CariDraftPDF = folder & "\" & found
+    End If
+End Function
+
+Private Function CariBaseDir(folderWorkbook As String) As String
+    ' Struktur: D:\Dokumen\@ POKJA 2026\{N}. Pokja XXX\  ← folderWorkbook
+    '           D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\
+    ' Naik 1 level dari folderWorkbook → @ POKJA 2026, lalu masuk V19_Scheduler\WPy64-313110
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim pokjaRoot As String
+    pokjaRoot = fso.GetParentFolderName(folderWorkbook)
+    CariBaseDir = pokjaRoot & "\V19_Scheduler\WPy64-313110"
+End Function
+
+Private Function FileExists(path As String) As Boolean
+    On Error Resume Next
+    FileExists = (Dir(path) <> "")
+    On Error GoTo 0
+End Function
+
+Private Function BacaFile(path As String) As String
+    Dim f As Integer: f = FreeFile
+    Dim teks As String, baris As String
+    Open path For Input As #f
+    Do While Not EOF(f)
+        Line Input #f, baris
+        teks = teks & baris & Chr(10)
+    Loop
+    Close #f
+    BacaFile = teks
+End Function
+
+
+' ============================================================
+' HELPER: Ekstrak blok JSON untuk field tertentu di nested object
+' Format: {"reviu": {"E2": {"nilai":"...", "status":"..."}}}
+' ============================================================
+Private Function ExtractJSONBlok(jsonTeks As String, bagian As String, cellKey As String) As String
+    ' Cari posisi bagian (reviu/dokpil)
+    Dim pBagian As Long
+    pBagian = InStr(jsonTeks, """" & bagian & """")
+    If pBagian = 0 Then ExtractJSONBlok = "{}": Exit Function
+
+    ' Cari posisi cellKey dalam bagian itu
+    Dim pKey As Long
+    pKey = InStr(pBagian, jsonTeks, """" & cellKey & """")
+    If pKey = 0 Then ExtractJSONBlok = "{}": Exit Function
+
+    ' Ambil blok { } setelah cellKey
+    Dim pBrace As Long
+    pBrace = InStr(pKey, jsonTeks, "{")
+    If pBrace = 0 Then ExtractJSONBlok = "{}": Exit Function
+
+    Dim depth As Integer: depth = 0
+    Dim pos As Long: pos = pBrace
+    Do While pos <= Len(jsonTeks)
+        Dim c As String: c = Mid(jsonTeks, pos, 1)
+        If c = "{" Then depth = depth + 1
+        If c = "}" Then
+            depth = depth - 1
+            If depth = 0 Then
+                ExtractJSONBlok = Mid(jsonTeks, pBrace, pos - pBrace + 1)
+                Exit Function
+            End If
+        End If
+        pos = pos + 1
+    Loop
+    ExtractJSONBlok = "{}"
+End Function
 
 
 ' ============================================================
