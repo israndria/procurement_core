@@ -14,7 +14,7 @@ import io
 import re
 import json
 import hashlib
-import urllib.request
+import cloudscraper
 import datetime
 import pandas as pd
 
@@ -99,20 +99,17 @@ def get_service():
 # ============================================================
 # SCRAPING (tanpa Selenium)
 # ============================================================
+_scraper = cloudscraper.create_scraper()
+
 def fetch_jadwal(url: str) -> pd.DataFrame | None:
     """
-    Ambil tabel jadwal dari halaman SPSE menggunakan urllib.
-    Tidak membutuhkan Chrome/Selenium.
+    Ambil tabel jadwal dari halaman SPSE menggunakan cloudscraper
+    (bypass Cloudflare/bot detection di GitHub Actions IP).
     """
-    referer = url.replace('/jadwal', '/pengumuman')
-    req = urllib.request.Request(url, headers={
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer':    referer,
-        'Accept':     'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    })
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            html = resp.read().decode('utf-8', errors='replace')
+        resp = _scraper.get(url, timeout=30)
+        resp.raise_for_status()
+        html = resp.text
     except Exception as e:
         log(f"  ⚠️  Gagal fetch {url}: {e}")
         return None

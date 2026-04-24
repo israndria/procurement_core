@@ -36,7 +36,8 @@ jobs:
             pandas \
             lxml \
             html5lib \
-            beautifulsoup4
+            beautifulsoup4 \
+            cloudscraper
 
       - name: 📅 Jalankan sync jadwal
         env:
