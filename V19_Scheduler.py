@@ -506,6 +506,22 @@ if not token_ok:
             creds = flow.run_local_server(port=0)
             with open(TOKEN_FILE_PATH, 'w') as token:
                 token.write(creds.to_json())
+            # Update GitHub Secret otomatis supaya workflow CI ikut pakai token baru
+            try:
+                import subprocess, shutil
+                if shutil.which('gh'):
+                    r = subprocess.run(
+                        ['gh', 'secret', 'set', 'GOOGLE_TOKEN_JSON',
+                         '--repo', 'israndria/procurement_core',
+                         '--body', creds.to_json()],
+                        capture_output=True, text=True, timeout=15
+                    )
+                    if r.returncode == 0:
+                        st.info("☁️ GitHub Secret GOOGLE_TOKEN_JSON ikut diperbarui.")
+                    else:
+                        st.warning(f"⚠️ Gagal update GitHub Secret: {r.stderr.strip()}")
+            except Exception as _e:
+                st.warning(f"⚠️ Gagal update GitHub Secret: {_e}")
             st.success("✅ Login berhasil! Halaman akan refresh...")
             time.sleep(2)
             st.rerun()
