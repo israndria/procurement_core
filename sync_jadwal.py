@@ -79,15 +79,19 @@ def get_service():
         if creds and creds.expired and creds.refresh_token:
             log("🔄 Refreshing Google token...")
             creds.refresh(Request())
-            # Simpan token baru ke file (mode lokal)
-            if not token_env and os.path.exists(TOKEN_PATH):
-                with open(TOKEN_PATH, 'w') as f:
-                    f.write(creds.to_json())
         else:
             raise RuntimeError(
                 "Token Google tidak valid dan tidak bisa di-refresh. "
                 "Jalankan V19_Scheduler.py sekali secara lokal untuk login ulang."
             )
+
+    # Simpan token terbaru — lokal ke token.json, CI ke refreshed_token.json
+    if token_env:
+        with open('refreshed_token.json', 'w') as f:
+            f.write(creds.to_json())
+    elif os.path.exists(TOKEN_PATH):
+        with open(TOKEN_PATH, 'w') as f:
+            f.write(creds.to_json())
 
     return build('calendar', 'v3', credentials=creds)
 

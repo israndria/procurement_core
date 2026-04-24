@@ -43,6 +43,16 @@ jobs:
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
         run: python sync_jadwal.py
 
+      - name: 🔑 Update GOOGLE_TOKEN_JSON secret (auto-refresh)
+        if: hashFiles('refreshed_token.json') != ''
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_TOKEN }}
+        run: |
+          gh secret set GOOGLE_TOKEN_JSON \
+            --repo ${{ github.repository }} \
+            --body "$(cat refreshed_token.json)"
+          echo "✅ Token berhasil di-refresh dan di-update ke secret."
+
       - name: 💾 Commit database (jika ada perubahan hash)
         run: |
           git config user.name  "github-actions[bot]"
