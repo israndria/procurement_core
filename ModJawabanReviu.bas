@@ -24,8 +24,18 @@ Private Function JalankanEngine(mode As String, docPath As String) As Integer
     cmd = """" & PY_EXE & """ """ & PY_ENGINE & """ " & mode & " """ & docPath & """"
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
-    JalankanEngine = wsh.Run(cmd, 1, True)
+    JalankanEngine = wsh.Run(cmd, 0, True)  ' 0 = hidden window
 End Function
+
+Private Sub TungguFileBebas(docPath As String)
+    Dim lockFile As String
+    lockFile = Left(docPath, InStrRev(docPath, "\")) & "~$" & Mid(docPath, InStrRev(docPath, "\") + 1)
+    Dim i As Integer
+    For i = 1 To 20
+        If Dir(lockFile) = "" Then Exit Sub
+        Application.Wait Now + TimeValue("00:00:01")
+    Next i
+End Sub
 
 ' ============================================================
 ' PUBLIC: Simpan jawaban — tutup, simpan XML via Python, buka lagi
@@ -38,6 +48,7 @@ Public Sub SimpanJawabanReviu()
 
     doc.Save
     doc.Close SaveChanges:=False
+    TungguFileBebas docPath
 
     Dim ret As Integer
     ret = JalankanEngine("simpan", docPath)
@@ -79,6 +90,7 @@ Public Sub LoadJawabanReviu()
 
     doc.Save
     doc.Close SaveChanges:=False
+    TungguFileBebas docPath
 
     Dim ret As Integer
     ret = JalankanEngine("load", docPath)
