@@ -2,16 +2,19 @@ Attribute VB_Name = "ModJawabanReviu"
 Option Explicit
 
 ' ============================================================
-' ModJawabanReviu — Simpan & Load jawaban reviu via XML
+' ModJawabanReviu — Simpan & Load jawaban reviu via XML/ZIP
 '
-' Simpan: save + tutup -> Python baca ZIP -> JSON -> buka lagi
-' Load  : tutup -> Python inject ZIP -> buka via shell
+' Simpan: Python baca ZIP langsung (Word boleh tetap buka)
+'         -> simpan ke JSON (merge, tidak timpa placeholder)
+' Load  : Python inject XML ke ZIP -> doc.Close -> reopen
+'         -> user bisa menyaksikan dokumen reload dengan jawaban baru
 ' ============================================================
 
 Private Const PY_EXE    As String = "D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\python\python.exe"
 Private Const PY_ENGINE As String = "D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\jawaban_reviu_engine.py"
 
 Private Function JalankanEngine(mode As String, docPath As String) As Integer
+    ' Jalankan Python engine, tunggu selesai, return exit code
     Dim cmd As String
     cmd = """" & PY_EXE & """ """ & PY_ENGINE & """ " & mode & " """ & docPath & """"
     Dim wsh As Object
@@ -19,34 +22,23 @@ Private Function JalankanEngine(mode As String, docPath As String) As Integer
     JalankanEngine = wsh.Run(cmd, 0, True)
 End Function
 
-Private Sub TungguFileBebas(docPath As String)
-    Dim folder As String: folder = Left(docPath, InStrRev(docPath, "\"))
-    Dim fname As String:  fname = Mid(docPath, InStrRev(docPath, "\") + 1)
-    Dim lockFile As String: lockFile = folder & "~$" & fname
-    Dim i As Integer
-    For i = 1 To 20
-        If Dir(lockFile) = "" Then Exit Sub
-        Application.Wait Now + TimeValue("00:00:01")
-    Next i
-End Sub
-
 ' ============================================================
-' PUBLIC: Simpan — save+tutup -> Python baca ZIP -> buka lagi
+' PUBLIC: Simpan — Python baca ZIP langsung, dokumen tetap buka
 ' ============================================================
 Public Sub SimpanJawabanReviu()
     Dim doc As Document
     Set doc = ActiveDocument
+
+    ' Pastikan dokumen sudah tersimpan agar XML di ZIP up-to-date
+    If doc.Saved = False Then
+        doc.Save
+    End If
+
     Dim docPath As String
     docPath = doc.FullName
 
-    doc.Save
-    doc.Close SaveChanges:=False
-    TungguFileBebas docPath
-
     Dim ret As Integer
     ret = JalankanEngine("simpan", docPath)
-
-    Documents.Open docPath
 
     If ret = 0 Then
         MsgBox "Jawaban reviu berhasil disimpan.", vbInformation, "Simpan Jawaban"
@@ -56,7 +48,9 @@ Public Sub SimpanJawabanReviu()
 End Sub
 
 ' ============================================================
-' PUBLIC: Load — tutup -> Python inject ZIP + buka via shell
+' PUBLIC: Load — inject ZIP -> close -> reopen di Word yg sama
+'         Dokumen akan tutup sebentar lalu buka kembali
+'         dengan jawaban yang sudah terisi.
 ' ============================================================
 Public Sub LoadJawabanReviu()
     Dim doc As Document
@@ -66,20 +60,21 @@ Public Sub LoadJawabanReviu()
 
     If Dir(doc.Path & "\jawaban_reviu.json") = "" Then
         MsgBox "File jawaban_reviu.json tidak ditemukan." & Chr(10) & _
-               "Simpan dulu sebelum load.", vbCritical, "Load Jawaban"
+               "Simpan dari file sumber dulu, lalu copy JSON ke folder ini.", _
+               vbCritical, "Load Jawaban"
         Exit Sub
     End If
 
-    If MsgBox("Dokumen akan ditutup sementara untuk memuat data." & Chr(10) & _
-              "Pastikan sudah simpan perubahan lain." & Chr(10) & Chr(10) & _
-              "Lanjutkan?", vbYesNo + vbQuestion, "Load Jawaban") <> vbYes Then
-        Exit Sub
+    MsgBox "Dokumen akan ditutup sebentar lalu dibuka kembali" & Chr(10) & _
+           "dengan jawaban reviu yang sudah terisi." & Chr(10) & Chr(10) & _
+           "Klik OK untuk melanjutkan.", vbInformation, "Load Jawaban"
+
+    Dim ret As Integer
+    ret = JalankanEngine("load", docPath)
+
+    If ret <> 0 Then
+        MsgBox "Load gagal (exit code " & ret & ")." & Chr(10) & _
+               "Pastikan dokumen ini terbuka di Word.", vbCritical, "Load Jawaban"
     End If
-
-    doc.Save
-    doc.Close SaveChanges:=False
-    TungguFileBebas docPath
-
-    ' Python inject lalu buka sendiri via os.startfile
-    JalankanEngine "load", docPath
+    ' Jika sukses: Python sudah reopen dokumen, VBA tidak perlu tindakan lanjut
 End Sub
