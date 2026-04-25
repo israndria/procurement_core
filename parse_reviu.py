@@ -95,6 +95,12 @@ def parse_pdf(path_pdf, bidang=""):
         return None, "pdfplumber tidak tersedia"
 
     hasil = {
+        # input_data (1. Input Data)
+        "input_data": {
+            "E16": {"nilai": "", "status": "kosong", "label": "Kegiatan/Sub Kegiatan"},
+            "E32": {"nilai": "", "status": "kosong", "label": "Lokasi Pekerjaan"},
+            "E33": {"nilai": "", "status": "kosong", "label": "Sumber Dana"},
+        },
         # database_reviu
         "reviu": {
             "E2":  {"nilai": "", "status": "kosong", "label": "Fungsi Bangunan"},
@@ -151,6 +157,56 @@ def parse_pdf(path_pdf, bidang=""):
     with pdfplumber.open(path_pdf) as pdf:
         semua_halaman = [p.extract_text() or "" for p in pdf.pages]
         semua_teks = "\n".join(semua_halaman)
+
+        # ── input_data E16: Kegiatan / Sub Kegiatan ──────────────────────────
+        # Pola: "Kegiatan : Penyelenggaraan Jalan" + "Sub Kegiatan : Rekonstruksi Jalan"
+        kegiatan_val = ""
+        sub_keg_val  = ""
+        for teks in semua_halaman:
+            if "Kegiatan" in teks and "Sub Kegiatan" in teks:
+                m_keg = re.search(r"Kegiatan\s*[:/]\s*([^\n]+)", teks, re.IGNORECASE)
+                m_sub = re.search(r"Sub\s+Kegiatan\s*[:/]\s*([^\n]+)", teks, re.IGNORECASE)
+                if m_keg:
+                    kegiatan_val = bersihkan(m_keg.group(1))
+                if m_sub:
+                    sub_keg_val = bersihkan(m_sub.group(1))
+                if kegiatan_val and sub_keg_val:
+                    break
+        if kegiatan_val or sub_keg_val:
+            gabung = kegiatan_val
+            if sub_keg_val:
+                gabung = (kegiatan_val + " / " + sub_keg_val) if kegiatan_val else sub_keg_val
+            set_val("input_data", "E16", gabung)
+        else:
+            hasil["input_data"]["E16"]["status"] = "tidak_ada"
+
+        # ── input_data E32: Lokasi Pekerjaan ─────────────────────────────────
+        for teks in semua_halaman:
+            m_lok = re.search(
+                r"(?:Lokasi\s+(?:Kegiatan|Pekerjaan|Kerja)?\s*[:/]\s*|"
+                r"dilaksanakan\s+di\s+)([^\n.]{5,60})",
+                teks, re.IGNORECASE
+            )
+            if m_lok:
+                lok = bersihkan(m_lok.group(1)).rstrip(".,")
+                if len(lok) > 3:
+                    set_val("input_data", "E32", lok)
+                    break
+        if hasil["input_data"]["E32"]["status"] == "kosong":
+            hasil["input_data"]["E32"]["status"] = "tidak_ada"
+
+        # ── input_data E33: Sumber Dana ───────────────────────────────────────
+        for teks in semua_halaman:
+            m_sd = re.search(
+                r"(?:Sumber\s+[Dd]ana|Sumber\s+[Aa]nggaran|dibiayai\s+dari)\s*[:/]?\s*(APBD[^\n]{0,40}|APBN[^\n]{0,40})",
+                teks, re.IGNORECASE
+            )
+            if m_sd:
+                sd = bersihkan(m_sd.group(1)).rstrip(".,")
+                set_val("input_data", "E33", sd)
+                break
+        if hasil["input_data"]["E33"]["status"] == "kosong":
+            hasil["input_data"]["E33"]["status"] = "tidak_ada"
 
         # ── E2: Fungsi Bangunan (ambil dari Tujuan / Maksud) ─────────────────
         for teks in semua_halaman:

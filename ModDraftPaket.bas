@@ -345,6 +345,9 @@ Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String, Optiona
         Exit Sub
     End If
 
+    ' Isi input_data (1. Input Data)
+    IsiInputDataDariPDF jsonTeks
+
     ' Isi database_reviu
     IsiDatabaseReviu jsonTeks
 
@@ -353,6 +356,42 @@ Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String, Optiona
 
     ' Tampilkan sheet _HasilParse (hanya 1x MsgBox)
     TampilkanHasilParse jsonTeks, folderWorkbook
+End Sub
+
+
+' ============================================================
+' ISI 1. Input Data dari JSON (hasil parse PDF)
+' ============================================================
+Private Sub IsiInputDataDariPDF(jsonTeks As String)
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("1. Input Data")
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+
+    ' E16: Kegiatan/Sub Kegiatan — hanya isi jika cell masih kosong
+    Dim blok16 As String: blok16 = ExtractJSONBlok(jsonTeks, "input_data", "E16")
+    If ExtractJSONVal(blok16, "status") = "terisi" Then
+        If Trim(CStr(ws.Range("E16").Value)) = "" Then
+            ws.Range("E16").Value = ExtractJSONVal(blok16, "nilai")
+        End If
+    End If
+
+    ' E32: Lokasi
+    Dim blok32 As String: blok32 = ExtractJSONBlok(jsonTeks, "input_data", "E32")
+    If ExtractJSONVal(blok32, "status") = "terisi" Then
+        If Trim(CStr(ws.Range("E32").Value)) = "" Then
+            ws.Range("E32").Value = ExtractJSONVal(blok32, "nilai")
+        End If
+    End If
+
+    ' E33: Sumber Dana
+    Dim blok33 As String: blok33 = ExtractJSONBlok(jsonTeks, "input_data", "E33")
+    If ExtractJSONVal(blok33, "status") = "terisi" Then
+        If Trim(CStr(ws.Range("E33").Value)) = "" Then
+            ws.Range("E33").Value = ExtractJSONVal(blok33, "nilai")
+        End If
+    End If
 End Sub
 
 
@@ -501,6 +540,68 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
     Dim jmlKosong As Integer: jmlKosong = 0
     Dim jmlKeputusan As Integer: jmlKeputusan = 0
     Dim jmlTidakAda As Integer: jmlTidakAda = 0
+
+    ' ─── Bagian 1. Input Data ────────────────────────────────────────────────
+    TulisHeaderBagian wsHP, baris, "1. INPUT DATA"
+    baris = baris + 1
+
+    ' Field dari Supabase — baca nilai langsung dari sheet "1. Input Data"
+    Dim wsInp As Worksheet
+    On Error Resume Next
+    Set wsInp = ThisWorkbook.Sheets("1. Input Data")
+    On Error GoTo 0
+
+    ' Pasangan: cell address, label
+    Dim inpCells(13) As String, inpLabels(13) As String
+    inpCells(0)  = "E3":  inpLabels(0)  = "Kode Rekening (MAK)"
+    inpCells(1)  = "E5":  inpLabels(1)  = "Kode Tender"
+    inpCells(2)  = "E6":  inpLabels(2)  = "Nama Tender"
+    inpCells(3)  = "E8":  inpLabels(3)  = "Kode RUP"
+    inpCells(4)  = "E10": inpLabels(4)  = "Nilai Pagu"
+    inpCells(5)  = "E11": inpLabels(5)  = "Nilai HPS"
+    inpCells(6)  = "E12": inpLabels(6)  = "Nomor Surat Permohonan"
+    inpCells(7)  = "E13": inpLabels(7)  = "Nomor Surat Tugas"
+    inpCells(8)  = "E14": inpLabels(8)  = "Kode Pokja"
+    inpCells(9)  = "E15": inpLabels(9)  = "Masa Pelaksanaan (Hari)"
+    inpCells(10) = "E17": inpLabels(10) = "SKPD/OPD"
+    inpCells(11) = "E19": inpLabels(11) = "Nama PPK"
+    inpCells(12) = "E22": inpLabels(12) = "Anggota 1"
+    inpCells(13) = "E23": inpLabels(13) = "Anggota 2"
+
+    Dim si As Integer
+    For si = 0 To 13
+        Dim nilaiInp As String
+        If Not wsInp Is Nothing Then
+            nilaiInp = Trim(CStr(wsInp.Range(inpCells(si)).Value))
+        Else
+            nilaiInp = ""
+        End If
+        Dim statusInp As String
+        If nilaiInp <> "" And nilaiInp <> "0" Then
+            statusInp = "terisi"
+        Else
+            statusInp = ""
+        End If
+        Dim blokFake As String
+        blokFake = "{""label"":""" & inpLabels(si) & """,""nilai"":""" & nilaiInp & """,""status"":""" & statusInp & """}"
+        TulisBarisHasil wsHP, baris, blokFake, inpCells(si), "1. Input Data", _
+                        jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
+        baris = baris + 1
+    Next si
+
+    ' Field dari PDF (E16 Kegiatan, E32 Lokasi, E33 Sumber Dana)
+    Dim idKeys(2) As String
+    idKeys(0) = "E16": idKeys(1) = "E32": idKeys(2) = "E33"
+
+    Dim idIdx As Integer
+    For idIdx = 0 To 2
+        Dim blokID As String: blokID = ExtractJSONBlok(jsonTeks, "input_data", idKeys(idIdx))
+        TulisBarisHasil wsHP, baris, blokID, idKeys(idIdx), "1. Input Data", _
+                        jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
+        baris = baris + 1
+    Next idIdx
+
+    baris = baris + 1
 
     ' ─── Bagian database_reviu ────────────────────────────────────────────────
     TulisHeaderBagian wsHP, baris, "DATABASE REVIU"
