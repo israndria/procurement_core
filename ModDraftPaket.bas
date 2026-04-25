@@ -552,7 +552,7 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
     On Error GoTo 0
 
     ' Pasangan: cell address, label
-    Dim inpCells(13) As String, inpLabels(13) As String
+    Dim inpCells(16) As String, inpLabels(16) As String
     inpCells(0)  = "E3":  inpLabels(0)  = "Kode Rekening (MAK)"
     inpCells(1)  = "E5":  inpLabels(1)  = "Kode Tender"
     inpCells(2)  = "E6":  inpLabels(2)  = "Nama Tender"
@@ -565,11 +565,14 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
     inpCells(9)  = "E15": inpLabels(9)  = "Masa Pelaksanaan (Hari)"
     inpCells(10) = "E17": inpLabels(10) = "SKPD/OPD"
     inpCells(11) = "E19": inpLabels(11) = "Nama PPK"
-    inpCells(12) = "E22": inpLabels(12) = "Anggota 1"
-    inpCells(13) = "E23": inpLabels(13) = "Anggota 2"
+    inpCells(12) = "E20": inpLabels(12) = "NIP PPK"
+    inpCells(13) = "E21": inpLabels(13) = "Nomor SK PPK"
+    inpCells(14) = "E22": inpLabels(14) = "Anggota 1"
+    inpCells(15) = "E23": inpLabels(15) = "Anggota 2"
+    inpCells(16) = "E24": inpLabels(16) = "Anggota 3"
 
     Dim si As Integer
-    For si = 0 To 13
+    For si = 0 To 16
         Dim nilaiInp As String
         If Not wsInp Is Nothing Then
             nilaiInp = Trim(CStr(wsInp.Range(inpCells(si)).Value))
