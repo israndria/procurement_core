@@ -31,7 +31,7 @@ SHEET_DOKPIL = "list_dokpil"
 # (nama_file_word, sheet_name)
 WORD_SHEET_MAP = [
     ("1. Full Dokumen BA PK v1.docx", SHEET_BA),
-    ("2. Isi Reviu PK v1.docx",       SHEET_REVIU),
+    ("2. Isi Reviu PK v2.docm",       SHEET_REVIU),
     ("3. Dokpil Full PK v1.docx",      SHEET_DOKPIL),
 ]
 

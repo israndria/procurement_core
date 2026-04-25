@@ -204,8 +204,9 @@ def inject_buttons(filepath):
                 ("btnRelink",        "Relink Template",        "RelinkTemplate",   6, 8, (255, 140, 0)),
             ]),
             ("database_reviu", [
-                ("btnBukaReviu",   "Buka Reviu",      "BukaReviu",        2, 7, BLUE_WORD),
-                ("btnPrintIsiReviu", "Print Isi Reviu", "PrintIsiReviuPDF", 2, 8, BLACK),
+                ("btnBukaReviu",     "Buka Reviu",       "BukaReviu",        2, 7, BLUE_WORD),
+                ("btnPrintIsiReviu", "Print Isi Reviu",  "PrintIsiReviuPDF", 2, 8, BLACK),
+                ("btnPrintBAReviu",  "Print BA Reviu",   "PrintBAReviuPDF",  2, 9, BLACK),
             ]),
             ("database_dokpil", [
                 ("btnBukaDokpil",   "Buka Dokpil",   "BukaDokpil",   2, 6, BLUE_WORD),
