@@ -22,6 +22,7 @@ def inject_buttons(filepath):
         "ModKodeUnik",      # Generate kode unik otomatis
         "ModAutoFit",       # Auto-fit baris
         "ModDraftPaket",    # Load draft paket dari Supabase + autofill
+        "ModKKEvaluasi",    # Muat data KK Evaluasi Kualifikasi dari Supabase
     ]
 
     # Verify semua .bas file ada
@@ -169,7 +170,7 @@ def inject_buttons(filepath):
 
         # 3. Clean old buttons - langsung target 3 sheet yang diketahui ada tombolnya
         print("\n  Cleaning old buttons...")
-        target_clean = ["1. Input Data", "database_reviu", "database_dokpil"]
+        target_clean = ["1. Input Data", "database_reviu", "database_dokpil", "3. KK Evaluasi Kualifikasi"]
         for sheet_name in target_clean:
             try:
                 ws = wb.Sheets(sheet_name)
@@ -211,6 +212,9 @@ def inject_buttons(filepath):
             ("database_dokpil", [
                 ("btnBukaDokpil",   "Buka Dokpil",   "BukaDokpil",   2, 6, BLUE_WORD),
                 ("btnPrintDokpil",  "Print Dokpil",  "PrintDokpilPDF",  2, 7, BLACK),
+            ]),
+            ("3. KK Evaluasi Kualifikasi", [
+                ("btnMuatKKEvaluasi", "Muat KK Evaluasi", "MuatKKEvaluasi", 1, 7, PURPLE),
             ]),
         ]
         
