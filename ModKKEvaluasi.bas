@@ -112,13 +112,20 @@ Public Sub MuatKKEvaluasi()
     Dim colMap(1 To 3) As Integer
     colMap(1) = 3: colMap(2) = 4: colMap(3) = 5
 
-    ' Bersihkan kolom C/D/E baris 6-54
+    ' Bersihkan kolom C/D/E baris 6-54: hapus isi + Data Validation + highlight
     Dim r As Integer, c As Integer
     For r = 6 To 54
         For c = 3 To 5
-            wsKK.Cells(r, c).ClearContents
+            With wsKK.Cells(r, c)
+                .ClearContents
+                .Validation.Delete
+                .Interior.ColorIndex = xlNone
+            End With
         Next c
     Next r
+
+    ' Kumpulkan peringatan field perlu cek manual (per peserta)
+    Dim warnMsg As String: warnMsg = ""
 
     Dim i As Integer
     For i = 1 To itemCount
@@ -127,6 +134,9 @@ Public Sub MuatKKEvaluasi()
         it = items(i - 1)
         Dim col As Integer
         col = colMap(i)
+        Dim namaP As String: namaP = GetF(it, "nama")
+        If namaP = "" Then namaP = "Peserta " & i
+        Dim warnPeserta As String: warnPeserta = ""
 
         ' ── Poin 1: Perizinan Berusaha ──────────────────────
         Dim nibNomor As String: nibNomor = GetF(it, "nib_nomor")
@@ -148,6 +158,11 @@ Public Sub MuatKKEvaluasi()
         wsKK.Cells(ROW_NIB_ADA, col).Value = IIf(nibNomor <> "", "Ada", "Tidak Ada")
         wsKK.Cells(ROW_NIB_NOMOR, col).Value = nibNomor
         wsKK.Cells(ROW_SS_TERVERIFIKASI, col).Value = ssTerverifikasi
+        ' Highlight jika SS terverifikasi tidak dikenali (bukan nilai baku)
+        If ssTerverifikasi <> "Terverifikasi" And ssTerverifikasi <> "Belum Terverifikasi" Then
+            wsKK.Cells(ROW_SS_TERVERIFIKASI, col).Interior.Color = RGB(255, 255, 0)
+            warnPeserta = warnPeserta & "  - SS Terverifikasi: """ & ssTerverifikasi & """ (tidak dikenali)" & vbCrLf
+        End If
         wsKK.Cells(ROW_SS_NOMOR, col).Value = GetF(it, "ss_nomor")
         wsKK.Cells(ROW_TANGKAPAN_OSS, col).Value = "-"
         wsKK.Cells(ROW_SBU_2015, col).Value = "-"
@@ -203,6 +218,11 @@ Public Sub MuatKKEvaluasi()
             skpNum = skpNum & " [!]"
         End If
         wsKK.Cells(ROW_SKP, col).Value = skpNum
+        ' Highlight jika SKP kosong (tidak terdeteksi)
+        If skpNum = "" Then
+            wsKK.Cells(ROW_SKP, col).Interior.Color = RGB(255, 255, 0)
+            warnPeserta = warnPeserta & "  - SKP: tidak terdeteksi" & vbCrLf
+        End If
 
         ' ── Poin 5: NPWP / KSWP ──────────────────────────────
         Dim kswpVal As String: kswpVal = GetF(it, "kswp_status")
@@ -217,9 +237,15 @@ Public Sub MuatKKEvaluasi()
         End If
         wsKK.Cells(ROW_NPWP_KESIMPULAN, col).Value = npwpKesimpulan
         wsKK.Cells(ROW_NPWP, col).Value = npwpVal
-        ' KSWP: jika "TIDAK DIKETAHUI" → kosongkan (isi manual)
+        ' KSWP: jika tidak diketahui/kosong → kosongkan + highlight kuning (isi manual)
         If kswpVal = "TIDAK DIKETAHUI" Or kswpVal = "" Then
             wsKK.Cells(ROW_KSWP, col).Value = ""
+            wsKK.Cells(ROW_KSWP, col).Interior.Color = RGB(255, 255, 0)
+            warnPeserta = warnPeserta & "  - KSWP: tidak terdeteksi (OCR gagal atau tidak ada PDF)" & vbCrLf
+        ElseIf kswpVal <> "VALID" And kswpVal <> "TIDAK VALID" Then
+            wsKK.Cells(ROW_KSWP, col).Value = kswpVal
+            wsKK.Cells(ROW_KSWP, col).Interior.Color = RGB(255, 255, 0)
+            warnPeserta = warnPeserta & "  - KSWP: """ & kswpVal & """ (nilai tidak baku)" & vbCrLf
         Else
             wsKK.Cells(ROW_KSWP, col).Value = kswpVal
         End If
@@ -247,6 +273,11 @@ Public Sub MuatKKEvaluasi()
         If kinerjaAda = "true" Then
             wsKK.Cells(ROW_KINERJA_ADA, col).Value = "ADA"
             wsKK.Cells(ROW_KINERJA_NILAI, col).Value = kinerjaVal
+            ' Highlight jika kinerja ada tapi nilai tidak terdeteksi
+            If kinerjaVal = "" Then
+                wsKK.Cells(ROW_KINERJA_NILAI, col).Interior.Color = RGB(255, 255, 0)
+                warnPeserta = warnPeserta & "  - Kinerja: ADA tapi nilai tidak terdeteksi (cek PDF kinerja)" & vbCrLf
+            End If
         Else
             wsKK.Cells(ROW_KINERJA_ADA, col).Value = "TIDAK MENYAMPAIKAN"
             wsKK.Cells(ROW_KINERJA_NILAI, col).Value = "-"
@@ -265,9 +296,23 @@ Public Sub MuatKKEvaluasi()
         End If
         wsKK.Cells(ROW_HASIL_MS, col).Value = msVal
 
+        ' Akumulasi peringatan peserta ini ke pesan global
+        If warnPeserta <> "" Then
+            warnMsg = warnMsg & namaP & ":" & vbCrLf & warnPeserta
+        End If
+
     Next i
 
-    MsgBox "Data " & itemCount & " peserta berhasil dimuat dari Supabase.", vbInformation
+    ' Tampilkan ringkasan: sukses + peringatan field perlu cek manual
+    Dim finalMsg As String
+    finalMsg = "Data " & itemCount & " peserta berhasil dimuat dari Supabase."
+    If warnMsg <> "" Then
+        finalMsg = finalMsg & vbCrLf & vbCrLf & _
+                   "⚠️ Field berikut perlu dicek manual (highlight kuning):" & vbCrLf & warnMsg
+        MsgBox finalMsg, vbExclamation, "Muat KK Evaluasi"
+    Else
+        MsgBox finalMsg, vbInformation, "Muat KK Evaluasi"
+    End If
     Exit Sub
 
 ErrHandler:
