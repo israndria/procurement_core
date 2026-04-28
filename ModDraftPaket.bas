@@ -218,6 +218,9 @@ Public Sub PilihDraftPaket(selectedLabel As String)
             Dim kodePokja2 As String: kodePokja2 = CStr(item(0))
             Dim bidang2 As String: bidang2 = CStr(item(16))
             ParsaDanIsiDariPDF kodeTender, kodePokja2, bidang2
+
+            ' ── Muat HPS dari Supabase → isi sheet "5. HPS" ───────────────────
+            MuatHPS kodeTender
             Exit For
         End If
     Next i
@@ -923,6 +926,196 @@ Private Sub IsiAnggotaPokja(wsInput As Worksheet, a1 As String, a2 As String, a3
         wsInput.Range("E24").Value = a3
     End If
 End Sub
+
+
+' ============================================================
+' MUAT HPS: GET hps_items dari Supabase → isi sheet "5. HPS"
+' ============================================================
+Public Sub MuatHPS(kodeTender As String)
+    If kodeTender = "" Then Exit Sub
+
+    Dim wsHPS As Worksheet
+    On Error Resume Next
+    Set wsHPS = ThisWorkbook.Sheets("5. HPS")
+    On Error GoTo 0
+    If wsHPS Is Nothing Then Exit Sub
+
+    ' Fetch JSON dari Supabase
+    Dim url As String
+    url = SB_URL & "/rest/v1/hps_items" & _
+          "?kode_tender=eq." & kodeTender & _
+          "&order=urutan.asc" & _
+          "&select=urutan,jenis_bj,satuan,vol,harga,pajak_pct,total_spse,total_hitung,is_divisi,selisih,selisih_ok,total_nilai,total_nilai_bulat"
+
+    Dim http As Object
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    On Error GoTo ErrHPS
+    http.Open "GET", url, False
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+
+    If http.Status <> 200 Then
+        MsgBox "Gagal fetch HPS: HTTP " & http.Status, vbExclamation, "Muat HPS"
+        Exit Sub
+    End If
+
+    Dim json As String: json = http.ResponseText
+
+    ' Cek kosong
+    If json = "[]" Or json = "" Then
+        ' HPS belum tersedia di Supabase — tidak perlu MsgBox, silent
+        Exit Sub
+    End If
+
+    ' ── Bersihkan sheet "5. HPS" baris 2 ke bawah (A–J) ──────────────────
+    Dim lastRow As Long
+    lastRow = wsHPS.Cells(wsHPS.Rows.Count, 2).End(xlUp).Row
+    If lastRow >= 2 Then wsHPS.Range("A2:J" & lastRow).ClearContents
+
+    ' ── Parse JSON array → isi baris ──────────────────────────────────────
+    Dim pos As Long: pos = 1
+    Dim baris As Long: baris = 2
+    Dim adaSelisih As Boolean: adaSelisih = False
+    Dim selisihMsg As String: selisihMsg = ""
+    Dim totalNilai As String: totalNilai = ""
+    Dim totalBulat As String: totalBulat = ""
+    Dim totalHitungAll As Double: totalHitungAll = 0
+
+    Do
+        Dim bs As Long: bs = InStr(pos, json, "{")
+        If bs = 0 Then Exit Do
+        Dim depth As Integer: depth = 1
+        Dim p As Long: p = bs + 1
+        Do While p <= Len(json) And depth > 0
+            Dim ch As String: ch = Mid(json, p, 1)
+            If ch = "{" Then depth = depth + 1
+            If ch = "}" Then depth = depth - 1
+            p = p + 1
+        Loop
+        Dim be As Long: be = p - 1
+        Dim obj As String: obj = Mid(json, bs, be - bs + 1)
+
+        Dim isDivisi As String: isDivisi = ExtractJSONVal(obj, "is_divisi")
+        Dim jenisBJ  As String: jenisBJ  = ExtractJSONVal(obj, "jenis_bj")
+        Dim satuan   As String: satuan   = ExtractJSONVal(obj, "satuan")
+        Dim volS     As String: volS     = ExtractJSONVal(obj, "vol")
+        Dim hargaS   As String: hargaS   = ExtractJSONVal(obj, "harga")
+        Dim pajakS   As String: pajakS   = ExtractJSONVal(obj, "pajak_pct")
+        Dim totSpseS As String: totSpseS = ExtractJSONVal(obj, "total_spse")
+        Dim totHitS  As String: totHitS  = ExtractJSONVal(obj, "total_hitung")
+        Dim selisihS As String: selisihS = ExtractJSONVal(obj, "selisih")
+        Dim selOkS   As String: selOkS   = ExtractJSONVal(obj, "selisih_ok")
+        Dim urutan   As String: urutan   = ExtractJSONVal(obj, "urutan")
+
+        ' Simpan total nilai dari item pertama (sama di semua baris)
+        If totalNilai = "" Then
+            totalNilai = ExtractJSONVal(obj, "total_nilai")
+            totalBulat = ExtractJSONVal(obj, "total_nilai_bulat")
+        End If
+
+        With wsHPS
+            .Cells(baris, 1).Value = CDblSafe(urutan)  ' A: nomor urut
+            .Cells(baris, 2).Value = jenisBJ            ' B: Jenis B/J
+
+            If isDivisi <> "true" Then
+                .Cells(baris, 3).Value = satuan          ' C: Satuan
+                If volS <> "" Then
+                    .Cells(baris, 4).Value = CDblSafe(volS)
+                    .Cells(baris, 4).NumberFormat = "#,##0.00"
+                End If
+                If hargaS <> "" Then
+                    .Cells(baris, 5).Value = CDblSafe(hargaS)
+                    .Cells(baris, 5).NumberFormat = "#,##0.00"
+                End If
+                If pajakS <> "" Then
+                    .Cells(baris, 6).Value = CDblSafe(pajakS)
+                    .Cells(baris, 6).NumberFormat = "0.00"
+                End If
+                If totSpseS <> "" Then
+                    .Cells(baris, 7).Value = CDblSafe(totSpseS)
+                    .Cells(baris, 7).NumberFormat = "#,##0.00"
+                End If
+                ' Kolom H: total hitung manual
+                If totHitS <> "" Then
+                    .Cells(baris, 8).Value = CDblSafe(totHitS)
+                    .Cells(baris, 8).NumberFormat = "#,##0.00"
+                End If
+                ' Kolom I: selisih
+                Dim selisihVal As Double: selisihVal = CDblSafe(selisihS)
+                .Cells(baris, 9).Value = selisihVal
+                .Cells(baris, 9).NumberFormat = "#,##0.00"
+
+                totalHitungAll = totalHitungAll + CDblSafe(totHitS)
+
+                ' Highlight baris jika selisih > 1
+                If selOkS = "false" Then
+                    .Range(.Cells(baris, 1), .Cells(baris, 9)).Interior.Color = RGB(255, 255, 0)
+                    adaSelisih = True
+                    selisihMsg = selisihMsg & "  Baris " & baris & ": " & jenisBJ & _
+                                 " (selisih Rp " & Format(selisihVal, "#,##0.00") & ")" & vbCrLf
+                End If
+            End If
+        End With
+
+        baris = baris + 1
+        pos = be + 1
+    Loop
+
+    ' ── Tulis header kolom H–I jika belum ada ─────────────────────────────
+    If wsHPS.Cells(1, 8).Value = "" Then
+        wsHPS.Cells(1, 8).Value = "Total (Hitung)"
+        wsHPS.Cells(1, 8).Font.Bold = True
+    End If
+    If wsHPS.Cells(1, 9).Value = "" Then
+        wsHPS.Cells(1, 9).Value = "Selisih"
+        wsHPS.Cells(1, 9).Font.Bold = True
+    End If
+
+    ' ── Tulis total di baris terakhir+1 ───────────────────────────────────
+    Dim barisTotal As Long: barisTotal = baris + 1
+    With wsHPS
+        .Cells(barisTotal, 2).Value = "TOTAL NILAI (SPSE)"
+        .Cells(barisTotal, 7).Value = CDblSafe(totalNilai)
+        .Cells(barisTotal, 7).NumberFormat = "#,##0.00"
+        .Cells(barisTotal, 2).Font.Bold = True
+
+        .Cells(barisTotal + 1, 2).Value = "TOTAL NILAI (Setelah Pembulatan SPSE)"
+        .Cells(barisTotal + 1, 7).Value = CDblSafe(totalBulat)
+        .Cells(barisTotal + 1, 7).NumberFormat = "#,##0.00"
+        .Cells(barisTotal + 1, 2).Font.Bold = True
+
+        .Cells(barisTotal + 2, 2).Value = "TOTAL HITUNG MANUAL"
+        .Cells(barisTotal + 2, 8).Value = totalHitungAll
+        .Cells(barisTotal + 2, 8).NumberFormat = "#,##0.00"
+        .Cells(barisTotal + 2, 2).Font.Bold = True
+    End With
+
+    ' ── MsgBox ringkasan ──────────────────────────────────────────────────
+    Dim itemCount As Long: itemCount = baris - 2
+    Dim msg As String
+    msg = "HPS berhasil dimuat: " & itemCount & " baris."
+    If adaSelisih Then
+        msg = msg & vbCrLf & vbCrLf & _
+              "⚠️ Terdapat selisih antara total SPSE vs hitung manual (highlight kuning):" & vbCrLf & selisihMsg
+        MsgBox msg, vbExclamation, "Muat HPS"
+    End If
+    ' Jika tidak ada selisih — silent (tidak ganggu alur pilih paket)
+    Exit Sub
+
+ErrHPS:
+    ' Gagal muat HPS — silent, tidak mengganggu alur utama
+End Sub
+
+
+' Helper: konversi string angka ke Double (toleran koma/titik)
+Private Function CDblSafe(s As String) As Double
+    If s = "" Or s = "null" Then CDblSafe = 0: Exit Function
+    On Error Resume Next
+    CDblSafe = CDbl(s)
+    On Error GoTo 0
+End Function
 
 
 ' ============================================================
