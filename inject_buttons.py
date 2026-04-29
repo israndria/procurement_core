@@ -23,6 +23,7 @@ def inject_buttons(filepath):
         "ModAutoFit",       # Auto-fit baris
         "ModDraftPaket",    # Load draft paket dari Supabase + autofill
         "ModKKEvaluasi",    # Muat data KK Evaluasi Kualifikasi dari Supabase
+        "ModInputBA",       # Muat sheet "0. Input BA" dari Supabase + GCal
     ]
 
     # Verify semua .bas file ada
@@ -95,8 +96,6 @@ def inject_buttons(filepath):
         
         # 2b. Inject Workbook_Open auto-relink ke ThisWorkbook module
         auto_relink_code = (
-            "' Worksheet_Change untuk Sheet '1. Input Data'\n"
-            "' Ketika cell E2 (selector paket) berubah → autofill semua field\n"
             "Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)\n"
             "    If Sh.Name = \"1. Input Data\" Then\n"
             "        If Not Intersect(Target, Sh.Range(\"E2\")) Is Nothing Then\n"
@@ -110,46 +109,21 @@ def inject_buttons(filepath):
             "End Sub\n"
             "\n"
             "Private Sub Workbook_Open()\n"
-            "    ' Auto-load daftar draft paket dari Supabase\n"
             "    On Error Resume Next\n"
-            "    ModDraftPaket.MuatDraftPaket True\n"
-            "    On Error GoTo 0\n"
-            "    ' Auto-relink jika path Excel berubah (misal pindah PC/drive)\n"
-            "    On Error Resume Next\n"
-            "    Dim needRelink As Boolean\n"
-            "    needRelink = False\n"
-            "    \n"
-            "    ' Cek apakah ScriptDir bisa ditemukan\n"
             "    Dim sd As String\n"
             "    sd = ModWordLink.ScriptDir_Public()\n"
             "    If sd = \"\" Then Exit Sub\n"
-            "    \n"
-            "    ' Cek file Word pertama — apakah ada?\n"
             "    Dim testWord As String\n"
-            "    testWord = ThisWorkbook.Path & \"\\\" & \"1. Full Dokumen BA PK v1.docx\"\n"
+            "    testWord = ThisWorkbook.Path & Chr(92) & \"1. Full Dokumen BA PK v1.docx\"\n"
             "    If Dir(testWord) = \"\" Then Exit Sub\n"
-            "    \n"
-            "    ' Baca byte kecil dari settings.xml untuk cek path\n"
-            "    ' Jika path Excel di settings.xml tidak cocok → relink\n"
-            "    Dim fso As Object\n"
-            "    Set fso = CreateObject(\"Scripting.FileSystemObject\")\n"
-            "    Dim zipPath As String\n"
-            "    zipPath = testWord\n"
-            "    \n"
-            "    ' Simple check: jalankan relink_dotnet.ps1 dengan flag --check-only\n"
-            "    ' yang return exit code 0 jika sudah cocok, 1 jika perlu relink\n"
-            "    Dim cmd As String\n"
             "    Dim wsh As Object\n"
             "    Set wsh = CreateObject(\"WScript.Shell\")\n"
-            "    cmd = \"powershell -ExecutionPolicy Bypass -File \"\"\" & sd & \"\\relink_dotnet.ps1\"\"\" & \" -ExcelPath \"\"\" & ThisWorkbook.FullName & \"\"\" -CheckOnly\"\n"
+            "    Dim cmd As String\n"
+            "    cmd = \"powershell -ExecutionPolicy Bypass -File \"\"\" & sd & Chr(92) & \"relink_dotnet.ps1\"\" -ExcelPath \"\"\" & ThisWorkbook.FullName & \"\"\" -CheckOnly\"\n"
             "    Dim exitCode As Long\n"
             "    exitCode = wsh.Run(cmd, 0, True)\n"
             "    Set wsh = Nothing\n"
-            "    \n"
-            "    If exitCode = 1 Then\n"
-            "        ' Path berubah — auto relink\n"
-            "        ModWordLink.RelinkTemplate\n"
-            "    End If\n"
+            "    If exitCode = 1 Then ModWordLink.RelinkTemplate\n"
             "End Sub\n"
         )
 
@@ -218,6 +192,9 @@ def inject_buttons(filepath):
             ]),
             ("6. Harga Penawaran", [
                 ("btnMuatHargaPenawaran", "Muat Harga Penawaran", "MuatHargaPenawaran", 1, 4, PURPLE),
+            ]),
+            ("0. Input BA", [
+                ("btnMuatInputBA", "Muat Input BA", "MuatInputBA", 1, 3, PURPLE),
             ]),
         ]
         
