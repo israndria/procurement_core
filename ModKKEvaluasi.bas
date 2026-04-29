@@ -491,6 +491,258 @@ End Function
 ' ============================================================
 ' PARSER: Ekstrak nilai dari JSON string (single-level)
 ' ============================================================
+' ============================================================
+' MUAT HARGA PENAWARAN — sheet "6. Harga Penawaran"
+' ============================================================
+Public Sub MuatHargaPenawaran()
+    Dim wsInput As Worksheet, wsHP As Worksheet
+    On Error GoTo ErrHandler
+
+    Set wsInput = ThisWorkbook.Sheets(SHEET_INPUT)
+    Dim kodeTender As String
+    kodeTender = Trim(wsInput.Range(CELL_KODE_TENDER).Value)
+
+    If kodeTender = "" Then
+        MsgBox "Kode Tender belum diisi di sheet '" & SHEET_INPUT & "' cell " & CELL_KODE_TENDER & ".", vbExclamation
+        Exit Sub
+    End If
+
+    Set wsHP = ThisWorkbook.Sheets("6. Harga Penawaran")
+
+    ' ── 1. Ambil daftar peserta distinct dari Supabase ──
+    Dim urlPeserta As String
+    urlPeserta = SB_URL & "/rest/v1/harga_penawaran" & _
+                 "?kode_tender=eq." & kodeTender & _
+                 "&select=peserta_id,nama_peserta,total_penawaran" & _
+                 "&order=peserta_id.asc"
+
+    Dim http As Object
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    http.Open "GET", urlPeserta, False
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+
+    If http.Status <> 200 Then
+        MsgBox "HTTP Error " & http.Status & " saat ambil daftar peserta.", vbExclamation
+        Exit Sub
+    End If
+
+    ' Parse distinct peserta_id + nama_peserta
+    Dim jsonP As String: jsonP = http.ResponseText
+    Dim pesertaIds(10) As String
+    Dim pesertaNama(10) As String
+    Dim pesertaTotal(10) As Double
+    Dim pesertaCount As Integer: pesertaCount = 0
+    Dim seenIds(10) As String
+
+    Dim posP As Long: posP = 1
+    Do
+        Dim bs As Long: bs = InStr(posP, jsonP, "{")
+        If bs = 0 Then Exit Do
+        Dim dep As Integer: dep = 1
+        Dim pp As Long: pp = bs + 1
+        Do While pp <= Len(jsonP) And dep > 0
+            Dim cc As String: cc = Mid(jsonP, pp, 1)
+            If cc = "{" Then dep = dep + 1
+            If cc = "}" Then dep = dep - 1
+            pp = pp + 1
+        Loop
+        Dim objP As String: objP = Mid(jsonP, bs, pp - bs)
+        Dim pid As String: pid = ExtractJSONVal(objP, "peserta_id")
+        ' Deduplikasi
+        Dim isDup As Boolean: isDup = False
+        Dim si As Integer
+        For si = 0 To pesertaCount - 1
+            If seenIds(si) = pid Then isDup = True: Exit For
+        Next si
+        If Not isDup And pid <> "" And pesertaCount < 10 Then
+            seenIds(pesertaCount) = pid
+            pesertaIds(pesertaCount) = pid
+            pesertaNama(pesertaCount) = ExtractJSONVal(objP, "nama_peserta")
+            pesertaTotal(pesertaCount) = CDbl(IIf(ExtractJSONVal(objP, "total_penawaran") = "", "0", ExtractJSONVal(objP, "total_penawaran")))
+            pesertaCount = pesertaCount + 1
+        End If
+        posP = pp
+    Loop
+
+    If pesertaCount = 0 Then
+        MsgBox "Tidak ada data harga penawaran untuk kode tender " & kodeTender & "." & vbCrLf & _
+               "Jalankan 'Serap Harga Penawaran' di Asisten Pokja terlebih dahulu.", vbInformation
+        Exit Sub
+    End If
+
+    ' ── 2. Populate dropdown di B1 ──
+    wsHP.Unprotect
+    With wsHP.Range("B1").Validation
+        .Delete
+        Dim listStr As String: listStr = ""
+        Dim ni As Integer
+        For ni = 0 To pesertaCount - 1
+            If listStr <> "" Then listStr = listStr & ","
+            listStr = listStr & pesertaNama(ni)
+        Next ni
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:=listStr
+        .ShowInput = True
+    End With
+    ' Set default ke peserta pertama jika B1 kosong
+    If Trim(wsHP.Range("B1").Value) = "" Then
+        wsHP.Range("B1").Value = pesertaNama(0)
+    End If
+
+    ' ── 3. Baca peserta yang dipilih di B1 ──
+    Dim namaDipilih As String: namaDipilih = Trim(wsHP.Range("B1").Value)
+    Dim pidDipilih As String: pidDipilih = ""
+    Dim totalDipilih As Double: totalDipilih = 0
+    Dim ki As Integer
+    For ki = 0 To pesertaCount - 1
+        If pesertaNama(ki) = namaDipilih Then
+            pidDipilih = pesertaIds(ki)
+            totalDipilih = pesertaTotal(ki)
+            Exit For
+        End If
+    Next ki
+
+    If pidDipilih = "" Then
+        MsgBox "Peserta '" & namaDipilih & "' tidak ditemukan di Supabase.", vbExclamation
+        Exit Sub
+    End If
+
+    ' ── 4. Ambil item harga penawaran peserta terpilih ──
+    Dim urlItem As String
+    urlItem = SB_URL & "/rest/v1/harga_penawaran" & _
+              "?kode_tender=eq." & kodeTender & _
+              "&peserta_id=eq." & pidDipilih & _
+              "&order=urutan.asc"
+
+    http.Open "GET", urlItem, False
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+
+    If http.Status <> 200 Then
+        MsgBox "HTTP Error " & http.Status & " saat ambil item penawaran.", vbExclamation
+        Exit Sub
+    End If
+
+    ' ── 5. Clear sheet dari baris 2 ke bawah ──
+    Dim lastRow As Long
+    lastRow = wsHP.Cells(wsHP.Rows.Count, 2).End(xlUp).Row
+    If lastRow >= 2 Then wsHP.Rows("2:" & lastRow + 5).ClearContents
+
+    ' ── 6. Parse + isi data ──
+    Dim jsonI As String: jsonI = http.ResponseText
+    Dim curRow As Long: curRow = 2
+    Dim posI As Long: posI = 1
+
+    Do
+        Dim bsI As Long: bsI = InStr(posI, jsonI, "{")
+        If bsI = 0 Then Exit Do
+        Dim depI As Integer: depI = 1
+        Dim pI As Long: pI = bsI + 1
+        Do While pI <= Len(jsonI) And depI > 0
+            Dim cI As String: cI = Mid(jsonI, pI, 1)
+            If cI = "{" Then depI = depI + 1
+            If cI = "}" Then depI = depI - 1
+            pI = pI + 1
+        Loop
+        Dim objI As String: objI = Mid(jsonI, bsI, pI - bsI)
+
+        Dim isDivisi As String: isDivisi = ExtractJSONVal(objI, "is_divisi")
+        Dim jenisBj As String:  jenisBj  = ExtractJSONVal(objI, "jenis_bj")
+        Dim satuan As String:   satuan   = ExtractJSONVal(objI, "satuan")
+        Dim volStr As String:   volStr   = ExtractJSONVal(objI, "vol")
+        Dim hsStr As String:    hsStr    = ExtractJSONVal(objI, "harga_satuan")
+        Dim pajStr As String:   pajStr   = ExtractJSONVal(objI, "pajak_pct")
+        Dim totStr As String:   totStr   = ExtractJSONVal(objI, "total_stlh_pajak")
+        Dim urtStr As String:   urtStr   = ExtractJSONVal(objI, "urutan")
+
+        wsHP.Cells(curRow, 1).Value = IIf(isDivisi = "true", "", urtStr)  ' No
+        wsHP.Cells(curRow, 2).Value = jenisBj                              ' Jenis
+        If isDivisi <> "true" Then
+            wsHP.Cells(curRow, 3).Value = satuan                           ' Satuan
+            If volStr <> "" Then wsHP.Cells(curRow, 4).Value = CDbl(volStr)  ' Volume
+            If hsStr  <> "" Then wsHP.Cells(curRow, 5).Value = CDbl(hsStr)   ' Harga Satuan
+            If pajStr <> "" Then
+                wsHP.Cells(curRow, 6).Value = CDbl(pajStr)                 ' Pajak %
+                If volStr <> "" And hsStr <> "" Then
+                    ' Nilai Pajak = harga_satuan × vol × pajak/100
+                    wsHP.Cells(curRow, 7).Value = CDbl(hsStr) * CDbl(volStr) * CDbl(pajStr) / 100
+                End If
+            End If
+            If totStr <> "" Then wsHP.Cells(curRow, 8).Value = CDbl(totStr) ' Total
+        End If
+
+        curRow = curRow + 1
+        posI = pI
+    Loop
+
+    ' ── 7. Baris total + selisih ──
+    ' Ambil total HPS dari hps_items
+    Dim urlHPS As String
+    urlHPS = SB_URL & "/rest/v1/hps_items" & _
+             "?kode_tender=eq." & kodeTender & _
+             "&select=total_nilai_bulat&limit=1"
+    http.Open "GET", urlHPS, False
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+
+    Dim totalHPS As Double: totalHPS = 0
+    If http.Status = 200 Then
+        Dim hpsStr As String: hpsStr = ExtractJSONVal(http.ResponseText, "total_nilai_bulat")
+        If hpsStr <> "" Then totalHPS = CDbl(hpsStr)
+    End If
+
+    curRow = curRow + 1  ' satu baris kosong
+
+    With wsHP.Cells(curRow, 2)
+        .Value = "Total Penawaran"
+        .Font.Bold = True
+    End With
+    wsHP.Cells(curRow, 8).Value = totalDipilih
+
+    curRow = curRow + 1
+    With wsHP.Cells(curRow, 2)
+        .Value = "Total HPS"
+        .Font.Bold = True
+    End With
+    wsHP.Cells(curRow, 8).Value = totalHPS
+
+    curRow = curRow + 1
+    With wsHP.Cells(curRow, 2)
+        .Value = "Selisih (Penawaran - HPS)"
+        .Font.Bold = True
+    End With
+    Dim selisih As Double: selisih = totalDipilih - totalHPS
+    wsHP.Cells(curRow, 8).Value = selisih
+
+    ' Highlight selisih kuning jika lebih dari 5% HPS
+    If totalHPS > 0 And Abs(selisih) / totalHPS > 0.05 Then
+        wsHP.Cells(curRow, 8).Interior.Color = RGB(255, 255, 0)
+        MsgBox "Selisih penawaran vs HPS: Rp " & Format(Abs(selisih), "#,##0") & _
+               " (" & Format(Abs(selisih) / totalHPS * 100, "0.0") & "% HPS)." & vbCrLf & _
+               "Pertimbangkan klarifikasi kewajaran harga.", vbExclamation, "Muat Harga Penawaran"
+    Else
+        MsgBox "Data " & namaDipilih & " berhasil dimuat." & vbCrLf & _
+               "Total Penawaran : Rp " & Format(totalDipilih, "#,##0") & vbCrLf & _
+               "Total HPS       : Rp " & Format(totalHPS, "#,##0") & vbCrLf & _
+               "Selisih         : Rp " & Format(selisih, "#,##0"), _
+               vbInformation, "Muat Harga Penawaran"
+    End If
+    Exit Sub
+
+ErrHandler:
+    MsgBox "Error " & Err.Number & ": " & Err.Description, vbCritical, "MuatHargaPenawaran"
+End Sub
+
+
+' ============================================================
+' PARSER: Ekstrak nilai dari JSON string (single-level)
+' ============================================================
 Private Function ExtractJSONVal(json As String, key As String) As String
     Dim pattern As String
     pattern = """" & key & """" & ":"

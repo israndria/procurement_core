@@ -216,6 +216,9 @@ def inject_buttons(filepath):
             ("3. KK Evaluasi Kualifikasi", [
                 ("btnMuatKKEvaluasi", "Muat KK Evaluasi", "MuatKKEvaluasi", 1, 7, PURPLE),
             ]),
+            ("6. Harga Penawaran", [
+                ("btnMuatHargaPenawaran", "Muat Harga Penawaran", "MuatHargaPenawaran", 1, 4, PURPLE),
+            ]),
         ]
         
         for sheet_name, btns in sheet_buttons:
