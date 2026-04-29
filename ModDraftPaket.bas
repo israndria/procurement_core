@@ -951,6 +951,7 @@ Public Sub MuatHPS(kodeTender As String)
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
     On Error GoTo ErrHPS
     http.Open "GET", url, False
+    http.SetTimeouts 5000, 5000, 10000, 10000
     http.SetRequestHeader "apikey", SB_KEY
     http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
     http.SetRequestHeader "Accept", "application/json"
@@ -1130,6 +1131,7 @@ Private Function FetchSupabase() As String
 
     On Error GoTo ErrHTTP
     http.Open "GET", url, False
+    http.SetTimeouts 5000, 5000, 10000, 10000
     http.SetRequestHeader "apikey", SB_KEY
     http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
     http.SetRequestHeader "Accept", "application/json"

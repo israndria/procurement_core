@@ -334,6 +334,7 @@ Private Function FetchKKEvaluasi(kodeTender As String) As String
 
     On Error GoTo ErrHTTP
     http.Open "GET", url, False
+    http.SetTimeouts 5000, 5000, 10000, 10000
     http.SetRequestHeader "apikey", SB_KEY
     http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
     http.SetRequestHeader "Accept", "application/json"
@@ -519,6 +520,7 @@ Public Sub MuatHargaPenawaran()
     Dim http As Object
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
     http.Open "GET", urlPeserta, False
+    http.SetTimeouts 5000, 5000, 10000, 10000
     http.SetRequestHeader "apikey", SB_KEY
     http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
     http.SetRequestHeader "Accept", "application/json"
@@ -617,6 +619,7 @@ Public Sub MuatHargaPenawaran()
               "&order=urutan.asc"
 
     http.Open "GET", urlItem, False
+    http.SetTimeouts 5000, 5000, 10000, 10000
     http.SetRequestHeader "apikey", SB_KEY
     http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
     http.SetRequestHeader "Accept", "application/json"
@@ -686,6 +689,7 @@ Public Sub MuatHargaPenawaran()
              "?kode_tender=eq." & kodeTender & _
              "&select=total_nilai_bulat&limit=1"
     http.Open "GET", urlHPS, False
+    http.SetTimeouts 5000, 5000, 10000, 10000
     http.SetRequestHeader "apikey", SB_KEY
     http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
     http.SetRequestHeader "Accept", "application/json"
