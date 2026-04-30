@@ -15,10 +15,76 @@ Private Const SB_TABLE As String = "draft_paket"
 
 ' Sheet & Cell target
 Private Const SHEET_INPUT As String = "1. Input Data"
-Private Const CELL_SELECTOR As String = "E2"   ' Dropdown pilih paket
+Private Const CELL_SELECTOR As String = "E1"   ' Dropdown pilih paket (di @ Master Data)
 
 ' Kolom yang di-fetch (efisien, tidak perlu semua)
 Private Const SB_SELECT As String = "kode_tender,nama_tender,mak,kode_rup,nilai_pagu,nilai_hps,kode_pokja,nomor_pp,nomor_surat_dinas,nama_dinas,nama_ppk,jangka_waktu,sumber_anggaran,anggota_1,anggota_2,anggota_3,bidang"
+
+' ── @ Master Data row constants (fixed layout) ──
+Private Const MD_SHEET As String = "@ Master Data"
+' INPUT DATA section (row 2 = header)
+Private Const MD_E3 As Integer = 3
+Private Const MD_E5 As Integer = 4
+Private Const MD_E6 As Integer = 5
+Private Const MD_E8 As Integer = 6
+Private Const MD_E10 As Integer = 7
+Private Const MD_E11 As Integer = 8
+Private Const MD_E12 As Integer = 9
+Private Const MD_E13 As Integer = 10
+Private Const MD_E14 As Integer = 11
+Private Const MD_E15 As Integer = 12
+Private Const MD_E16 As Integer = 13
+Private Const MD_E17 As Integer = 14
+Private Const MD_E19 As Integer = 15
+Private Const MD_E20 As Integer = 16
+Private Const MD_E21 As Integer = 17
+Private Const MD_E22 As Integer = 18
+Private Const MD_E23 As Integer = 19
+Private Const MD_E24 As Integer = 20
+Private Const MD_E32 As Integer = 21
+Private Const MD_E33 As Integer = 22
+' REVIU section (row 24 = header)
+Private Const MD_R_E2 As Integer = 25
+Private Const MD_R_E6 As Integer = 26
+Private Const MD_R_E7 As Integer = 27
+Private Const MD_R_E9 As Integer = 28
+Private Const MD_R_E10 As Integer = 29
+Private Const MD_R_E11 As Integer = 30
+Private Const MD_R_E12 As Integer = 31
+Private Const MD_R_E13 As Integer = 32
+Private Const MD_R_E14 As Integer = 33
+Private Const MD_R_E15 As Integer = 34
+Private Const MD_R_E16 As Integer = 35
+Private Const MD_R_E17 As Integer = 36
+Private Const MD_R_E18 As Integer = 37
+Private Const MD_R_E19 As Integer = 38
+Private Const MD_R_E20 As Integer = 39
+Private Const MD_R_E21 As Integer = 40
+Private Const MD_R_E22 As Integer = 41
+Private Const MD_R_E23 As Integer = 42
+Private Const MD_R_E24 As Integer = 43
+Private Const MD_R_E25 As Integer = 44
+Private Const MD_R_E26 As Integer = 45
+Private Const MD_R_E27 As Integer = 46
+Private Const MD_R_E28 As Integer = 47
+Private Const MD_R_E29 As Integer = 48
+Private Const MD_R_E30 As Integer = 49
+Private Const MD_R_E31 As Integer = 50
+Private Const MD_R_E32 As Integer = 51
+Private Const MD_R_E33 As Integer = 52
+Private Const MD_R_E34 As Integer = 53
+' DOKPIL section (row 55 = header)
+Private Const MD_D_E6 As Integer = 56
+Private Const MD_D_E7 As Integer = 57
+Private Const MD_D_E8 As Integer = 58
+Private Const MD_D_E9 As Integer = 59
+Private Const MD_D_E10 As Integer = 60
+Private Const MD_D_E11 As Integer = 61
+Private Const MD_D_E12 As Integer = 62
+Private Const MD_D_E13 As Integer = 63
+Private Const MD_D_E14 As Integer = 64
+Private Const MD_D_E15 As Integer = 65
+Private Const MD_D_E16 As Integer = 66
 
 ' Cache data in-memory (Collection of Dictionary-like arrays)
 Private m_DataCache As Collection
@@ -31,7 +97,13 @@ Private m_LastLoad As Date
 Public Sub MuatDraftPaket(Optional bFromOpen As Boolean = False)
     Dim ws As Worksheet
     On Error GoTo ErrHandler
-    Set ws = ThisWorkbook.Sheets(SHEET_INPUT)
+    ' Dropdown sekarang di @ Master Data
+    Set ws = ThisWorkbook.Sheets(MD_SHEET)
+    ' Pastikan sheet ada
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
+        ws.Name = MD_SHEET
+    End If
 
     ' Fetch JSON dari Supabase
     Dim json As String
@@ -161,57 +233,65 @@ Public Sub PilihDraftPaket(selectedLabel As String)
         If thn2 <> "" Then label = label & " - " & thn2
 
         If label = selectedLabel Then
-            ' Mapping cell berdasarkan sheet "1. Input Data" v1.4
-            With ws
-                .Range("E3").Value  = CStr(item(2))   ' MAK
-                .Range("E5").Value  = CStr(item(6))   ' Kode Tender
-                .Range("E6").Value  = CStr(item(1))   ' Nama Tender
-                .Range("E8").Value  = CStr(item(3))   ' Kode RUP
-                .Range("E10").Value = CStr(item(4))   ' Nilai Pagu
-                .Range("E11").Value = CStr(item(5))   ' Nilai HPS
-                .Range("E12").Value = CStr(item(8))   ' Nomor Surat Dinas
-                .Range("E13").Value = CStr(item(7))   ' Nomor PP
-                .Range("E14").NumberFormat = "@"
-                .Range("E14").Value = CStr(item(0))   ' Kode Pokja
-                ' Jangka Waktu → E15 (angka hari saja)
+            ' Mapping: tulis ke @ Master Data kolom C
+            Dim wsMD As Worksheet
+            On Error Resume Next
+            Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+            On Error GoTo 0
+            If wsMD Is Nothing Then
+                Set wsMD = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
+                wsMD.Name = MD_SHEET
+            End If
+            With wsMD
+                .Cells(MD_E3, 3).Value  = CStr(item(2))   ' MAK
+                .Cells(MD_E5, 3).Value  = CStr(item(6))   ' Kode Tender
+                .Cells(MD_E6, 3).Value  = CStr(item(1))   ' Nama Tender
+                .Cells(MD_E8, 3).Value  = CStr(item(3))   ' Kode RUP
+                .Cells(MD_E10, 3).Value = CStr(item(4))   ' Nilai Pagu
+                .Cells(MD_E11, 3).Value = CStr(item(5))   ' Nilai HPS
+                .Cells(MD_E12, 3).Value = CStr(item(8))   ' Nomor Surat Dinas
+                .Cells(MD_E13, 3).Value = CStr(item(7))   ' Nomor PP
+                .Cells(MD_E14, 3).NumberFormat = "@"
+                .Cells(MD_E14, 3).Value = CStr(item(0))   ' Kode Pokja
+                ' Jangka Waktu
                 Dim jw As String: jw = Trim(CStr(item(11)))
                 Dim spPos As Long: spPos = InStr(jw, " ")
                 If spPos > 0 Then jw = Left(jw, spPos - 1)
                 If IsNumeric(jw) Then
-                    .Range("E15").Value = CLng(jw)
+                    .Cells(MD_E15, 3).Value = CLng(jw)
                 Else
-                    .Range("E15").Value = CStr(item(11))
+                    .Cells(MD_E15, 3).Value = CStr(item(11))
                 End If
-                ' SKPD/OPD → E17 (nama_dinas), F17 (nama lengkap sama)
-                .Range("E17").Value = CStr(item(9))
-                .Range("F17").Value = CStr(item(9))
-                ' Bidang PUPR (Bina Marga/SDA/CK) → tidak dipakai di E17 lagi
-                ' Nama PPK → E19 + F19 (gelar), NIP → E20, Nomor SK → E21
-                Dim ppkNama As String: ppkNama = Trim(CStr(item(10)))
-                Dim komaPos As Long: komaPos = InStr(ppkNama, ",")
-                Dim ppkNamaBersih As String
-                If komaPos > 0 Then
-                    ppkNamaBersih = Trim(Left(ppkNama, komaPos - 1))
-                    .Range("E19").Value = ppkNamaBersih
-                    .Range("F19").Value = Trim(Mid(ppkNama, komaPos))
-                Else
-                    ppkNamaBersih = ppkNama
-                    .Range("E19").Value = ppkNama
-                End If
-                ' Lookup NIP PPK + Nomor SK dari sheet "0. Data Nama Pokja & PPK"
-                Dim nipPPK As String, skPPK As String, gelarPPK As String
-                LookupPPK ppkNamaBersih, nipPPK, skPPK, gelarPPK
-                If nipPPK <> "" Then
-                    .Range("E20").NumberFormat = "@"
-                    .Range("E20").Value = nipPPK
-                End If
-                If skPPK <> "" Then .Range("E21").Value = skPPK
-                If gelarPPK <> "" And komaPos = 0 Then .Range("F19").Value = gelarPPK
-                ' Sumber Anggaran → E33
-                .Range("E33").Value = CStr(item(12))
+                ' SKPD/OPD
+                .Cells(MD_E17, 3).Value = CStr(item(9))
             End With
-            ' Isi anggota pokja dari sheet "0. Data Nama Pokja & PPK" berdasarkan Kode Pokja
-            IsiAnggotaPokja ws, CStr(item(13)), CStr(item(14)), CStr(item(15))
+            ' Helper cells tetap di sheet asli
+            ws.Range("F17").Value = CStr(item(9))
+            ' Nama PPK
+            Dim ppkNama As String: ppkNama = Trim(CStr(item(10)))
+            Dim komaPos As Long: komaPos = InStr(ppkNama, ",")
+            Dim ppkNamaBersih As String
+            If komaPos > 0 Then
+                ppkNamaBersih = Trim(Left(ppkNama, komaPos - 1))
+                wsMD.Cells(MD_E19, 3).Value = ppkNamaBersih
+                ws.Range("F19").Value = Trim(Mid(ppkNama, komaPos))
+            Else
+                ppkNamaBersih = ppkNama
+                wsMD.Cells(MD_E19, 3).Value = ppkNama
+            End If
+            ' Lookup NIP PPK + Nomor SK
+            Dim nipPPK As String, skPPK As String, gelarPPK As String
+            LookupPPK ppkNamaBersih, nipPPK, skPPK, gelarPPK
+            If nipPPK <> "" Then
+                wsMD.Cells(MD_E20, 3).NumberFormat = "@"
+                wsMD.Cells(MD_E20, 3).Value = nipPPK
+            End If
+            If skPPK <> "" Then wsMD.Cells(MD_E21, 3).Value = skPPK
+            If gelarPPK <> "" And komaPos = 0 Then ws.Range("F19").Value = gelarPPK
+            ' Sumber Anggaran
+            wsMD.Cells(MD_E33, 3).Value = CStr(item(12))
+            ' Isi anggota pokja
+            IsiAnggotaPokjaToMaster wsMD, CStr(item(13)), CStr(item(14)), CStr(item(15))
 
             ' ── Parse PDF → isi database_reviu + database_dokpil ──────────────
             Dim kodeTender As String: kodeTender = CStr(item(6))
@@ -366,33 +446,33 @@ End Sub
 ' ISI 1. Input Data dari JSON (hasil parse PDF)
 ' ============================================================
 Private Sub IsiInputDataDariPDF(jsonTeks As String)
-    Dim ws As Worksheet
+    Dim wsMD As Worksheet
     On Error Resume Next
-    Set ws = ThisWorkbook.Sheets("1. Input Data")
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
     On Error GoTo 0
-    If ws Is Nothing Then Exit Sub
+    If wsMD Is Nothing Then Exit Sub
 
-    ' E16: Kegiatan/Sub Kegiatan — hanya isi jika cell masih kosong
+    ' E16: Kegiatan/Sub Kegiatan
     Dim blok16 As String: blok16 = ExtractJSONBlok(jsonTeks, "input_data", "E16")
     If ExtractJSONVal(blok16, "status") = "terisi" Then
-        If Trim(CStr(ws.Range("E16").Value)) = "" Then
-            ws.Range("E16").Value = ExtractJSONVal(blok16, "nilai")
+        If Trim(CStr(wsMD.Cells(MD_E16, 3).Value)) = "" Then
+            wsMD.Cells(MD_E16, 3).Value = ExtractJSONVal(blok16, "nilai")
         End If
     End If
 
     ' E32: Lokasi
     Dim blok32 As String: blok32 = ExtractJSONBlok(jsonTeks, "input_data", "E32")
     If ExtractJSONVal(blok32, "status") = "terisi" Then
-        If Trim(CStr(ws.Range("E32").Value)) = "" Then
-            ws.Range("E32").Value = ExtractJSONVal(blok32, "nilai")
+        If Trim(CStr(wsMD.Cells(MD_E32, 3).Value)) = "" Then
+            wsMD.Cells(MD_E32, 3).Value = ExtractJSONVal(blok32, "nilai")
         End If
     End If
 
     ' E33: Sumber Dana
     Dim blok33 As String: blok33 = ExtractJSONBlok(jsonTeks, "input_data", "E33")
     If ExtractJSONVal(blok33, "status") = "terisi" Then
-        If Trim(CStr(ws.Range("E33").Value)) = "" Then
-            ws.Range("E33").Value = ExtractJSONVal(blok33, "nilai")
+        If Trim(CStr(wsMD.Cells(MD_E33, 3).Value)) = "" Then
+            wsMD.Cells(MD_E33, 3).Value = ExtractJSONVal(blok33, "nilai")
         End If
     End If
 End Sub
@@ -402,11 +482,11 @@ End Sub
 ' ISI database_reviu dari JSON
 ' ============================================================
 Private Sub IsiDatabaseReviu(jsonTeks As String)
-    Dim ws As Worksheet
+    Dim wsMD As Worksheet
     On Error Resume Next
-    Set ws = ThisWorkbook.Sheets("database_reviu")
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
     On Error GoTo 0
-    If ws Is Nothing Then Exit Sub
+    If wsMD Is Nothing Then Exit Sub
 
     ' Mapping cell → path JSON (format: "reviu.EXX.nilai")
     Dim cells(25) As String, paths(25) As String
@@ -443,27 +523,57 @@ Private Sub IsiDatabaseReviu(jsonTeks As String)
         blok = ExtractJSONBlok(jsonTeks, "reviu", paths(i))
         Dim status As String: status = ExtractJSONVal(blok, "status")
         Dim nilai As String:  nilai  = ExtractJSONVal(blok, "nilai")
-        ' Hanya isi jika terisi (tidak timpa perlu_keputusan / tidak_ada)
+        ' Hanya isi jika terisi
         If status = "terisi" And nilai <> "" Then
-            ws.Range(cells(i)).Value = nilai
+            ' Write to @ Master Data kolom C at mapped row
+            Dim mdRow As Integer
+            Select Case cells(i)
+                Case "E2": mdRow = 25
+                Case "E6": mdRow = 26
+                Case "E7": mdRow = 27
+                Case "E9": mdRow = 28
+                Case "E10": mdRow = 29
+                Case "E11": mdRow = 30
+                Case "E12": mdRow = 31
+                Case "E13": mdRow = 32
+                Case "E14": mdRow = 33
+                Case "E15": mdRow = 34
+                Case "E16": mdRow = 35
+                Case "E17": mdRow = 36
+                Case "E18": mdRow = 37
+                Case "E19": mdRow = 38
+                Case "E20": mdRow = 39
+                Case "E21": mdRow = 40
+                Case "E22": mdRow = 41
+                Case "E23": mdRow = 42
+                Case "E24": mdRow = 43
+                Case "E25": mdRow = 44
+                Case "E26": mdRow = 45
+                Case "E27": mdRow = 46
+                Case "E28": mdRow = 47
+                Case "E29": mdRow = 48
+                Case "E30": mdRow = 49
+                Case "E31": mdRow = 50
+                Case Else: mdRow = 0
+            End Select
+            If mdRow > 0 Then wsMD.Cells(mdRow, 3).Value = nilai
         End If
     Next i
 
-    ' E32, E33, E34 (string panjang, bisa ada newline)
+    ' E32, E33, E34
     Dim blok32 As String: blok32 = ExtractJSONBlok(jsonTeks, "reviu", "E32")
     If ExtractJSONVal(blok32, "status") = "terisi" Then
-        ws.Range("E32").Value = ExtractJSONVal(blok32, "nilai")
+        wsMD.Cells(MD_R_E32, 3).Value = ExtractJSONVal(blok32, "nilai")
     End If
     Dim blok33 As String: blok33 = ExtractJSONBlok(jsonTeks, "reviu", "E33")
     If ExtractJSONVal(blok33, "status") = "terisi" Then
-        ' Ganti \n literal dengan newline Excel
         Dim uraian As String: uraian = ExtractJSONVal(blok33, "nilai")
         uraian = Join(Split(uraian, "\n"), Chr(10))
-        ws.Range("E33").Value = uraian
+        wsMD.Cells(MD_R_E33, 3).Value = uraian
     End If
     Dim blok34 As String: blok34 = ExtractJSONBlok(jsonTeks, "reviu", "E34")
     If ExtractJSONVal(blok34, "status") = "terisi" Then
-        ws.Range("E34").Value = ExtractJSONVal(blok34, "nilai")
+        wsMD.Cells(MD_R_E34, 3).Value = ExtractJSONVal(blok34, "nilai")
     End If
 End Sub
 
@@ -472,11 +582,11 @@ End Sub
 ' ISI database_dokpil dari JSON
 ' ============================================================
 Private Sub IsiDatabaseDokpil(jsonTeks As String)
-    Dim ws As Worksheet
+    Dim wsMD As Worksheet
     On Error Resume Next
-    Set ws = ThisWorkbook.Sheets("database_dokpil")
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
     On Error GoTo 0
-    If ws Is Nothing Then Exit Sub
+    If wsMD Is Nothing Then Exit Sub
 
     Dim dokpilCells(9) As String
     dokpilCells(0) = "E6":  dokpilCells(1) = "E7"
@@ -492,16 +602,42 @@ Private Sub IsiDatabaseDokpil(jsonTeks As String)
         Dim status As String: status = ExtractJSONVal(blok, "status")
         Dim nilai As String:  nilai  = ExtractJSONVal(blok, "nilai")
         If status = "terisi" And nilai <> "" Then
-            ws.Range(dokpilCells(i)).Value = nilai
+            Dim mdRowD As Integer
+            Select Case dokpilCells(i)
+                Case "E6": mdRowD = 56
+                Case "E7": mdRowD = 57
+                Case "E8": mdRowD = 58
+                Case "E9": mdRowD = 59
+                Case "E10": mdRowD = 60
+                Case "E11": mdRowD = 61
+                Case "E12": mdRowD = 62
+                Case "E13": mdRowD = 63
+                Case "E14": mdRowD = 64
+                Case "E15": mdRowD = 65
+                Case Else: mdRowD = 0
+            End Select
+            If mdRowD > 0 Then wsMD.Cells(mdRowD, 3).Value = nilai
         ElseIf status = "tidak_ada" Then
-            ws.Range(dokpilCells(i)).Value = ""
+            ' Clear di master data juga
+            Select Case dokpilCells(i)
+                Case "E6": wsMD.Cells(56, 3).Value = ""
+                Case "E7": wsMD.Cells(57, 3).Value = ""
+                Case "E8": wsMD.Cells(58, 3).Value = ""
+                Case "E9": wsMD.Cells(59, 3).Value = ""
+                Case "E10": wsMD.Cells(60, 3).Value = ""
+                Case "E11": wsMD.Cells(61, 3).Value = ""
+                Case "E12": wsMD.Cells(62, 3).Value = ""
+                Case "E13": wsMD.Cells(63, 3).Value = ""
+                Case "E14": wsMD.Cells(64, 3).Value = ""
+                Case "E15": wsMD.Cells(65, 3).Value = ""
+            End Select
         End If
     Next i
 
     ' E16: Cara Pembayaran
     Dim blok16 As String: blok16 = ExtractJSONBlok(jsonTeks, "dokpil", "E16")
     If ExtractJSONVal(blok16, "status") = "terisi" Then
-        ws.Range("E16").Value = ExtractJSONVal(blok16, "nilai")
+        wsMD.Cells(MD_D_E16, 3).Value = ExtractJSONVal(blok16, "nilai")
     End If
 End Sub
 
@@ -513,11 +649,11 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
     ' Buat/ambil sheet _HasilParse
     Dim wsHP As Worksheet
     On Error Resume Next
-    Set wsHP = ThisWorkbook.Sheets("_HasilParse")
+    Set wsHP = ThisWorkbook.Sheets(MD_SHEET)
     On Error GoTo 0
     If wsHP Is Nothing Then
         Set wsHP = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
-        wsHP.Name = "_HasilParse"
+        wsHP.Name = MD_SHEET
     Else
         ' Pindah ke posisi paling kiri jika belum di sana
         If wsHP.Index <> 1 Then
@@ -525,7 +661,13 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
         End If
     End If
     wsHP.Visible = xlSheetVisible
-    wsHP.Cells.Clear
+    ' Clear hanya kolom A,B,D mulai baris 2 (row 1 = header + dropdown E1, JANGAN hapus)
+    ' Kolom C juga JANGAN dihapus (data sudah ditulis sebelumnya)
+    wsHP.Range("A2:D70").UnMerge
+    wsHP.Range("A2:B70").ClearContents
+    wsHP.Range("D2:D70").ClearContents
+    wsHP.Range("A2:D70").Interior.Pattern = xlNone
+    wsHP.Range("A2:D70").Font.Bold = False
 
     ' Header
     With wsHP
@@ -533,6 +675,7 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
         .Range("B1").Value = "Status"
         .Range("C1").Value = "Nilai / Keterangan"
         .Range("D1").Value = "Navigasi"
+        ' E1 = dropdown pilih paket (JANGAN dihapus/tulis ulang)
         .Range("A1:D1").Font.Bold = True
         .Range("A1:D1").Interior.Color = RGB(68, 114, 196)
         .Range("A1:D1").Font.Color = RGB(255, 255, 255)
@@ -577,8 +720,30 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
     Dim si As Integer
     For si = 0 To 16
         Dim nilaiInp As String
-        If Not wsInp Is Nothing Then
-            nilaiInp = Trim(CStr(wsInp.Range(inpCells(si)).Value))
+        ' Baca langsung dari @ Master Data kolom C (bukan dari sheet target)
+        Dim mdRowInp As Integer
+        Select Case inpCells(si)
+            Case "E3": mdRowInp = MD_E3
+            Case "E5": mdRowInp = MD_E5
+            Case "E6": mdRowInp = MD_E6
+            Case "E8": mdRowInp = MD_E8
+            Case "E10": mdRowInp = MD_E10
+            Case "E11": mdRowInp = MD_E11
+            Case "E12": mdRowInp = MD_E12
+            Case "E13": mdRowInp = MD_E13
+            Case "E14": mdRowInp = MD_E14
+            Case "E15": mdRowInp = MD_E15
+            Case "E17": mdRowInp = MD_E17
+            Case "E19": mdRowInp = MD_E19
+            Case "E20": mdRowInp = MD_E20
+            Case "E21": mdRowInp = MD_E21
+            Case "E22": mdRowInp = MD_E22
+            Case "E23": mdRowInp = MD_E23
+            Case "E24": mdRowInp = MD_E24
+            Case Else: mdRowInp = 0
+        End Select
+        If mdRowInp > 0 Then
+            nilaiInp = Trim(CStr(wsHP.Cells(mdRowInp, 3).Value))
         Else
             nilaiInp = ""
         End If
@@ -698,18 +863,18 @@ End Sub
 Private Sub TampilkanHasilParseNoPDF(folderWb As String)
     Dim wsHP As Worksheet
     On Error Resume Next
-    Set wsHP = ThisWorkbook.Sheets("_HasilParse")
+    Set wsHP = ThisWorkbook.Sheets(MD_SHEET)
     On Error GoTo 0
     If wsHP Is Nothing Then
         Set wsHP = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
-        wsHP.Name = "_HasilParse"
+        wsHP.Name = MD_SHEET
     Else
         If wsHP.Index <> 1 Then wsHP.Move Before:=ThisWorkbook.Sheets(1)
     End If
     wsHP.Visible = xlSheetVisible
     wsHP.Cells.Clear
     wsHP.Range("A1").Value = "INFO"
-    wsHP.Range("B1").Value = "File Draft_Pokja_XXX.pdf tidak ditemukan di folder paket."
+    wsHP.Range("B1").Value = "File Draft_Pokja_XXX.pdf tidak ditemukan."
     wsHP.Range("C1").Value = "Jalankan 'Download Dokumen' di Asisten Pokja terlebih dahulu, atau salin PDF ke folder yang sama dengan file Excel."
     wsHP.Columns("A:C").AutoFit
     wsHP.Activate
@@ -756,7 +921,10 @@ Private Sub TulisBarisHasil(ws As Worksheet, baris As Integer, blok As String, _
         .Cells(baris, 1).Value = label & " (" & cellAddr & ")"
         .Cells(baris, 2).Value = statusTeks
         .Cells(baris, 2).Interior.Color = warna
-        .Cells(baris, 3).Value = Left(nilai, 120)
+        ' Kolom C: tulis HANYA jika kosong (data bisa sudah diisi sebelumnya)
+        If Trim(CStr(.Cells(baris, 3).Value)) = "" Or Trim(CStr(.Cells(baris, 3).Value)) = "0" Then
+            .Cells(baris, 3).Value = nilai
+        End If
 
         ' Hyperlink navigasi ke cell target
         If status <> "tidak_ada" Then
@@ -1110,6 +1278,16 @@ ErrHPS:
 End Sub
 
 
+' ============================================================
+' ISI ANGGOTA POKJA ke @ Master Data
+' ============================================================
+Private Sub IsiAnggotaPokjaToMaster(wsMD As Worksheet, anggota1 As String, anggota2 As String, anggota3 As String)
+    If anggota1 <> "" Then wsMD.Cells(MD_E22, 3).Value = anggota1
+    If anggota2 <> "" Then wsMD.Cells(MD_E23, 3).Value = anggota2
+    If anggota3 <> "" Then wsMD.Cells(MD_E24, 3).Value = anggota3
+End Sub
+
+
 ' Helper: konversi string angka ke Double (toleran koma/titik)
 Private Function CDblSafe(s As String) As Double
     If s = "" Or s = "null" Then CDblSafe = 0: Exit Function
@@ -1168,17 +1346,39 @@ Private Function ParseDraftJSON(json As String) As Collection
     ' Ekstrak setiap objek {...} dalam array
     Dim pos As Long: pos = 1
     Dim braceStart As Long, braceEnd As Long
+    Dim depth As Long
+    Dim inQuote As Boolean
+    Dim scanPos As Long
+    Dim ch As String
+    Dim obj As String
+    Dim item(16) As Variant
 
     Do
         braceStart = InStr(pos, json, "{")
         If braceStart = 0 Then Exit Do
-        braceEnd = InStr(braceStart, json, "}")
+        ' Cari matching } dengan brace counting (skip isi string)
+        depth = 0
+        inQuote = False
+        braceEnd = 0
+        For scanPos = braceStart To Len(json)
+            ch = Mid(json, scanPos, 1)
+            If ch = """" And (scanPos = 1 Or Mid(json, scanPos - 1, 1) <> "\") Then
+                inQuote = Not inQuote
+            ElseIf Not inQuote Then
+                If ch = "{" Then depth = depth + 1
+                If ch = "}" Then
+                    depth = depth - 1
+                    If depth = 0 Then
+                        braceEnd = scanPos
+                        Exit For
+                    End If
+                End If
+            End If
+        Next scanPos
         If braceEnd = 0 Then Exit Do
 
-        Dim obj As String
         obj = Mid(json, braceStart, braceEnd - braceStart + 1)
 
-        Dim item(16) As Variant
         item(0)  = ExtractJSONVal(obj, "kode_pokja")
         item(1)  = ExtractJSONVal(obj, "nama_tender")
         item(2)  = ExtractJSONVal(obj, "mak")

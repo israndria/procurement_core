@@ -144,7 +144,7 @@ def inject_buttons(filepath):
 
         # 3. Clean old buttons - langsung target 3 sheet yang diketahui ada tombolnya
         print("\n  Cleaning old buttons...")
-        target_clean = ["1. Input Data", "database_reviu", "database_dokpil", "3. KK Evaluasi Kualifikasi"]
+        target_clean = ["1. Input Data", "@ Master Data", "database_reviu", "database_dokpil", "3. KK Evaluasi Kualifikasi"]
         for sheet_name in target_clean:
             try:
                 ws = wb.Sheets(sheet_name)
@@ -166,7 +166,7 @@ def inject_buttons(filepath):
         TEAL = (0, 128, 128)
 
         sheet_buttons = [
-            ("1. Input Data", [
+            ("@ Master Data", [
                 ("btnBukaBA",        "Buka BA PK",              "BukaBA",           3, 6, BLUE_WORD),
                 ("btnPrintBAReviu",  "Print BA Reviu",          "PrintBAReviuPDF",  3, 7, BLACK),
                 ("btnImportWeb",     "Import Data LPSE",        "ImportHTML",       3, 8, GREEN),
@@ -297,7 +297,17 @@ def inject_buttons(filepath):
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) > 1:
-        inject_buttons(sys.argv[1])
-    else:
-        inject_buttons(r"D:\Dokumen\@ POKJA 2026\Paket Experiment\@ BA PK 2026 (Improved) v1.4.xlsm")
+    target = sys.argv[1] if len(sys.argv) > 1 else r"D:\Dokumen\@ POKJA 2026\Paket Experiment\@ BA PK 2026 (Improved) v1.4.xlsm"
+
+    # Step 1: Setup @ Master Data via openpyxl (HARUS duluan, sebelum COM)
+    # openpyxl tidak support shapes — kalau jalan setelah inject, tombol hilang
+    print("--- Step 1: Setup @ Master Data (openpyxl) ---")
+    try:
+        from setup_master_data import setup_with_openpyxl
+        setup_with_openpyxl(target)
+    except Exception as e:
+        print(f"[WARN] Setup Master Data gagal: {e}")
+
+    # Step 2: Inject VBA + tombol via COM (shapes aman karena COM yang save terakhir)
+    print("\n--- Step 2: Inject VBA + Buttons (COM) ---")
+    inject_buttons(target)
