@@ -214,9 +214,6 @@ Public Sub MuatKKEvaluasi()
         Else
             skpNum = skpCatatan
         End If
-        If GetF(it, "skp_berbeda") = "true" Then
-            skpNum = skpNum & " [!]"
-        End If
         wsKK.Cells(ROW_SKP, col).Value = skpNum
         ' Highlight jika SKP kosong (tidak terdeteksi)
         If skpNum = "" Then
@@ -236,7 +233,7 @@ Public Sub MuatKKEvaluasi()
             npwpKesimpulan = "-"
         End If
         wsKK.Cells(ROW_NPWP_KESIMPULAN, col).Value = npwpKesimpulan
-        wsKK.Cells(ROW_NPWP, col).Value = npwpVal
+        wsKK.Cells(ROW_NPWP, col).Value = FormatNPWP(npwpVal)
         ' KSWP: jika tidak diketahui/kosong → kosongkan + highlight kuning (isi manual)
         If kswpVal = "TIDAK DIKETAHUI" Or kswpVal = "" Then
             wsKK.Cells(ROW_KSWP, col).Value = ""
@@ -742,6 +739,42 @@ Public Sub MuatHargaPenawaran()
 ErrHandler:
     MsgBox "Error " & Err.Number & ": " & Err.Description, vbCritical, "MuatHargaPenawaran"
 End Sub
+
+
+' ============================================================
+' Helper: Format NPWP ke XX.XXX.XXX.X-XXX.XXX
+' ============================================================
+Private Function FormatNPWP(raw As String) As String
+    If raw = "" Then FormatNPWP = "": Exit Function
+    ' Bersihkan: ambil digit saja (handles scientific notation jika ada)
+    Dim digits As String: digits = ""
+    Dim ch As String
+    Dim i As Integer
+    ' Jika scientific notation (misal 1.87561E+13), konversi ke CLng dulu
+    If InStr(raw, "E") > 0 Or InStr(raw, "e") > 0 Then
+        On Error Resume Next
+        Dim dblVal As Double: dblVal = CDbl(raw)
+        If Err.Number = 0 Then
+            raw = Format(dblVal, "0")
+        End If
+        On Error GoTo 0
+    End If
+    For i = 1 To Len(raw)
+        ch = Mid(raw, i, 1)
+        If ch >= "0" And ch <= "9" Then digits = digits & ch
+    Next i
+    ' Jika 16 digit dengan leading zero → strip jadi 15
+    If Len(digits) = 16 And Left(digits, 1) = "0" Then
+        digits = Mid(digits, 2)
+    End If
+    If Len(digits) = 15 Then
+        FormatNPWP = Left(digits, 2) & "." & Mid(digits, 3, 3) & "." & _
+                     Mid(digits, 6, 3) & "." & Mid(digits, 9, 1) & "-" & _
+                     Mid(digits, 10, 3) & "." & Right(digits, 3)
+    Else
+        FormatNPWP = raw  ' panjang tidak standar — kembalikan apa adanya
+    End If
+End Function
 
 
 ' ============================================================

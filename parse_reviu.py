@@ -159,23 +159,29 @@ def parse_pdf(path_pdf, bidang=""):
         semua_teks = "\n".join(semua_halaman)
 
         # ── input_data E16: Kegiatan / Sub Kegiatan ──────────────────────────
-        # Pola: "Kegiatan : Penyelenggaraan Jalan" + "Sub Kegiatan : Rekonstruksi Jalan"
         kegiatan_val = ""
         sub_keg_val  = ""
         for teks in semua_halaman:
-            if "Kegiatan" in teks and "Sub Kegiatan" in teks:
-                m_keg = re.search(r"Kegiatan\s*[:/]\s*([^\n]+)", teks, re.IGNORECASE)
-                m_sub = re.search(r"Sub\s+Kegiatan\s*[:/]\s*([^\n]+)", teks, re.IGNORECASE)
-                if m_keg:
-                    kegiatan_val = bersihkan(m_keg.group(1))
-                if m_sub:
-                    sub_keg_val = bersihkan(m_sub.group(1))
-                if kegiatan_val and sub_keg_val:
-                    break
+            if "Kegiatan" not in teks:
+                continue
+            # Cari "Sub Kegiatan" dulu (lebih spesifik) agar tidak tersedot oleh "Kegiatan"
+            m_sub = re.search(r"Sub\s+Kegiatan\s*[:/]\s*([^\n]+)", teks, re.IGNORECASE)
+            # Cari "Kegiatan" yang bukan bagian dari "Sub Kegiatan"
+            m_keg = re.search(r"(?<!Sub\s)(?<!Sub )Kegiatan\s*[:/]\s*([^\n]+)", teks, re.IGNORECASE)
+            if not m_keg:
+                # fallback: ambil baris "Kegiatan" pertama yang tidak diawali "Sub"
+                m_keg = re.search(r"^(?!.*Sub\s+Kegiatan).*Kegiatan\s*[:/]\s*([^\n]+)", teks, re.IGNORECASE | re.MULTILINE)
+            if m_sub:
+                sub_keg_val = bersihkan(m_sub.group(1))
+            if m_keg:
+                kegiatan_val = bersihkan(m_keg.group(1))
+            if kegiatan_val or sub_keg_val:
+                break
         if kegiatan_val or sub_keg_val:
-            gabung = kegiatan_val
-            if sub_keg_val:
-                gabung = (kegiatan_val + " / " + sub_keg_val) if kegiatan_val else sub_keg_val
+            if kegiatan_val and sub_keg_val:
+                gabung = kegiatan_val + " / " + sub_keg_val
+            else:
+                gabung = kegiatan_val or sub_keg_val
             set_val("input_data", "E16", gabung)
         else:
             hasil["input_data"]["E16"]["status"] = "tidak_ada"
@@ -184,7 +190,7 @@ def parse_pdf(path_pdf, bidang=""):
         for teks in semua_halaman:
             m_lok = re.search(
                 r"(?:Lokasi\s+(?:Kegiatan|Pekerjaan|Kerja)?\s*[:/]\s*|"
-                r"dilaksanakan\s+di\s+)([^\n.]{5,60})",
+                r"dilaksanakan\s+di\s+)([^\n]{5,120})",
                 teks, re.IGNORECASE
             )
             if m_lok:
@@ -198,11 +204,12 @@ def parse_pdf(path_pdf, bidang=""):
         # ── input_data E33: Sumber Dana ───────────────────────────────────────
         for teks in semua_halaman:
             m_sd = re.search(
-                r"(?:Sumber\s+[Dd]ana|Sumber\s+[Aa]nggaran|dibiayai\s+dari)\s*[:/]?\s*(APBD[^\n]{0,40}|APBN[^\n]{0,40})",
+                r"(?:Sumber\s+[Dd]ana|Sumber\s+[Aa]nggaran|dibiayai\s+dari)\s*[:/]?\s*"
+                r"((?:APBD|APBN)\s+(?:Kabupaten|Kota|Provinsi|Pusat|Tahun)?[^(\n]{0,60})",
                 teks, re.IGNORECASE
             )
             if m_sd:
-                sd = bersihkan(m_sd.group(1)).rstrip(".,")
+                sd = bersihkan(m_sd.group(1)).rstrip(".,)(")
                 set_val("input_data", "E33", sd)
                 break
         if hasil["input_data"]["E33"]["status"] == "kosong":

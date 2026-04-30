@@ -182,10 +182,10 @@ Public Sub PilihDraftPaket(selectedLabel As String)
                 Else
                     .Range("E15").Value = CStr(item(11))
                 End If
-                ' Nama Dinas lengkap → F17 (SKPD/OPD)
+                ' SKPD/OPD → E17 (nama_dinas), F17 (nama lengkap sama)
+                .Range("E17").Value = CStr(item(9))
                 .Range("F17").Value = CStr(item(9))
-                ' Bidang (khusus PUPR: Bina Marga/SDA/CK) → E17, kosong jika bukan PUPR
-                .Range("E17").Value = CStr(item(16))
+                ' Bidang PUPR (Bina Marga/SDA/CK) → tidak dipakai di E17 lagi
                 ' Nama PPK → E19 + F19 (gelar), NIP → E20, Nomor SK → E21
                 Dim ppkNama As String: ppkNama = Trim(CStr(item(10)))
                 Dim komaPos As Long: komaPos = InStr(ppkNama, ",")
