@@ -688,8 +688,7 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
     Dim jmlTidakAda As Integer: jmlTidakAda = 0
 
     ' ─── Bagian 1. Input Data ────────────────────────────────────────────────
-    TulisHeaderBagian wsHP, baris, "1. INPUT DATA"
-    baris = baris + 1
+    TulisHeaderBagian wsHP, 2, "1. INPUT DATA"
 
     ' Field dari Supabase — baca nilai langsung dari sheet "1. Input Data"
     Dim wsInp As Worksheet
@@ -755,9 +754,10 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
         End If
         Dim blokFake As String
         blokFake = "{""label"":""" & inpLabels(si) & """,""nilai"":""" & nilaiInp & """,""status"":""" & statusInp & """}"
-        TulisBarisHasil wsHP, baris, blokFake, inpCells(si), "1. Input Data", _
-                        jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
-        baris = baris + 1
+        If mdRowInp > 0 Then
+            TulisBarisHasil wsHP, mdRowInp, blokFake, inpCells(si), "1. Input Data", _
+                            jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
+        End If
     Next si
 
     ' Field dari PDF (E16 Kegiatan, E32 Lokasi, E33 Sumber Dana)
@@ -767,16 +767,22 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
     Dim idIdx As Integer
     For idIdx = 0 To 2
         Dim blokID As String: blokID = ExtractJSONBlok(jsonTeks, "input_data", idKeys(idIdx))
-        TulisBarisHasil wsHP, baris, blokID, idKeys(idIdx), "1. Input Data", _
-                        jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
-        baris = baris + 1
+        Dim mdRowPdf As Integer
+        Select Case idKeys(idIdx)
+            Case "E16": mdRowPdf = MD_E16
+            Case "E32": mdRowPdf = MD_E32
+            Case "E33": mdRowPdf = MD_E33
+        End Select
+        If mdRowPdf > 0 Then
+            TulisBarisHasil wsHP, mdRowPdf, blokID, idKeys(idIdx), "1. Input Data", _
+                            jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
+        End If
     Next idIdx
 
     baris = baris + 1
 
     ' ─── Bagian database_reviu ────────────────────────────────────────────────
-    TulisHeaderBagian wsHP, baris, "DATABASE REVIU"
-    baris = baris + 1
+    TulisHeaderBagian wsHP, 24, "DATABASE REVIU"
 
     Dim revKeys(27) As String
     revKeys(0)  = "E2":  revKeys(1)  = "E6":  revKeys(2)  = "E7"
@@ -793,20 +799,50 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
     Dim k As Integer
     For k = 0 To 27
         Dim blok As String: blok = ExtractJSONBlok(jsonTeks, "reviu", revKeys(k))
-        TulisBarisHasil wsHP, baris, blok, revKeys(k), "database_reviu", _
-                        jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
-        baris = baris + 1
+        Dim mdRowRev As Integer
+        Select Case revKeys(k)
+            Case "E2": mdRowRev = MD_R_E2
+            Case "E6": mdRowRev = MD_R_E6
+            Case "E7": mdRowRev = MD_R_E7
+            Case "E9": mdRowRev = MD_R_E9
+            Case "E10": mdRowRev = MD_R_E10
+            Case "E11": mdRowRev = MD_R_E11
+            Case "E12": mdRowRev = MD_R_E12
+            Case "E13": mdRowRev = MD_R_E13
+            Case "E14": mdRowRev = MD_R_E14
+            Case "E15": mdRowRev = MD_R_E15
+            Case "E16": mdRowRev = MD_R_E16
+            Case "E17": mdRowRev = MD_R_E17
+            Case "E18": mdRowRev = MD_R_E18
+            Case "E19": mdRowRev = MD_R_E19
+            Case "E20": mdRowRev = MD_R_E20
+            Case "E21": mdRowRev = MD_R_E21
+            Case "E22": mdRowRev = MD_R_E22
+            Case "E23": mdRowRev = MD_R_E23
+            Case "E24": mdRowRev = MD_R_E24
+            Case "E25": mdRowRev = MD_R_E25
+            Case "E26": mdRowRev = MD_R_E26
+            Case "E27": mdRowRev = MD_R_E27
+            Case "E28": mdRowRev = MD_R_E28
+            Case "E29": mdRowRev = MD_R_E29
+            Case "E30": mdRowRev = MD_R_E30
+            Case "E31": mdRowRev = MD_R_E31
+            Case "E32": mdRowRev = MD_R_E32
+            Case "E33": mdRowRev = MD_R_E33
+            Case Else: mdRowRev = 0
+        End Select
+        If mdRowRev > 0 Then
+            TulisBarisHasil wsHP, mdRowRev, blok, revKeys(k), "database_reviu", _
+                            jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
+        End If
     Next k
     ' E34
     Dim blok34 As String: blok34 = ExtractJSONBlok(jsonTeks, "reviu", "E34")
-    TulisBarisHasil wsHP, baris, blok34, "E34", "database_reviu", _
+    TulisBarisHasil wsHP, MD_R_E34, blok34, "E34", "database_reviu", _
                     jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
-    baris = baris + 1
 
     ' ─── Bagian database_dokpil ───────────────────────────────────────────────
-    baris = baris + 1
-    TulisHeaderBagian wsHP, baris, "DATABASE DOKPIL"
-    baris = baris + 1
+    TulisHeaderBagian wsHP, 55, "DATABASE DOKPIL"
 
     Dim dpKeys(10) As String
     dpKeys(0) = "E6":  dpKeys(1) = "E7":  dpKeys(2) = "E8"
@@ -817,17 +853,34 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
     Dim j As Integer
     For j = 0 To 10
         Dim blokD As String: blokD = ExtractJSONBlok(jsonTeks, "dokpil", dpKeys(j))
-        TulisBarisHasil wsHP, baris, blokD, dpKeys(j), "database_dokpil", _
-                        jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
-        baris = baris + 1
+        Dim mdRowDok As Integer
+        Select Case dpKeys(j)
+            Case "E6": mdRowDok = MD_D_E6
+            Case "E7": mdRowDok = MD_D_E7
+            Case "E8": mdRowDok = MD_D_E8
+            Case "E9": mdRowDok = MD_D_E9
+            Case "E10": mdRowDok = MD_D_E10
+            Case "E11": mdRowDok = MD_D_E11
+            Case "E12": mdRowDok = MD_D_E12
+            Case "E13": mdRowDok = MD_D_E13
+            Case "E14": mdRowDok = MD_D_E14
+            Case "E15": mdRowDok = MD_D_E15
+            Case "E16": mdRowDok = MD_D_E16
+            Case Else: mdRowDok = 0
+        End Select
+        If mdRowDok > 0 Then
+            TulisBarisHasil wsHP, mdRowDok, blokD, dpKeys(j), "database_dokpil", _
+                            jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
+        End If
     Next j
+
 
     ' Format kolom
     wsHP.Columns("A").ColumnWidth = 35
     wsHP.Columns("B").ColumnWidth = 20
     wsHP.Columns("C").ColumnWidth = 60
     wsHP.Columns("D").ColumnWidth = 15
-    wsHP.Range("C2:C" & baris).WrapText = False
+    wsHP.Range("C2:C70").WrapText = False
 
     ' Cek apakah MsgBox sudah pernah ditampilkan (flag di A1 comment)
     Dim sudahTampil As Boolean
@@ -1351,9 +1404,8 @@ Private Function ParseDraftJSON(json As String) As Collection
     Dim scanPos As Long
     Dim ch As String
     Dim obj As String
-    Dim item(16) As Variant
-
     Do
+        Dim item(16) As Variant
         braceStart = InStr(pos, json, "{")
         If braceStart = 0 Then Exit Do
         ' Cari matching } dengan brace counting (skip isi string)
