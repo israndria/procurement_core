@@ -1,16 +1,17 @@
 """
-parse_reviu.py — Parse Draft_Pokja_XXX.pdf → isi database_reviu + database_dokpil
-====================================================================================
-Dipanggil dari VBA ModDraftPaket via WScript.Shell:
-  python parse_reviu.py "<path_pdf>" "<kode_pokja>" "<folder_output>"
-
-Output: <folder_output>/_parse_reviu.json
+parse_reviu.py — Parse Dokumen Tender (Single PDF or Directory) → isi database_reviu + database_dokpil
+====================================================================================================
+Optimasi untuk Pokja 030:
+1. Mendukung scan folder untuk file spesifik (Daftar Peralatan, Personil, Kuantitas, dll).
+2. Perbaikan regex dan table extractor untuk struktur tabel yang terpecah (multi-line cells).
+3. Penanganan "Resiko Tertinggi" pada RK3K yang lebih presisi.
 """
 
 import sys
 import os
 import json
 import re
+from bs4 import BeautifulSoup
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -42,7 +43,6 @@ def fetch_cara_pembayaran():
             return r.json()
     except Exception:
         pass
-    # Fallback hardcode jika Supabase tidak tersedia
     return [
         {
             "id": "monthly_certificate",
@@ -57,51 +57,294 @@ def fetch_cara_pembayaran():
     ]
 
 def deteksi_cara_pembayaran(daftar_cp, bidang=""):
-    """
-    Deteksi cara pembayaran berdasarkan bidang paket (dari Supabase).
-    - Bina Marga (jalan/jembatan) → Monthly Certificate (MC)
-    - Semua bidang lain (SDA, CK, irigasi, bangunan, drainase,
-      pendidikan, perdagangan, dll) → Termin
-    """
     bidang_lower = (bidang or "").lower().strip()
-
-    # Kata kunci yang mengindikasikan Bina Marga / pekerjaan jalan
-    KEYWORD_BINAMARGA = [
-        "bina marga", "jalan", "jembatan", "perkerasan", "rigid", "flexible",
-        "hotmix", "aspal", "overlay"
-    ]
+    KEYWORD_BINAMARGA = ["bina marga", "jalan", "jembatan", "perkerasan", "rigid", "flexible", "hotmix", "aspal", "overlay"]
     is_binamarga = any(kw in bidang_lower for kw in KEYWORD_BINAMARGA)
     id_pilih = "monthly_certificate" if is_binamarga else "termin"
-
     for cp in daftar_cp:
         if cp["id"] == id_pilih:
             return cp["id"], cp["teks"]
-
     return daftar_cp[0]["id"], daftar_cp[0]["teks"]
 
-# ─── Helpers teks ────────────────────────────────────────────────────────────
+# ─── Helpers ────────────────────────────────────────────────────────────
 def bersihkan(s):
-    return " ".join(s.split()).strip()
+    if not s: return ""
+    return " ".join(str(s).split()).strip()
 
 def normalisasi_pengalaman(s):
-    m = re.search(r"(\d+)", s or "")
+    if not s: return 0
+    s = str(s).lower()
+    if "-" in s or "0" in s or not any(c.isdigit() for c in s): return 0
+    m = re.search(r"(\d+)", s)
     return int(m.group(1)) if m else 0
 
-# ─── Parser utama PDF ────────────────────────────────────────────────────────
-def parse_pdf(path_pdf, bidang=""):
+def find_files_by_keywords(directory, keywords):
+    """Mencari file dalam folder yang mengandung salah satu keyword."""
+    found = []
+    if not os.path.isdir(directory): return found
+    for f in os.listdir(directory):
+        if not f.lower().endswith(".pdf"): continue
+        if any(kw.lower() in f.lower() for kw in keywords):
+            found.append(os.path.join(directory, f))
+    return found
+
+# ─── Logic Parsers Per Bagian ───────────────────────────────────────────────
+
+def _parse_fung_bangunan(pdf, hasil):
+    """E2: Fungsi Bangunan"""
+    semua_halaman = [p.extract_text() or "" for p in pdf.pages]
+    for teks in semua_halaman:
+        # Pola Pekerjaan : [Nama Pekerjaan]
+        m_pek = re.search(r"Pekerjaan\s*[:/]\s*([^\n]{10,200})", teks, re.IGNORECASE)
+        if m_pek:
+            val = bersihkan(m_pek.group(1))
+            if "tujuan" not in val.lower() and len(val) > 10:
+                hasil["reviu"]["E2"]["nilai"] = val
+                hasil["reviu"]["E2"]["status"] = "terisi"
+                return True
+                
+        # Pola Tujuan / Maksud
+        m = re.search(r"(?:Tujuan|Maksud)\s*[:/]?\s*\n*(.*?)(?=\n\s*\d+\.|\Z)", teks, re.DOTALL | re.IGNORECASE)
+        if m:
+            val = bersihkan(m.group(1))
+            if len(val) > 20:
+                hasil["reviu"]["E2"]["nilai"] = val
+                hasil["reviu"]["E2"]["status"] = "terisi"
+                return True
+    return False
+
+def _parse_peralatan(pdf, hasil):
+    """E9-E26: Peralatan"""
+    alat_list = []
+    for page in pdf.pages:
+        txt = (page.extract_text() or "").lower()
+        if "peralatan" in txt:
+            tables = page.extract_tables()
+            for table in tables:
+                if not table or len(table) < 2: continue
+                
+                # Deteksi index kolom
+                idx_nama = -1; idx_kap = -1; idx_jml = -1
+                header = [str(c or "").lower() for c in table[0]]
+                for i, c in enumerate(header):
+                    if any(kw in c for kw in ["jenis", "nama", "peralatan"]): idx_nama = i
+                    if any(kw in c for kw in ["kapasitas", "ukuran"]): idx_kap = i
+                    if any(kw in c for kw in ["jumlah", "qty"]): idx_jml = i
+                
+                if idx_nama == -1: continue # Bukan tabel peralatan
+                
+                for row in table[1:]:
+                    if len(row) <= idx_nama: continue
+                    nama = str(row[idx_nama] or "").strip()
+                    if not nama or nama.isdigit() or len(nama) < 3: continue
+                    if any(kw in nama.lower() for kw in ["no", "jenis", "peralatan", "nama"]): continue
+                    
+                    # Cek jika ada multiple item dalam satu baris (biasanya terpisah \n di PDF)
+                    namas = [v.strip() for v in str(row[idx_nama] or "").split("\n") if len(v.strip()) > 2]
+                    kaps = [v.strip() for v in str(row[idx_kap] or "").split("\n")] if idx_kap != -1 else [""] * len(namas)
+                    jmls = [v.strip() for v in str(row[idx_jml] or "").split("\n")] if idx_jml != -1 else ["1"] * len(namas)
+                    
+                    for i, n_item in enumerate(namas):
+                        n = bersihkan(n_item)
+                        if not n or n.isdigit() or any(kw in n.lower() for kw in ["no", "jenis", "peralatan", "nama"]): continue
+                        
+                        k = bersihkan(kaps[i]) if i < len(kaps) else (bersihkan(" ".join(kaps)) if i == 0 else "")
+                        j = bersihkan(jmls[i]) if i < len(jmls) else (bersihkan(" ".join(jmls)) if i == 0 else "1 Unit")
+                        
+                        if not any(c.isdigit() for c in j): j = "1 Unit"
+                        elif "unit" not in j.lower(): j += " Unit"
+                        
+                        alat_list.append({"nama": n, "kapasitas": k, "jumlah": j})
+            if len(alat_list) >= 2: break
+
+    # Isi ke hasil
+    ALAT_CELLS  = ["E9","E10","E11","E12","E13","E14"]
+    KAP_CELLS   = ["E15","E16","E17","E18","E19","E20"]
+    JML_CELLS   = ["E21","E22","E23","E24","E25","E26"]
+    for i, alat in enumerate(alat_list[:6]):
+        hasil["reviu"][ALAT_CELLS[i]]["nilai"] = alat["nama"]
+        hasil["reviu"][ALAT_CELLS[i]]["status"] = "terisi"
+        hasil["reviu"][KAP_CELLS[i]]["nilai"] = alat["kapasitas"]
+        hasil["reviu"][KAP_CELLS[i]]["status"] = "terisi"
+        hasil["reviu"][JML_CELLS[i]]["nilai"] = alat["jumlah"]
+        hasil["reviu"][JML_CELLS[i]]["status"] = "terisi"
+    for i in range(len(alat_list), 6):
+        hasil["reviu"][ALAT_CELLS[i]]["status"] = "tidak_ada"
+        hasil["reviu"][KAP_CELLS[i]]["status"] = "tidak_ada"
+        hasil["reviu"][JML_CELLS[i]]["status"] = "tidak_ada"
+    return len(alat_list) > 0
+
+def _parse_personil(pdf, hasil):
+    """E27-E32: Personil"""
+    personil_list = []
+    for page in pdf.pages:
+        txt = (page.extract_text() or "").lower()
+        if "personil" in txt or "jabatan" in txt:
+            tables = page.extract_tables()
+            for table in tables:
+                if not table or len(table) < 2: continue
+                idx_jab = -1; idx_exp = -1; idx_sert = -1
+                header = [str(c or "").lower() for c in table[0]]
+                for i, c in enumerate(header):
+                    if "jabatan" in c: idx_jab = i
+                    if "pengalaman" in c: idx_exp = i
+                    if any(kw in c for kw in ["keterangan", "sertifikat", "skk", "skt", "bukti"]): idx_sert = i
+                
+                if idx_jab == -1: continue
+                
+                for row in table[1:]:
+                    if len(row) <= idx_jab: continue
+                    jab_raw = str(row[idx_jab] or "").strip()
+                    if not jab_raw or len(jab_raw) < 3 or any(kw in jab_raw.lower() for kw in ["no", "jabatan"]): continue
+                    
+                    # Split jika ada multiple jabatan di satu baris
+                    jabs = [j.strip() for j in jab_raw.split("\n") if len(j.strip()) > 3]
+                    exps_raw = str(row[idx_exp] or "").split("\n") if idx_exp != -1 else ["0"]
+                    srts_raw = str(row[idx_sert] or "").split("\n") if idx_sert != -1 else [""]
+                    
+                    for i, jb in enumerate(jabs):
+                        ex_val = exps_raw[i] if i < len(exps_raw) else exps_raw[-1]
+                        ex = normalisasi_pengalaman(ex_val)
+                        
+                        # Assign sertifikat: jika 2 jabatan 4 baris, bagi 2-2.
+                        step = len(srts_raw) // len(jabs) if len(jabs) > 0 else 1
+                        st = " ".join(srts_raw[i*step : (i+1)*step]) if step > 0 else " ".join(srts_raw)
+                        personil_list.append({"jabatan": bersihkan(jb), "pengalaman": ex, "sertifikat": bersihkan(st)})
+            if personil_list: break
+
+    # Pisahkan Teknis vs K3
+    p_teknis = None; p_k3 = None
+    for p in personil_list:
+        if any(kw in p["jabatan"].lower() for kw in ["k3", "keselamatan", "hse"]):
+            if not p_k3: p_k3 = p
+        else:
+            if not p_teknis: p_teknis = p
+            
+    if p_teknis:
+        hasil["reviu"]["E27"]["nilai"] = p_teknis["jabatan"]
+        hasil["reviu"]["E27"]["status"] = "terisi"
+        hasil["reviu"]["E28"]["nilai"] = p_teknis["pengalaman"]
+        hasil["reviu"]["E28"]["status"] = "terisi"
+        hasil["reviu"]["E29"]["nilai"] = p_teknis["sertifikat"]
+        hasil["reviu"]["E29"]["status"] = "terisi"
+    if p_k3:
+        hasil["reviu"]["E30"]["nilai"] = p_k3["jabatan"]
+        hasil["reviu"]["E30"]["status"] = "terisi"
+        hasil["reviu"]["E31"]["nilai"] = p_k3["pengalaman"]
+        hasil["reviu"]["E31"]["status"] = "terisi"
+        hasil["reviu"]["E32"]["nilai"] = p_k3["sertifikat"]
+        hasil["reviu"]["E32"]["status"] = "terisi"
+    return p_teknis is not None or p_k3 is not None
+
+def _parse_rk3k(pdf, hasil):
+    """E33-E34: RK3K"""
+    bahaya_list = []
+    risiko_tertinggi_bahaya = ""
+    risiko_tertinggi_uraian = ""
+    
+    for page in pdf.pages:
+        teks = page.extract_text() or ""
+        if "RK3" in teks or ("Keselamatan" in teks and "Bahaya" in teks):
+            table = page.extract_table()
+            if table:
+                idx_no = 0; idx_uraian = 1; idx_detail = 2; idx_bahaya = 3; idx_risiko = -1
+                header = [str(c or "").lower() for c in table[0]]
+                
+                # Cari index kolom secara dinamis
+                for ii, col in enumerate(header):
+                    if "no" == col.strip(): idx_no = ii
+                    if "identifikasi" in col and "bahaya" in col: idx_bahaya = ii
+                    if "uraian" in col and "pekerjaan" in col: idx_uraian = ii
+                    if "detail" in col or "item" in col: idx_detail = ii
+                    if any(kw in col for kw in ["keterangan", "risiko", "tingkat", "level"]): idx_risiko = ii
+                
+                # Jika detail tidak ketemu, coba cari kolom setelah uraian
+                if idx_detail == -1 and idx_uraian != -1 and len(header) > idx_uraian + 1:
+                    idx_detail = idx_uraian + 1
+                
+                for row in table[1:]:
+                    if len(row) > idx_bahaya:
+                        b_val = bersihkan(row[idx_bahaya])
+                        if b_val and len(b_val) > 5 and not b_val.isdigit() and "identifikasi" not in b_val.lower():
+                            bahaya_list.append(b_val)
+                            
+                            # Deteksi Resiko Tertinggi
+                            is_highest = False
+                            if idx_risiko != -1 and len(row) > idx_risiko:
+                                r_val = str(row[idx_risiko] or "").lower()
+                                high_keywords = [
+                                    "tertinggi", "besar", "sangat besar", "tinggi", "ekstrem", "kritis",
+                                    "high", "extreme", "major", "fatal", "sangat fatal", "meninggal", "cacat"
+                                ]
+                                if any(kw in r_val for kw in high_keywords):
+                                    is_highest = True
+                            
+                            if is_highest:
+                                # Ambil Uraian + Detail
+                                u_val = bersihkan(row[idx_uraian]) if idx_uraian != -1 else ""
+                                d_val = bersihkan(row[idx_detail]) if idx_detail != -1 else ""
+                                if u_val and d_val:
+                                    risiko_tertinggi_uraian = f"{u_val} ({d_val})"
+                                else:
+                                    risiko_tertinggi_uraian = u_val or d_val
+                                risiko_tertinggi_bahaya = b_val
+                                # Jangan break dulu, siapa tahu ada yang lebih 'tertinggi' (walau jarang)
+
+            # Fallback jika risiko tertinggi tidak ketemu di tabel tapi ada di text
+            if not risiko_tertinggi_bahaya:
+                m_rt = re.search(r"(?:Resiko|Tingkat\s+Risiko)\s+Tertinggi\s*[:\s]*([A-Z][^\n]{10,})", teks, re.IGNORECASE)
+                if m_rt: risiko_tertinggi_bahaya = bersihkan(m_rt.group(1))
+
+    if risiko_tertinggi_uraian:
+        hasil["reviu"]["E33"]["nilai"] = risiko_tertinggi_uraian
+        hasil["reviu"]["E33"]["status"] = "terisi"
+    elif bahaya_list:
+        # Fallback ke daftar bahaya jika tidak ada row khusus Resiko Tertinggi
+        hasil["reviu"]["E33"]["nilai"] = "\n".join(list(dict.fromkeys(bahaya_list))[:5])
+        hasil["reviu"]["E33"]["status"] = "terisi"
+
+    if risiko_tertinggi_bahaya:
+        hasil["reviu"]["E34"]["nilai"] = risiko_tertinggi_bahaya
+        hasil["reviu"]["E34"]["status"] = "terisi"
+        
+    return len(bahaya_list) > 0
+
+def _parse_dokpil_uraian(pdf, hasil):
+    """E6-E15 Dokpil: Uraian Pekerjaan (Divisi)"""
+    divisi_list = []
+    for teks in [p.extract_text() or "" for p in pdf.pages]:
+        # Cari Roman Numerals I, II, III... yang diawal baris
+        # Gunakan [A-Z ] (spasi literal) bukan \s agar tidak tembus \n
+        matches = re.findall(r"^[ \t]*([IVXLC]+\.?)[ \t]+([A-Z][A-Z \/,()&]{5,100})", teks, re.MULTILINE)
+        for m in matches:
+            rom, desc = m
+            desc = bersihkan(desc)
+            if desc and desc not in divisi_list and len(desc) > 3:
+                if any(kw in desc.lower() for kw in ["pekerjaan", "divisi", "umum", "galian", "tanah", "aspal", "beton", "persiapan"]):
+                    divisi_list.append(desc)
+        if len(divisi_list) >= 2: break
+        
+    DOKPIL_CELLS = ["E6","E7","E8","E9","E10","E11","E12","E13","E14","E15"]
+    for i, div in enumerate(divisi_list[:10]):
+        hasil["dokpil"][DOKPIL_CELLS[i]]["nilai"] = div
+        hasil["dokpil"][DOKPIL_CELLS[i]]["status"] = "terisi"
+    for i in range(len(divisi_list), 10):
+        hasil["dokpil"][DOKPIL_CELLS[i]]["status"] = "tidak_ada"
+    return len(divisi_list) > 0
+
+# ─── Parser Utama ────────────────────────────────────────────────────────────
+
+def parse_pdf_enhanced(path_or_dir, bidang=""):
     try:
         import pdfplumber
-    except ImportError:
-        return None, "pdfplumber tidak tersedia"
+    except ImportError: return None, "pdfplumber tidak tersedia"
 
     hasil = {
-        # input_data (1. Input Data)
         "input_data": {
             "E16": {"nilai": "", "status": "kosong", "label": "Kegiatan/Sub Kegiatan"},
             "E32": {"nilai": "", "status": "kosong", "label": "Lokasi Pekerjaan"},
             "E33": {"nilai": "", "status": "kosong", "label": "Sumber Dana"},
         },
-        # database_reviu
         "reviu": {
             "E2":  {"nilai": "", "status": "kosong", "label": "Fungsi Bangunan"},
             "E6":  {"nilai": "", "status": "kosong", "label": "SBU KBLI 2020"},
@@ -133,7 +376,6 @@ def parse_pdf(path_pdf, bidang=""):
             "E33": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan RK3"},
             "E34": {"nilai": "", "status": "kosong", "label": "Risiko Tertinggi RK3"},
         },
-        # database_dokpil
         "dokpil": {
             "E6":  {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 1"},
             "E7":  {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 2"},
@@ -150,300 +392,71 @@ def parse_pdf(path_pdf, bidang=""):
         "error": ""
     }
 
-    def set_val(sheet, cell, nilai, status="terisi"):
-        hasil[sheet][cell]["nilai"] = nilai
-        hasil[sheet][cell]["status"] = status
+    # 1. Identifikasi file sumber
+    base_dir = path_or_dir if os.path.isdir(path_or_dir) else os.path.dirname(path_or_dir)
+    file_map = {
+        "alat": find_files_by_keywords(base_dir, ["Peralatan", "Alat"]),
+        "personil": find_files_by_keywords(base_dir, ["Personil", "Tenaga"]),
+        "rk3k": find_files_by_keywords(base_dir, ["RK3K", "Keselamatan"]),
+        "dokpil": find_files_by_keywords(base_dir, ["Kuantitas", "BoQ", "RAB"]),
+        "uraian": find_files_by_keywords(base_dir, ["Uraian Singkat", "KAK", "Spek"]),
+        "merged": [path_or_dir] if os.path.isfile(path_or_dir) else find_files_by_keywords(base_dir, ["Draft_Pokja"])
+    }
 
-    with pdfplumber.open(path_pdf) as pdf:
-        semua_halaman = [p.extract_text() or "" for p in pdf.pages]
-        semua_teks = "\n".join(semua_halaman)
+    # 2. Eksekusi Parsing Berdasarkan File Spesifik
+    
+    # Fungsi Bangunan (E2)
+    for f in (file_map["uraian"] + file_map["merged"]):
+        with pdfplumber.open(f) as pdf:
+            if _parse_fung_bangunan(pdf, hasil): break
+            
+    # Peralatan (E9-E26)
+    for f in (file_map["alat"] + file_map["merged"]):
+        with pdfplumber.open(f) as pdf:
+            if _parse_peralatan(pdf, hasil): break
+            
+    # Personil (E27-E32)
+    for f in (file_map["personil"] + file_map["merged"]):
+        with pdfplumber.open(f) as pdf:
+            if _parse_personil(pdf, hasil): break
+            
+    # RK3K (E33-E34)
+    for f in (file_map["rk3k"] + file_map["merged"]):
+        with pdfplumber.open(f) as pdf:
+            if _parse_rk3k(pdf, hasil): break
+            
+    # Dokpil Uraian (E6-E15)
+    for f in (file_map["dokpil"] + file_map["merged"]):
+        with pdfplumber.open(f) as pdf:
+            if _parse_dokpil_uraian(pdf, hasil): break
 
-        # ── input_data E16: Kegiatan / Sub Kegiatan ──────────────────────────
-        kegiatan_val = ""
-        sub_keg_val  = ""
-        for teks in semua_halaman:
-            if "Kegiatan" not in teks:
-                continue
-            # Cari "Sub Kegiatan" dulu (lebih spesifik) agar tidak tersedot oleh "Kegiatan"
-            m_sub = re.search(r"Sub\s+Kegiatan\s*[:/]\s*([^\n]+)", teks, re.IGNORECASE)
-            # Cari "Kegiatan" yang bukan bagian dari "Sub Kegiatan"
-            m_keg = re.search(r"(?<!Sub\s)(?<!Sub )Kegiatan\s*[:/]\s*([^\n]+)", teks, re.IGNORECASE)
-            if not m_keg:
-                # fallback: ambil baris "Kegiatan" pertama yang tidak diawali "Sub"
-                m_keg = re.search(r"^(?!.*Sub\s+Kegiatan).*Kegiatan\s*[:/]\s*([^\n]+)", teks, re.IGNORECASE | re.MULTILINE)
-            if m_sub:
-                sub_keg_val = bersihkan(m_sub.group(1))
-            if m_keg:
-                kegiatan_val = bersihkan(m_keg.group(1))
-            if kegiatan_val or sub_keg_val:
-                break
-        if kegiatan_val or sub_keg_val:
-            if kegiatan_val and sub_keg_val:
-                gabung = kegiatan_val + " / " + sub_keg_val
-            else:
-                gabung = kegiatan_val or sub_keg_val
-            set_val("input_data", "E16", gabung)
-        else:
-            hasil["input_data"]["E16"]["status"] = "tidak_ada"
+    # 3. Common Fields (Input Data) dari file Merged atau Uraian
+    for f in (file_map["uraian"] + file_map["merged"]):
+        with pdfplumber.open(f) as pdf:
+            txt = "\n".join([p.extract_text() or "" for p in pdf.pages[:10]])
+            # Lokasi
+            if not hasil["input_data"]["E32"]["nilai"]:
+                m_lok = re.search(r"Lokasi\s*[:/]\s*([^\n]{5,100})", txt, re.IGNORECASE)
+                if m_lok:
+                    hasil["input_data"]["E32"]["nilai"] = bersihkan(m_lok.group(1))
+                    hasil["input_data"]["E32"]["status"] = "terisi"
+            # Sumber Dana
+            if not hasil["input_data"]["E33"]["nilai"]:
+                m_sd = re.search(r"(APBD|APBN)\s+(?:Tahun\s+)?(\d{4})", txt, re.IGNORECASE)
+                if m_sd:
+                    hasil["input_data"]["E33"]["nilai"] = f"{m_sd.group(1)} {m_sd.group(2)}"
+                    hasil["input_data"]["E33"]["status"] = "terisi"
 
-        # ── input_data E32: Lokasi Pekerjaan ─────────────────────────────────
-        for teks in semua_halaman:
-            m_lok = re.search(
-                r"(?:Lokasi\s+(?:Kegiatan|Pekerjaan|Kerja)?\s*[:/]\s*|"
-                r"dilaksanakan\s+di\s+)([^\n]{5,120})",
-                teks, re.IGNORECASE
-            )
-            if m_lok:
-                lok = bersihkan(m_lok.group(1)).rstrip(".,")
-                if len(lok) > 3:
-                    set_val("input_data", "E32", lok)
-                    break
-        if hasil["input_data"]["E32"]["status"] == "kosong":
-            hasil["input_data"]["E32"]["status"] = "tidak_ada"
-
-        # ── input_data E33: Sumber Dana ───────────────────────────────────────
-        for teks in semua_halaman:
-            m_sd = re.search(
-                r"(?:Sumber\s+[Dd]ana|Sumber\s+[Aa]nggaran|dibiayai\s+dari)\s*[:/]?\s*"
-                r"((?:APBD|APBN)\s+(?:Kabupaten|Kota|Provinsi|Pusat|Tahun)?[^(\n]{0,60})",
-                teks, re.IGNORECASE
-            )
-            if m_sd:
-                sd = bersihkan(m_sd.group(1)).rstrip(".,)(")
-                set_val("input_data", "E33", sd)
-                break
-        if hasil["input_data"]["E33"]["status"] == "kosong":
-            hasil["input_data"]["E33"]["status"] = "tidak_ada"
-
-        # ── E2: Fungsi Bangunan (ambil dari Tujuan / Maksud) ─────────────────
-        for teks in semua_halaman:
-            m = re.search(
-                r"(?:2\.2\s+Tujuan|Tujuan\s*\n+)(.*?)(?=\n\s*2\.\d|\n\s*\d+\.|\Z)",
-                teks, re.DOTALL | re.IGNORECASE
-            )
-            if m:
-                tujuan = bersihkan(m.group(1))
-                if len(tujuan) > 20:
-                    set_val("reviu", "E2", tujuan)
-                    break
-        # Fallback: seksi Maksud
-        if not hasil["reviu"]["E2"]["nilai"]:
-            for teks in semua_halaman:
-                m = re.search(
-                    r"(?:2\.1\s+Maksud|Maksud\s*\n+)(.*?)(?=\n\s*2\.\d|\n\s*\d+\.|\Z)",
-                    teks, re.DOTALL | re.IGNORECASE
-                )
-                if m:
-                    maksud = bersihkan(m.group(1))
-                    if len(maksud) > 20:
-                        set_val("reviu", "E2", maksud)
-                        break
-
-        # ── E6/E7: SBU — cari di PDF, fallback "perlu_keputusan" ─────────────
-        # Pola umum di KAK: "SBU : BS001" atau "Kode SBU BS 001" atau "BS001"
-        sbu_found = []
-        for teks in semua_halaman:
-            # Cari pola kode SBU: kombinasi 2 huruf + 3 digit (misal BS001, SI001, SP002)
-            hits = re.findall(
-                r'\bSBU\b[^A-Z0-9]*([A-Z]{2}\d{3})\b'   # "SBU BS001"
-                r'|\bKode\s+SBU[^A-Z0-9]*([A-Z]{2}\d{3})\b'  # "Kode SBU BS001"
-                r'|\b([A-Z]{2}\d{3})\b(?=[^)]*(?:SBU|Subkualifikasi|Bangunan Sipil|Bangunan Gedung))',
-                teks
-            )
-            for h in hits:
-                kode = (h[0] or h[1] or h[2]).strip()
-                if kode and kode not in sbu_found:
-                    sbu_found.append(kode)
-            if sbu_found:
-                break
-
-        if len(sbu_found) >= 2:
-            set_val("reviu", "E6", sbu_found[0])   # KBLI 2020
-            set_val("reviu", "E7", sbu_found[1])   # KBLI 2015
-        elif len(sbu_found) == 1:
-            set_val("reviu", "E6", sbu_found[0])
-            set_val("reviu", "E7", "", "perlu_keputusan")
-        else:
-            # Tidak ditemukan di PDF — perlu diisi manual
-            set_val("reviu", "E6", "", "perlu_keputusan")
-            set_val("reviu", "E7", "", "perlu_keputusan")
-
-        # ── E9-E26: Tabel Peralatan ───────────────────────────────────────────
-        alat_list = []
-        for teks in semua_halaman:
-            if "Peralatan" in teks and ("Kapasitas" in teks or "Kode" in teks or "unit" in teks.lower()):
-                # Cari baris tabel peralatan: "1. NamaAlat KodeAlat Kapasitas Jumlah"
-                baris_alat = re.findall(
-                    r"(\d+)[.\)]\s+([A-Za-z][A-Za-z0-9 \-/]+?)\s+(E\d+|[A-Z]\d+)?\s*(\d+[-–]\d+\s*[Tt]on|\d+\s*[Tt]on|\d+\s*[Kk][Ww]|\d+\s*[Mm]3/[Jj]am|\d+\s*[A-Za-z]+)?\s*(\d+)\s*(?:[Uu]nit|unit)?",
-                    teks
-                )
-                if baris_alat:
-                    for b in baris_alat:
-                        no, nama, kode, kapasitas, jumlah = b
-                        alat_list.append({
-                            "nama": bersihkan(nama),
-                            "kapasitas": bersihkan(kapasitas) if kapasitas else "",
-                            "jumlah": jumlah.strip() + " Unit" if jumlah else "1 Unit"
-                        })
-                    break
-
-        # Fallback: cari baris lebih sederhana
-        if not alat_list:
-            for teks in semua_halaman:
-                if "Tandem" in teks or "Vibratory" in teks or "Excavator" in teks or "Dump Truck" in teks:
-                    baris = re.findall(
-                        r"(\d+)[.\)]\s+(.+?)\s+(\d+[-–]\d+\s*[Tt]on|\d+\s*[Tt]on|\d+\s*[A-Za-z]+)?\s+(\d+)\s*$",
-                        teks, re.MULTILINE
-                    )
-                    for b in baris:
-                        no, nama, kapasitas, jumlah = b
-                        nama_bersih = bersihkan(nama)
-                        # Buang kode alat (E17, E19, dll) dari nama
-                        nama_bersih = re.sub(r'\b[A-Z]\d{2,3}\b', '', nama_bersih).strip()
-                        alat_list.append({
-                            "nama": nama_bersih,
-                            "kapasitas": bersihkan(kapasitas) if kapasitas else "",
-                            "jumlah": jumlah.strip() + " Unit"
-                        })
-                    if alat_list:
-                        break
-
-        ALAT_CELLS  = ["E9","E10","E11","E12","E13","E14"]
-        KAP_CELLS   = ["E15","E16","E17","E18","E19","E20"]
-        JML_CELLS   = ["E21","E22","E23","E24","E25","E26"]
-
-        for i, alat in enumerate(alat_list[:6]):
-            set_val("reviu", ALAT_CELLS[i], alat["nama"])
-            if alat["kapasitas"]:
-                set_val("reviu", KAP_CELLS[i], alat["kapasitas"])
-            set_val("reviu", JML_CELLS[i], alat["jumlah"])
-
-        # Sel alat yang tidak terisi → status "tidak_ada"
-        for i in range(len(alat_list), 6):
-            hasil["reviu"][ALAT_CELLS[i]]["status"] = "tidak_ada"
-            hasil["reviu"][KAP_CELLS[i]]["status"] = "tidak_ada"
-            hasil["reviu"][JML_CELLS[i]]["status"] = "tidak_ada"
-
-        # ── E27-E32: Tabel Personil ───────────────────────────────────────────
-        for teks in semua_halaman:
-            if "Personil" in teks and ("Jabatan" in teks or "Pelaksana" in teks or "K3" in teks):
-                # Jabatan teknis (bukan K3)
-                m_teknis = re.search(
-                    r"(\d+)\s+(Pelaksana\s+[^\n]+?(?:Jalan|Gedung|Saluran|Bangunan|Lapangan)[^\n]*?)\s+"
-                    r"(\d+)\s*[Tt]ahun\s+(SKK[^\n]+|SKT[^\n]+)",
-                    teks, re.IGNORECASE
-                )
-                if m_teknis:
-                    set_val("reviu", "E27", bersihkan(m_teknis.group(2)))
-                    set_val("reviu", "E28", normalisasi_pengalaman(m_teknis.group(3)))
-                    set_val("reviu", "E29", bersihkan(m_teknis.group(4)))
-                else:
-                    # Fallback lebih longgar
-                    m_teknis2 = re.search(
-                        r"1\s+(Pelaksana[^\n]+)\s+(\d+)\s*[Tt]ahun\s+(S\s*K\s*[KT][^\n]+)",
-                        teks, re.IGNORECASE
-                    )
-                    if m_teknis2:
-                        jabatan = bersihkan(m_teknis2.group(1))
-                        set_val("reviu", "E27", jabatan)
-                        set_val("reviu", "E28", normalisasi_pengalaman(m_teknis2.group(2)))
-                        # Normalisasi SKK/SKT: hapus spasi berlebih di dalam kata
-                        skk_raw = bersihkan(m_teknis2.group(3))
-                        skk_norm = re.sub(r'\bS\s*K\s*K\b', 'SKK', skk_raw, flags=re.IGNORECASE)
-                        skk_norm = re.sub(r'\bS\s*K\s*T\b', 'SKT', skk_norm, flags=re.IGNORECASE)
-                        set_val("reviu", "E29", skk_norm)
-
-                # Jabatan K3
-                m_k3 = re.search(
-                    r"(\d+)\s+(Petugas\s+K3|Ahli\s+K3[^\n]*)\s+(?:(\d+)\s*[Tt]ahun\s+)?(Sertifikat[^\n]+|SKA[^\n]+|SKK[^\n]+)",
-                    teks, re.IGNORECASE
-                )
-                if m_k3:
-                    set_val("reviu", "E30", bersihkan(m_k3.group(2)))
-                    set_val("reviu", "E31", normalisasi_pengalaman(m_k3.group(3) or "0"))
-                    set_val("reviu", "E32", bersihkan(m_k3.group(4)))
-                else:
-                    # Fallback: cari baris "Petugas K3" + baris berikutnya sebagai sertifikat
-                    m_k3b = re.search(r"(Petugas\s+K3|Ahli\s+K3)\s+(Sertifikat[^\n]+)", teks, re.IGNORECASE)
-                    if m_k3b:
-                        set_val("reviu", "E30", bersihkan(m_k3b.group(1)))
-                        set_val("reviu", "E32", bersihkan(m_k3b.group(2)))
-                        set_val("reviu", "E31", 0)
-
-                if hasil["reviu"]["E27"]["nilai"] or hasil["reviu"]["E30"]["nilai"]:
-                    break
-
-        # ── E33/E34: RK3K ─────────────────────────────────────────────────────
-        for teks in semua_halaman:
-            if "RK3" in teks or "Keselamatan" in teks and "Uraian Pekerjaan" in teks:
-                # Kumpulkan semua uraian pekerjaan dari tabel RK3K
-                uraian_list = re.findall(
-                    r"^\s*\d+[.\)]\s+([A-Z][^\n]{10,}?)(?=\s*[-–]|\s*$)",
-                    teks, re.MULTILINE
-                )
-                if uraian_list:
-                    uraian_gabung = "\n".join(u.strip() for u in uraian_list[:4])
-                    set_val("reviu", "E33", uraian_gabung)
-
-                # Risiko tertinggi: cari blok yang mengandung "Paling Tinggi"
-                # PDF struktur: "- Bahaya  Resiko\nPaling\nTinggi" atau inline
-                m_risiko = re.search(
-                    r"([-–]\s*[A-Z][^\n]{3,80}?)\s+Resiko[\s\n]*Paling[\s\n]*Tinggi",
-                    teks, re.IGNORECASE
-                )
-                if m_risiko:
-                    val = re.sub(r'\s+Resiko\s*$', '', bersihkan(m_risiko.group(1)), flags=re.IGNORECASE)
-                    set_val("reviu", "E34", val)
-                else:
-                    # Fallback: cari "Paling Tinggi" sebagai kata terpisah di baris manapun
-                    # lalu ambil teks identifikasi bahaya di baris/kolom sebelumnya
-                    idx = teks.lower().find("paling\ntinggi")
-                    if idx == -1:
-                        idx = teks.lower().find("paling tinggi")
-                    if idx > 0:
-                        potongan = teks[max(0, idx-200):idx]
-                        bahaya = re.findall(r"[-–]\s*([A-Z][^\n]{3,80})", potongan)
-                        if bahaya:
-                            set_val("reviu", "E34", "- " + bersihkan(bahaya[-1]))
-
-                if hasil["reviu"]["E33"]["nilai"] or hasil["reviu"]["E34"]["nilai"]:
-                    break
-
-        # ── database_dokpil E6-E15: Uraian Pekerjaan dari Divisi RAB ─────────
-        divisi_list = []
-        for teks in semua_halaman:
-            if "DIVISI" in teks and ("UMUM" in teks or "PERKERASAN" in teks or "REKAPITULASI" in teks):
-                # Cari pola: "DIVISI 1 UMUM", "DIVISI 4 PEKERJAAN PREVENTIF", dll
-                divisi_raw = re.findall(
-                    r"DIVISI\s+\d+[.\s]*([A-Z][A-Z\s/,()]+?)(?=\s*\.\s*\.|\s+DIVISI\s+\d|\s+[A-Z]\s+Jumlah|Jumlah\s+Harga|\n\n|$)",
-                    teks
-                )
-                for d in divisi_raw:
-                    d_bersih = bersihkan(d).rstrip(". ").lower()
-                    if d_bersih and d_bersih not in divisi_list and len(d_bersih) > 2:
-                        divisi_list.append(d_bersih)
-                if divisi_list:
-                    break
-
-        DOKPIL_CELLS = ["E6","E7","E8","E9","E10","E11","E12","E13","E14","E15"]
-        for i, div in enumerate(divisi_list[:10]):
-            set_val("dokpil", DOKPIL_CELLS[i], div)
-        for i in range(len(divisi_list), 10):
-            hasil["dokpil"][DOKPIL_CELLS[i]]["status"] = "tidak_ada"
-
-        # ── database_dokpil E16: Cara Pembayaran ─────────────────────────────
-        daftar_cp = fetch_cara_pembayaran()
-        id_cp, teks_cp = deteksi_cara_pembayaran(daftar_cp, bidang)
-        hasil["dokpil"]["E16"]["nilai"] = teks_cp
-        hasil["dokpil"]["E16"]["id_cp"] = id_cp
-        hasil["dokpil"]["E16"]["status"] = "terisi"
+    # 4. Cara Pembayaran
+    daftar_cp = fetch_cara_pembayaran()
+    id_cp, teks_cp = deteksi_cara_pembayaran(daftar_cp, bidang)
+    hasil["dokpil"]["E16"]["nilai"] = teks_cp
+    hasil["dokpil"]["E16"]["id_cp"] = id_cp
+    hasil["dokpil"]["E16"]["status"] = "terisi"
 
     return hasil, ""
 
-
-# ─── Main ────────────────────────────────────────────────────────────────────
 def main():
-    # Mode --argfile: baca path_pdf, folder_output, bidang dari file teks
     bidang = ""
     if len(sys.argv) >= 3 and sys.argv[1] == "--argfile":
         argfile = sys.argv[2]
@@ -457,26 +470,17 @@ def main():
         folder_output = sys.argv[2]
         bidang = sys.argv[3] if len(sys.argv) > 3 else ""
     else:
-        print("Usage: python parse_reviu.py <path_pdf> <folder_output> [bidang]")
+        print("Usage: python parse_reviu.py <path_pdf_or_dir> <folder_output> [bidang]")
         sys.exit(1)
 
-    if not os.path.exists(path_pdf):
-        out = {"error": f"File PDF tidak ditemukan: {path_pdf}", "reviu": {}, "dokpil": {}}
-        out_path = os.path.join(folder_output, "_parse_reviu.json")
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(out, f, ensure_ascii=False, indent=2)
-        sys.exit(0)
-
-    hasil, err = parse_pdf(path_pdf, bidang)
+    hasil, err = parse_pdf_enhanced(path_pdf, bidang)
     if err:
-        hasil = {"error": err, "reviu": {}, "dokpil": {}}
+        hasil = {"error": err, "reviu": {}, "dokpil": {}, "input_data": {}}
 
     out_path = os.path.join(folder_output, "_parse_reviu.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(hasil, f, ensure_ascii=False, indent=2)
-
     print(f"OK: {out_path}")
-
 
 if __name__ == "__main__":
     main()
