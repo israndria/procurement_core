@@ -78,16 +78,46 @@ def normalisasi_pengalaman(s):
     m = re.search(r"(\d+)", s)
     return int(m.group(1)) if m else 0
 
-def find_files_by_keywords(directory, keywords):
-    """Mencari file dalam folder yang mengandung salah satu keyword."""
-    found = []
-    if not os.path.isdir(directory): return found
-    for f in os.listdir(directory):
-        ext = f.lower().split(".")[-1]
-        if ext not in ["pdf", "docx", "xlsx", "xlsm"]: continue
-        if any(kw.lower() in f.lower() for kw in keywords):
-            found.append(os.path.join(directory, f))
-    return found
+def extract_rekap_from_xlsx(path):
+    try:
+        import pandas as pd
+        xl = pd.ExcelFile(path)
+        sheet_name = ""
+        for s in xl.sheet_names:
+            if any(kw in s.upper() for kw in ["REKAP", "BOQ", "DAFTAR", "KUANTITAS"]):
+                sheet_name = s
+                break
+        if not sheet_name: sheet_name = xl.sheet_names[0]
+        
+        df = pd.read_excel(path, sheet_name=sheet_name, header=None)
+        items = []
+        for index, row in df.iterrows():
+            # Gabungkan semua kolom dalam baris ini untuk mencari kata "DIVISI"
+            full_row_text = " ".join([str(v) for v in row if v and not pd.isna(v)])
+            
+            # Cari pola "DIVISI [X] [DESKRIPSI]"
+            m_div = re.search(r"(DIVISI\s+[\d\w]+)\s*(.*)", full_row_text, re.IGNORECASE)
+            if m_div:
+                div_num = m_div.group(1).upper()
+                div_desc = bersihkan(m_div.group(2))
+                
+                # Filter jika ternyata ini header (misal: DIVISI URAIAN)
+                if any(kw in div_desc.upper() for kw in ["URAIAN", "HARGA", "BOBOT", "KETERANGAN"]):
+                    continue
+                
+                # Bersihkan sisa-sisa karakter sampah di akhir
+                div_desc = re.sub(r"[\d.,\s-]+$", "", div_desc).strip()
+                
+                full_val = f"{div_num} {div_desc}".strip()
+                if len(full_val) > 8 and full_val not in items:
+                    items.append(full_val)
+            
+            # Fallback untuk pola Romawi
+            elif re.match(r"^[ \t]*([IVXLC]+\.?)[ \t]+([A-Z][A-Z \/,()&]{5,100})", full_row_text):
+                items.append(bersihkan(full_row_text))
+                
+        return items
+    except Exception: return []
 
 def extract_text_from_docx(path):
     try:
@@ -116,30 +146,25 @@ def extract_tables_from_docx(path):
         return tables
     except Exception: return []
 
-def extract_rekap_from_xlsx(path):
-    try:
-        import pandas as pd
-        # Cari sheet yang mengandung 'REKAP' atau 'BOQ'
-        xl = pd.ExcelFile(path)
-        sheet_name = ""
-        for s in xl.sheet_names:
-            if any(kw in s.upper() for kw in ["REKAP", "BOQ", "DAFTAR", "KUANTITAS"]):
-                sheet_name = s
-                break
-        if not sheet_name: sheet_name = xl.sheet_names[0]
-        
-        df = pd.read_excel(path, sheet_name=sheet_name, header=None)
-        items = []
-        for index, row in df.iterrows():
-            txt = str(row.iloc[1] or "").strip() # Biasanya kolom B (index 1) adalah Uraian
-            # Cari Roman Numerals
-            m = re.match(r"^([IVXLC]+\.?)\s+([A-Z][A-Z \/,()&]{5,100})", txt)
-            if m:
-                items.append(bersihkan(m.group(2)))
-            elif re.match(r"^DIVISI\s+\d+", txt, re.IGNORECASE):
-                items.append(bersihkan(txt))
-        return items
-    except Exception: return []
+def find_files_by_keywords(directory, keywords):
+    """Mencari file dengan prioritas format: xlsx > docx > pdf."""
+    found = []
+    if not os.path.isdir(directory): return found
+    
+    all_matching = []
+    for f in os.listdir(directory):
+        ext = f.lower().split(".")[-1]
+        if ext not in ["pdf", "docx", "xlsx", "xlsm"]: continue
+        if any(kw.lower() in f.lower() for kw in keywords):
+            priority = 0
+            if ext in ["xlsx", "xlsm"]: priority = 3
+            elif ext == "docx": priority = 2
+            elif ext == "pdf": priority = 1
+            all_matching.append((priority, os.path.join(directory, f)))
+            
+    # Sort berdasarkan priority DESC
+    all_matching.sort(key=lambda x: x[0], reverse=True)
+    return [x[1] for x in all_matching]
 
 # ─── Logic Parsers Per Bagian ───────────────────────────────────────────────
 
