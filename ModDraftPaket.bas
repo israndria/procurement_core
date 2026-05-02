@@ -293,15 +293,15 @@ Public Sub PilihDraftPaket(selectedLabel As String)
             ' Isi anggota pokja
             IsiAnggotaPokjaToMaster wsMD, CStr(item(13)), CStr(item(14)), CStr(item(15))
 
-            ' ── SBU Baru + SBU Lama → @ Master Data baris 39 & 40 ───────────
-            If CStr(item(17)) <> "" Then wsMD.Cells(MD_R_E20, 3).Value = CStr(item(17))
-            If CStr(item(18)) <> "" Then wsMD.Cells(MD_R_E21, 3).Value = CStr(item(18))
-
             ' ── Parse PDF → isi database_reviu + database_dokpil ──────────────
             Dim kodeTender As String: kodeTender = CStr(item(6))
             Dim kodePokja2 As String: kodePokja2 = CStr(item(0))
             Dim bidang2 As String: bidang2 = CStr(item(16))
             ParsaDanIsiDariPDF kodeTender, kodePokja2, bidang2
+
+            ' ── SBU → @ Master Data baris 39 (Lama) + 40 (Baru) — SETELAH parse PDF ──
+            If CStr(item(18)) <> "" Then wsMD.Cells(MD_R_E20, 3).Value = CStr(item(18))  ' SBU Lama → baris 39
+            If CStr(item(17)) <> "" Then wsMD.Cells(MD_R_E21, 3).Value = CStr(item(17))  ' SBU Baru → baris 40
 
             ' ── Muat HPS dari Supabase → isi sheet "5. HPS" ───────────────────
             MuatHPS kodeTender
