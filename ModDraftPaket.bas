@@ -300,8 +300,23 @@ Public Sub PilihDraftPaket(selectedLabel As String)
             ParsaDanIsiDariPDF kodeTender, kodePokja2, bidang2
 
             ' ── SBU → @ Master Data DATABASE REVIU: E6=SBU Baru (baris 26), E7=SBU Lama (baris 27) ──
-            If CStr(item(17)) <> "" Then wsMD.Cells(MD_R_E6, 3).Value = CStr(item(17))  ' SBU Baru (KBLI 2020) → baris 26
-            If CStr(item(18)) <> "" Then wsMD.Cells(MD_R_E7, 3).Value = CStr(item(18))  ' SBU Lama (KBLI 2015) → baris 27
+            Dim sbuBaru As String: sbuBaru = CStr(item(17))
+            Dim sbuLama As String: sbuLama = CStr(item(18))
+            If sbuBaru <> "" Then
+                wsMD.Cells(MD_R_E6, 3).Value = sbuBaru  ' SBU Baru (KBLI 2020) → baris 26
+                wsMD.Cells(MD_R_E6, 2).Value = "Terisi (Supabase)"
+            End If
+            If sbuLama <> "" Then
+                wsMD.Cells(MD_R_E7, 3).Value = sbuLama  ' SBU Lama (KBLI 2015) → baris 27
+                wsMD.Cells(MD_R_E7, 2).Value = "Terisi (Supabase)"
+            End If
+            ' Bersihkan baris 39 (E20) jika isinya adalah kode SBU yang salah tempat
+            Dim c39 As String: c39 = Trim(CStr(wsMD.Cells(MD_R_E20, 3).Value))
+            If Len(c39) = 5 And (Left(c39, 2) = "BS" Or Left(c39, 2) = "SI" Or Left(c39, 2) = "BG") Then
+                wsMD.Cells(MD_R_E20, 3).Value = ""
+            End If
+            ' Override baris SBU di _HasilParse agar status sinkron dengan Supabase
+            OverrideSBUdiHasilParse sbuBaru, sbuLama
 
             ' ── Muat HPS dari Supabase → isi sheet "5. HPS" ───────────────────
             MuatHPS kodeTender
@@ -665,13 +680,21 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
         End If
     End If
     wsHP.Visible = xlSheetVisible
-    ' Clear hanya kolom A,B,D mulai baris 2 (row 1 = header + dropdown E1, JANGAN hapus)
-    ' Kolom C juga JANGAN dihapus (data sudah ditulis sebelumnya)
+    ' Simpan nilai kolom C (INPUT DATA, baris 3-22) sebelum clear
+    Dim savedC(3 To 22) As Variant
+    Dim r As Integer
+    For r = 3 To 22
+        savedC(r) = wsHP.Cells(r, 3).Value
+    Next r
+    ' Clear layout A:D semua baris (kolom C diisi ulang: INPUT DATA dari saved, REVIU/DOKPIL dari JSON)
     wsHP.Range("A2:D70").UnMerge
-    wsHP.Range("A2:B70").ClearContents
-    wsHP.Range("D2:D70").ClearContents
+    wsHP.Range("A2:D70").ClearContents
     wsHP.Range("A2:D70").Interior.Pattern = xlNone
     wsHP.Range("A2:D70").Font.Bold = False
+    ' Kembalikan nilai INPUT DATA ke kolom C (akan di-override oleh TulisBarisHasil jika JSON punya nilai)
+    For r = 3 To 22
+        If savedC(r) <> "" Then wsHP.Cells(r, 3).Value = savedC(r)
+    Next r
 
     ' Header
     With wsHP
@@ -978,8 +1001,8 @@ Private Sub TulisBarisHasil(ws As Worksheet, baris As Integer, blok As String, _
         .Cells(baris, 1).Value = label & " (" & cellAddr & ")"
         .Cells(baris, 2).Value = statusTeks
         .Cells(baris, 2).Interior.Color = warna
-        ' Kolom C: tulis HANYA jika kosong (data bisa sudah diisi sebelumnya)
-        If Trim(CStr(.Cells(baris, 3).Value)) = "" Or Trim(CStr(.Cells(baris, 3).Value)) = "0" Then
+        ' Kolom C: tulis nilai dari JSON (kolom sudah di-clear sebelum TampilkanHasilParse)
+        If nilai <> "" And nilai <> "0" Then
             .Cells(baris, 3).Value = nilai
         End If
 
@@ -1045,6 +1068,19 @@ Private Function FileExists(path As String) As Boolean
 End Function
 
 Private Function BacaFile(path As String) As String
+    ' Baca file UTF-8 via ADODB.Stream agar karakter Unicode tidak rusak
+    On Error GoTo fallback
+    Dim stm As Object
+    Set stm = CreateObject("ADODB.Stream")
+    stm.Type = 2      ' adTypeText
+    stm.Charset = "utf-8"
+    stm.Open
+    stm.LoadFromFile path
+    BacaFile = stm.ReadText()
+    stm.Close
+    Exit Function
+fallback:
+    ' Fallback: VBA default (ANSI)
     Dim f As Integer: f = FreeFile
     Dim teks As String, baris As String
     Open path For Input As #f
@@ -1505,3 +1541,28 @@ Private Function ExtractJSONVal(json As String, key As String) As String
         ExtractJSONVal = Trim(Mid(json, p, endPos - p))
     End If
 End Function
+
+' ============================================================
+' Override baris SBU di _HasilParse setelah diisi dari Supabase
+' ============================================================
+Private Sub OverrideSBUdiHasilParse(sbuBaru As String, sbuLama As String)
+    Dim wsHP As Worksheet
+    On Error Resume Next
+    Set wsHP = ThisWorkbook.Sheets(MD_SHEET)
+    On Error GoTo 0
+    If wsHP Is Nothing Then Exit Sub
+
+    ' E6 = baris MD_R_E6 = 26 → override status + nilai dari Supabase
+    If sbuBaru <> "" Then
+        wsHP.Cells(MD_R_E6, 2).Value = "Terisi (Supabase)"
+        wsHP.Cells(MD_R_E6, 2).Interior.Color = RGB(198, 239, 206)
+        wsHP.Cells(MD_R_E6, 3).Value = sbuBaru
+    End If
+
+    ' E7 = baris MD_R_E7 = 27
+    If sbuLama <> "" Then
+        wsHP.Cells(MD_R_E7, 2).Value = "Terisi (Supabase)"
+        wsHP.Cells(MD_R_E7, 2).Interior.Color = RGB(198, 239, 206)
+        wsHP.Cells(MD_R_E7, 3).Value = sbuLama
+    End If
+End Sub

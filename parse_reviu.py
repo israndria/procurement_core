@@ -69,7 +69,17 @@ def deteksi_cara_pembayaran(daftar_cp, bidang=""):
 # ─── Helpers ────────────────────────────────────────────────────────────
 def bersihkan(s):
     if not s: return ""
-    return " ".join(str(s).split()).strip()
+    s = str(s)
+    # Fix encoding rusak: bytes UTF-8 dibaca sebagai latin-1/cp1252 (â€" → –)
+    try:
+        s = s.encode("latin-1").decode("utf-8")
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass
+    # Fix � (replacement char) yang muncul di antara angka → en dash
+    s = re.sub(r"(?<=[\d,])\s*�+\s*(?=[\d,])", " – ", s)
+    # Hapus replacement char yang tersisa
+    s = s.replace("�", "")
+    return " ".join(s.split()).strip()
 
 def normalisasi_pengalaman(s):
     if not s: return 0
@@ -321,15 +331,17 @@ def _parse_personil(pdf_or_path, hasil):
         hasil["reviu"]["E27"]["status"] = "terisi"
         hasil["reviu"]["E28"]["nilai"] = p_teknis["pengalaman"]
         hasil["reviu"]["E28"]["status"] = "terisi"
-        hasil["reviu"]["E29"]["nilai"] = p_teknis["sertifikat"]
-        hasil["reviu"]["E29"]["status"] = "terisi"
+        skt = p_teknis["sertifikat"]
+        hasil["reviu"]["E29"]["nilai"] = skt
+        hasil["reviu"]["E29"]["status"] = "terisi" if skt else "tidak_ada"
     if p_k3:
         hasil["reviu"]["E30"]["nilai"] = p_k3["jabatan"]
         hasil["reviu"]["E30"]["status"] = "terisi"
         hasil["reviu"]["E31"]["nilai"] = p_k3["pengalaman"]
         hasil["reviu"]["E31"]["status"] = "terisi"
-        hasil["reviu"]["E32"]["nilai"] = p_k3["sertifikat"]
-        hasil["reviu"]["E32"]["status"] = "terisi"
+        sert_k3 = p_k3["sertifikat"]
+        hasil["reviu"]["E32"]["nilai"] = sert_k3
+        hasil["reviu"]["E32"]["status"] = "terisi" if sert_k3 else "tidak_ada"
     return True
 
 def _parse_rk3k(pdf_or_path, hasil):
@@ -381,13 +393,24 @@ def _parse_rk3k(pdf_or_path, hasil):
         m_rt = re.search(r"(?:Resiko|Tingkat\s+Risiko)\s+Tertinggi\s*[:\s]*([A-Z][^\n]{10,})", teks_full, re.IGNORECASE)
         if m_rt: risiko_tertinggi_bahaya = bersihkan(m_rt.group(1))
 
-    if risiko_tertinggi_uraian:
-        hasil["reviu"]["E33"]["nilai"] = risiko_tertinggi_uraian
-        hasil["reviu"]["E33"]["status"] = "terisi"
-    elif bahaya_list:
-        hasil["reviu"]["E33"]["nilai"] = "\n".join(list(dict.fromkeys(bahaya_list))[:5])
-        hasil["reviu"]["E33"]["status"] = "terisi"
-    if risiko_tertinggi_bahaya:
+    # Fallback: pola PDF terpecah — "- <bahaya> Resiko\n<...> Paling\nTinggi"
+    if not risiko_tertinggi_bahaya:
+        m_pt = re.search(r"Paling\s*\nTinggi", teks_full, re.IGNORECASE)
+        if m_pt:
+            pre = teks_full[max(0, m_pt.start()-400):m_pt.start()]
+            # Cari "- <bahaya> Resiko\n" di teks sebelum "Paling\nTinggi"
+            m_pre = re.search(r"- ([A-Za-z][^\n]{3,60}) Resiko\n", pre, re.IGNORECASE)
+            if m_pre:
+                risiko_tertinggi_bahaya = bersihkan(m_pre.group(1))
+
+    if hasil["reviu"]["E33"]["status"] != "terisi":
+        if risiko_tertinggi_uraian:
+            hasil["reviu"]["E33"]["nilai"] = risiko_tertinggi_uraian
+            hasil["reviu"]["E33"]["status"] = "terisi"
+        elif bahaya_list:
+            hasil["reviu"]["E33"]["nilai"] = "\n".join(list(dict.fromkeys(bahaya_list))[:5])
+            hasil["reviu"]["E33"]["status"] = "terisi"
+    if hasil["reviu"]["E34"]["status"] != "terisi" and risiko_tertinggi_bahaya:
         hasil["reviu"]["E34"]["nilai"] = risiko_tertinggi_bahaya
         hasil["reviu"]["E34"]["status"] = "terisi"
     return len(bahaya_list) > 0
@@ -507,7 +530,24 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
     process_file(file_map["uraian"] + file_map["merged"], _parse_fung_bangunan, hasil)
     process_file(file_map["alat"] + file_map["merged"], _parse_peralatan, hasil)
     process_file(file_map["personil"] + file_map["merged"], _parse_personil, hasil)
-    process_file(file_map["rk3k"] + file_map["merged"], _parse_rk3k, hasil)
+    # RK3K: DOCX terpisah dulu (E33 bagus), lalu Draft_Pokja PDF hanya untuk E34 jika masih kosong
+    for f in file_map["rk3k"]:
+        if f.lower().endswith(".docx"):
+            _parse_rk3k(f, hasil)
+    # Jika E34 masih kosong, coba dari Draft_Pokja PDF
+    if hasil["reviu"]["E34"]["status"] != "terisi":
+        for f in file_map["merged"]:
+            if f.lower().endswith(".pdf"):
+                with pdfplumber.open(f) as pdf:
+                    _parse_rk3k(pdf, hasil)
+                break
+    # Fallback: jika E33 masih kosong juga, ambil dari Draft PDF
+    if hasil["reviu"]["E33"]["status"] != "terisi":
+        for f in file_map["merged"]:
+            if f.lower().endswith(".pdf"):
+                with pdfplumber.open(f) as pdf:
+                    _parse_rk3k(pdf, hasil)
+                break
     process_file(file_map["dokpil"] + file_map["merged"], _parse_dokpil_uraian, hasil)
 
     # 3. Common Fields (Input Data) dari SEMUA file (biasanya ada di RK3K atau KAK)
@@ -530,23 +570,46 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
                     hasil["input_data"]["E16"]["nilai"] = val
                     hasil["input_data"]["E16"]["status"] = "terisi"
         
-        # E32: Lokasi
+        # E32: Lokasi — skip jika nilai mengandung kata-kata RK3K/teknis yang bukan lokasi
+        _BUKAN_LOKASI = ["resiko", "risiko", "tingkat", "uraian", "bahaya", "pengendalian",
+                         "ibprp", "rk3k", "k3", "pekerjaan persiapan"]
         if not hasil["input_data"]["E32"]["nilai"]:
+            # Pola 1: nilai di baris sama setelah "Lokasi Pekerjaan :"
             m_lok = re.search(r"Lokasi\s*(?:Pekerjaan)?\s*[:/]?\s*([^\n]{5,100})", txt, re.IGNORECASE)
-            if m_lok:
-                hasil["input_data"]["E32"]["nilai"] = bersihkan(m_lok.group(1))
-                hasil["input_data"]["E32"]["status"] = "terisi"
-        
-        # E33: Sumber Dana
+            # Pola 2: nilai di baris berikutnya (PDF kolom, nilai pada baris setelah label)
+            m_lok2 = re.search(r"Lokasi\s*(?:Pekerjaan)?\s*[:/]?\s*\n([^\n]{5,100})", txt, re.IGNORECASE)
+            for m_try in [m_lok2, m_lok]:
+                if m_try:
+                    val_lok = bersihkan(m_try.group(1))
+                    if val_lok and not any(kw in val_lok.lower() for kw in _BUKAN_LOKASI):
+                        # Cek apakah ada baris lanjutan yang bisa digabung
+                        pos_end = m_try.end()
+                        m_next = re.search(r"([^\n]{3,60})\n", txt[pos_end:pos_end+100])
+                        if m_next and not re.match(r"^\d+\s+\d{2,}|^[A-Z\s:]{10,}|^\.|^\d+\s+[A-Z]", m_next.group(1)):
+                            val_lok = val_lok + " " + bersihkan(m_next.group(1))
+                        hasil["input_data"]["E32"]["nilai"] = val_lok
+                        hasil["input_data"]["E32"]["status"] = "terisi"
+                        break
+
+        # E33: Sumber Dana — skip jika nilai hanya angka tahun atau bukan sumber dana
         if not hasil["input_data"]["E33"]["nilai"]:
             m_sd = re.search(r"(?:Sumber\s+Dana|Sumber\s+Anggaran|Anggaran)\s*[:/]?\s*([^\n]{5,60})", txt, re.IGNORECASE)
             if m_sd:
-                hasil["input_data"]["E33"]["nilai"] = bersihkan(m_sd.group(1))
-                hasil["input_data"]["E33"]["status"] = "terisi"
-            else:
+                val_sd = bersihkan(m_sd.group(1))
+                # Skip jika hanya angka (tahun) atau mengandung kata-kata teknis
+                if not re.fullmatch(r"\d{4}", val_sd) and re.search(r"[A-Za-z]", val_sd):
+                    hasil["input_data"]["E33"]["nilai"] = val_sd
+                    hasil["input_data"]["E33"]["status"] = "terisi"
+            if not hasil["input_data"]["E33"]["nilai"]:
                 m_sd2 = re.search(r"(APBD|APBN)\s+(?:Tahun\s+)?(\d{4})", txt, re.IGNORECASE)
                 if m_sd2:
                     hasil["input_data"]["E33"]["nilai"] = f"{m_sd2.group(1)} {m_sd2.group(2)}"
+                    hasil["input_data"]["E33"]["status"] = "terisi"
+            if not hasil["input_data"]["E33"]["nilai"]:
+                # Pola: "Anggaran 2025" atau "Anggaran Tahun 2025" → asumsi APBD
+                m_sd3 = re.search(r"Anggaran\s+(?:Tahun\s+)?(\d{4})\b", txt, re.IGNORECASE)
+                if m_sd3:
+                    hasil["input_data"]["E33"]["nilai"] = f"APBD {m_sd3.group(1)}"
                     hasil["input_data"]["E33"]["status"] = "terisi"
 
     # 4. Cara Pembayaran
@@ -555,6 +618,21 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
     hasil["dokpil"]["E16"]["nilai"] = teks_cp
     hasil["dokpil"]["E16"]["id_cp"] = id_cp
     hasil["dokpil"]["E16"]["status"] = "terisi"
+
+    # 5. Normalisasi akhir: field yang masih "kosong" setelah semua proses → "tidak_ada"
+    # (artinya sudah dicoba parse tapi tidak ditemukan)
+    FIELD_PARSE_ONLY = [
+        ("reviu", "E6"), ("reviu", "E7"),                          # SBU (dari PDF)
+        ("reviu", "E27"), ("reviu", "E28"), ("reviu", "E29"),      # Personil teknis
+        ("reviu", "E30"), ("reviu", "E31"), ("reviu", "E32"),      # Personil K3
+        ("reviu", "E33"), ("reviu", "E34"),                        # RK3K
+    ]
+    for bagian, k in FIELD_PARSE_ONLY:
+        if hasil[bagian][k]["status"] == "kosong":
+            hasil[bagian][k]["status"] = "tidak_ada"
+            # E28/E31 (pengalaman): jika nilai 0 dan tidak ada personil, kosongkan
+            if k in ("E28", "E31") and hasil[bagian][k]["nilai"] == 0:
+                hasil[bagian][k]["nilai"] = ""
 
     return hasil, ""
 
