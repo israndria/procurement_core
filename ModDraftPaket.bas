@@ -18,7 +18,7 @@ Private Const SHEET_INPUT As String = "1. Input Data"
 Private Const CELL_SELECTOR As String = "E1"   ' Dropdown pilih paket (di @ Master Data)
 
 ' Kolom yang di-fetch (efisien, tidak perlu semua)
-Private Const SB_SELECT As String = "kode_tender,nama_tender,mak,kode_rup,nilai_pagu,nilai_hps,kode_pokja,nomor_pp,nomor_surat_dinas,nama_dinas,nama_ppk,jangka_waktu,sumber_anggaran,anggota_1,anggota_2,anggota_3,bidang"
+Private Const SB_SELECT As String = "kode_tender,nama_tender,mak,kode_rup,nilai_pagu,nilai_hps,kode_pokja,nomor_pp,nomor_surat_dinas,nama_dinas,nama_ppk,jangka_waktu,sumber_anggaran,anggota_1,anggota_2,anggota_3,bidang,sbu_baru,sbu_lama"
 
 ' ── @ Master Data row constants (fixed layout) ──
 Private Const MD_SHEET As String = "@ Master Data"
@@ -292,6 +292,10 @@ Public Sub PilihDraftPaket(selectedLabel As String)
             wsMD.Cells(MD_E33, 3).Value = CStr(item(12))
             ' Isi anggota pokja
             IsiAnggotaPokjaToMaster wsMD, CStr(item(13)), CStr(item(14)), CStr(item(15))
+
+            ' ── SBU Baru + SBU Lama → @ Master Data baris 39 & 40 ───────────
+            If CStr(item(17)) <> "" Then wsMD.Cells(MD_R_E20, 3).Value = CStr(item(17))
+            If CStr(item(18)) <> "" Then wsMD.Cells(MD_R_E21, 3).Value = CStr(item(18))
 
             ' ── Parse PDF → isi database_reviu + database_dokpil ──────────────
             Dim kodeTender As String: kodeTender = CStr(item(6))
@@ -1405,7 +1409,7 @@ Private Function ParseDraftJSON(json As String) As Collection
     Dim ch As String
     Dim obj As String
     Do
-        Dim item(16) As Variant
+        Dim item(18) As Variant
         braceStart = InStr(pos, json, "{")
         If braceStart = 0 Then Exit Do
         ' Cari matching } dengan brace counting (skip isi string)
@@ -1448,6 +1452,8 @@ Private Function ParseDraftJSON(json As String) As Collection
         item(14) = ExtractJSONVal(obj, "anggota_2")
         item(15) = ExtractJSONVal(obj, "anggota_3")
         item(16) = ExtractJSONVal(obj, "bidang")
+        item(17) = ExtractJSONVal(obj, "sbu_baru")
+        item(18) = ExtractJSONVal(obj, "sbu_lama")
 
         col.Add item
         pos = braceEnd + 1
