@@ -299,9 +299,9 @@ Public Sub PilihDraftPaket(selectedLabel As String)
             Dim bidang2 As String: bidang2 = CStr(item(16))
             ParsaDanIsiDariPDF kodeTender, kodePokja2, bidang2
 
-            ' ── SBU → @ Master Data baris 39 (Lama) + 40 (Baru) — SETELAH parse PDF ──
-            If CStr(item(18)) <> "" Then wsMD.Cells(MD_R_E20, 3).Value = CStr(item(18))  ' SBU Lama → baris 39
-            If CStr(item(17)) <> "" Then wsMD.Cells(MD_R_E21, 3).Value = CStr(item(17))  ' SBU Baru → baris 40
+            ' ── SBU → @ Master Data DATABASE REVIU: E6=SBU Baru (baris 26), E7=SBU Lama (baris 27) ──
+            If CStr(item(17)) <> "" Then wsMD.Cells(MD_R_E6, 3).Value = CStr(item(17))  ' SBU Baru (KBLI 2020) → baris 26
+            If CStr(item(18)) <> "" Then wsMD.Cells(MD_R_E7, 3).Value = CStr(item(18))  ' SBU Lama (KBLI 2015) → baris 27
 
             ' ── Muat HPS dari Supabase → isi sheet "5. HPS" ───────────────────
             MuatHPS kodeTender
