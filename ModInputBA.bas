@@ -310,10 +310,10 @@ Private Sub IsiTanggalDariGCal(wsBA As Worksheet, namaTender As String)
         kataPertama = kataPertama & parts(k)
     Next k
 
-    ' timeMin = 60 hari lalu, timeMax = 180 hari ke depan
+    ' Cakup seluruh tahun 2025-2026 agar paket selesai pun ketemu
     Dim timeMin As String, timeMax As String
-    timeMin = Format(Now - 60, "yyyy-mm-dd") & "T00:00:00Z"
-    timeMax = Format(Now + 180, "yyyy-mm-dd") & "T00:00:00Z"
+    timeMin = "2025-01-01T00:00:00Z"
+    timeMax = "2026-12-31T00:00:00Z"
 
     ' Encode spasi sebagai %20 untuk URL query
     Dim qParam As String
