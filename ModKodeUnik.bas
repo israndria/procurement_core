@@ -358,20 +358,23 @@ Attribute GenerateKodeUnik.VB_ProcData.VB_Invoke_Func = "R\n14"
     If hasil = "" Then Exit Sub
     
     ' Simpan ke cell
-    On Error Resume Next
-    wsInput.Unprotect Password:="pokja2026"
-    On Error GoTo 0
-    
-    wsInput.Range("E9").Value = hasil
+    Dim wsMD As Worksheet
+    Set wsMD = ThisWorkbook.Sheets("@ Master Data")
     
     On Error Resume Next
-    wsInput.Protect Password:="pokja2026", AllowFormattingCells:=True
+    wsMD.Unprotect Password:="pokja2026"
     On Error GoTo 0
     
-    MsgBox "Kode unik disimpan di E9:" & vbCrLf & hasil, vbInformation
+    wsMD.Range("G2").Value = hasil
     
-    wsInput.Activate
-    wsInput.Range("E9").Select
+    On Error Resume Next
+    wsMD.Protect Password:="pokja2026", AllowFormattingCells:=True
+    On Error GoTo 0
+    
+    MsgBox "Kode unik disimpan di G2 @ Master Data:" & vbCrLf & hasil, vbInformation
+    
+    wsMD.Activate
+    wsMD.Range("G2").Select
 End Sub
 
 ' Fungsi formula: bisa dipanggil dari cell

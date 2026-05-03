@@ -152,48 +152,73 @@ def setup_paket_baru(folder_name=None):
     else:
         os.makedirs(target_dir)
     
+    # Extract Pokja Number untuk suffix (misal: "086")
+    pokja_suffix = ""
+    m_pokja = re.search(r"Pokja\s+(\d+)", folder_name, re.IGNORECASE)
+    if m_pokja:
+        pokja_suffix = m_pokja.group(1)
+    
     print(f"\n[1/3] Folder: {target_dir}")
+    if pokja_suffix:
+        print(f"      Pokja detected: {pokja_suffix}")
     
-    # Copy files
-    print("\n[2/3] Copy template files...")
+    # Copy files with renaming
+    print("\n[2/3] Copy & Rename template files...")
     
-    # Excel
-    dst_excel = os.path.join(target_dir, EXCEL_TEMPLATE)
+    # 1. Excel
+    excel_name_dst = EXCEL_TEMPLATE.replace("Template", pokja_suffix) if pokja_suffix else EXCEL_TEMPLATE
+    dst_excel = os.path.join(target_dir, excel_name_dst)
+    
     if not os.path.exists(dst_excel):
         shutil.copy2(os.path.join(TEMPLATE_DIR, EXCEL_TEMPLATE), dst_excel)
-        print(f"  [OK] {EXCEL_TEMPLATE}")
+        print(f"  [OK] {EXCEL_TEMPLATE} -> {excel_name_dst}")
     else:
-        print(f"  [SKIP] {EXCEL_TEMPLATE} (sudah ada)")
+        print(f"  [SKIP] {excel_name_dst} (sudah ada)")
     
-    # Word files
-    for wf, _ in WORD_SHEET_MAP:
-        dst = os.path.join(target_dir, wf)
-        if not os.path.exists(dst):
-            shutil.copy2(os.path.join(TEMPLATE_DIR, wf), dst)
-            print(f"  [OK] {wf}")
+    # 2. Word files
+    dst_word_map = [] # list of (new_word_path, sheet_name)
+    for wf_tpl, sheet_name in WORD_SHEET_MAP:
+        wf_dst = wf_tpl.replace("Template", pokja_suffix) if pokja_suffix else wf_tpl
+        dst_path = os.path.join(target_dir, wf_dst)
+        
+        # Copy Template Asli
+        if not os.path.exists(dst_path):
+            shutil.copy2(os.path.join(TEMPLATE_DIR, wf_tpl), dst_path)
+            print(f"  [OK] {wf_tpl} -> {wf_dst}")
         else:
-            print(f"  [SKIP] {wf} (sudah ada)")
+            print(f"  [SKIP] {wf_dst} (sudah ada)")
+            
+        # Copy file (Merged) jika ada
+        # Pola: Nama File - Template.docx -> Nama File - 086 (Merged).docx
+        wf_tpl_merged = wf_tpl.replace("- Template", "- Template (Merged)").replace(".docm", ".docx")
+        if os.path.exists(os.path.join(TEMPLATE_DIR, wf_tpl_merged)):
+            wf_dst_merged = wf_dst.replace(".docm", ".docx").replace(".docx", " (Merged).docx")
+            dst_path_merged = os.path.join(target_dir, wf_dst_merged)
+            if not os.path.exists(dst_path_merged):
+                shutil.copy2(os.path.join(TEMPLATE_DIR, wf_tpl_merged), dst_path_merged)
+                print(f"  [OK] (Merged) {wf_tpl_merged} -> {wf_dst_merged}")
+        
+        dst_word_map.append((dst_path, wf_dst, sheet_name))
     
     # Auto-link setiap Word ke sheet yang benar
     print("\n[3/3] Auto-link Word Mail Merge -> Excel...")
     abs_excel = os.path.abspath(dst_excel)
     
     success_count = 0
-    for wf, sheet_name in WORD_SHEET_MAP:
-        dst_word = os.path.join(target_dir, wf)
-        ok = link_word_to_excel(dst_word, abs_excel, sheet_name)
+    for dst_path, wf_dst, sheet_name in dst_word_map:
+        ok = link_word_to_excel(dst_path, abs_excel, sheet_name)
         if ok:
-            print(f"  [OK] {wf} -> sheet '{sheet_name}'")
+            print(f"  [OK] {wf_dst} -> sheet '{sheet_name}'")
             success_count += 1
         else:
-            print(f"  [FAIL] {wf}")
+            print(f"  [FAIL] {wf_dst}")
     
     # Summary
     print(f"\n{'='*60}")
     print(f"  SETUP SELESAI!")
     print(f"{'='*60}")
     print(f"\n  Folder : {target_dir}")
-    print(f"  Excel  : {EXCEL_TEMPLATE}")
+    print(f"  Excel  : {excel_name_dst}")
     print(f"  Word   : {success_count}/{len(WORD_SHEET_MAP)} terhubung")
     print(f"\n  Langkah selanjutnya:")
     print(f"  1. Buka Excel -> isi data paket baru")

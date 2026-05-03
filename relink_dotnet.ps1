@@ -54,15 +54,18 @@ $excelUri = "file:///" + ($encodedSegments -join "/")
 
 # Mapping
 $mapping = @{
-    "BA PK"  = "satu_data"
+    "BAPK"   = "satu_data"
     "Reviu"  = "list_reviu"
     "Dokpil" = "list_dokpil"
 }
 
 $results = @()
 
-Get-ChildItem $folder -Filter "*.docx" | Where-Object {
-    $_.Name -notlike "*(Merged)*" -and $_.Name -notlike "~*"
+# Ambil file docx/docm hanya di folder saat ini (tidak recurse)
+Get-ChildItem $folder | Where-Object { 
+    $_.Extension -in ".docx", ".docm" -and 
+    $_.Name -notlike "*(Merged)*" -and 
+    $_.Name -notlike "~*" 
 } | ForEach-Object {
     $docxPath = $_.FullName
     $docxName = $_.Name
