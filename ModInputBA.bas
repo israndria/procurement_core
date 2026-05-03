@@ -122,15 +122,54 @@ Public Sub MuatInputBA()
     End If
     On Error GoTo ErrHandler
 
-    ' ── 4. Tanggal dari Google Calendar ─────────────────────
-    ' (dinonaktifkan sementara — isi manual di sheet "0. Input BA" C3/C4)
-    ' Call IsiTanggalDariGCal(wsBA, kodeTender)
-
     MsgBox "Sheet '0. Input BA' berhasil diperbarui.", vbInformation
     Exit Sub
 
 ErrHandler:
     MsgBox "Error MuatInputBA: " & Err.Description, vbCritical
+End Sub
+
+
+' ============================================================
+' SYNC KALENDER: isi C3/C4 dari Google Calendar
+' Dipanggil dari tombol "Sync Kalender" di sheet "0. Input BA"
+' ============================================================
+Public Sub SyncKalender()
+    Dim wsBA As Worksheet
+    On Error GoTo ErrHandler
+
+    On Error Resume Next
+    Set wsBA = ThisWorkbook.Sheets(SHEET_BA)
+    On Error GoTo ErrHandler
+    If wsBA Is Nothing Then
+        MsgBox "Sheet '" & SHEET_BA & "' tidak ditemukan.", vbExclamation
+        Exit Sub
+    End If
+
+    ' Ambil nama_tender dari @ Master Data kolom C baris 3 (MD_E3)
+    Dim wsMD As Worksheet
+    On Error Resume Next
+    Set wsMD = ThisWorkbook.Sheets("@ Master Data")
+    On Error GoTo ErrHandler
+    If wsMD Is Nothing Then
+        MsgBox "Sheet '@ Master Data' tidak ditemukan.", vbExclamation
+        Exit Sub
+    End If
+
+    Dim namaTender As String
+    namaTender = Trim(CStr(wsMD.Cells(3, 3).Value))  ' C3 = nama_tender
+    If namaTender = "" Then
+        MsgBox "Nama tender belum terisi di '@ Master Data' C3." & vbCrLf & _
+               "Klik 'Muat Draft Paket' terlebih dahulu.", vbExclamation
+        Exit Sub
+    End If
+
+    wsBA.Unprotect
+    Call IsiTanggalDariGCal(wsBA, namaTender)
+    Exit Sub
+
+ErrHandler:
+    MsgBox "Error SyncKalender: " & Err.Description, vbCritical
 End Sub
 
 
@@ -224,48 +263,80 @@ End Sub
 ' Isi tanggal dari Google Calendar via V19 token
 ' Cari event berdasarkan kata kunci di title
 ' ============================================================
-Private Sub IsiTanggalDariGCal(wsBA As Worksheet, kodeTender As String)
+Private Sub IsiTanggalDariGCal(wsBA As Worksheet, namaTender As String)
+    ' Format event GCal V19: "{Tahap} - {Nama_Paket}"
+    ' Cari berdasarkan kata kunci pertama nama_tender (agar match partial)
     Dim scriptDir As String
     scriptDir = ModWordLink.ScriptDir_Public()
-    If scriptDir = "" Then Exit Sub
+    If scriptDir = "" Then
+        MsgBox "Script dir tidak ditemukan. Pastikan ModWordLink ter-inject.", vbExclamation
+        Exit Sub
+    End If
 
     Dim tokenPath As String
     tokenPath = scriptDir & "\token.json"
-    If Dir(tokenPath) = "" Then Exit Sub
+    If Dir(tokenPath) = "" Then
+        MsgBox "token.json tidak ditemukan di: " & tokenPath & vbCrLf & _
+               "Login Google Calendar dulu di V19 Scheduler.", vbExclamation
+        Exit Sub
+    End If
 
-    ' Baca access_token dari token.json
-    Dim fso As Object, f As Object
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    Set f = fso.OpenTextFile(tokenPath, 1)
+    ' Baca token via ADODB (UTF-8 safe)
+    Dim ado As Object
+    Set ado = CreateObject("ADODB.Stream")
+    ado.Type = 2: ado.Charset = "UTF-8": ado.Open
+    ado.LoadFromFile tokenPath
     Dim tokenJson As String
-    tokenJson = f.ReadAll
-    f.Close
+    tokenJson = ado.ReadText
+    ado.Close
 
     Dim accessToken As String
     accessToken = ExtractVal(tokenJson, "token")
     If accessToken = "" Then accessToken = ExtractVal(tokenJson, "access_token")
-    If accessToken = "" Then Exit Sub
+    If accessToken = "" Then
+        MsgBox "Access token tidak valid. Login ulang di V19 Scheduler.", vbExclamation
+        Exit Sub
+    End If
 
-    ' Query GCal untuk event yang mengandung kode tender atau "Pembukaan"
-    ' timeMin = 30 hari lalu, timeMax = 90 hari kedepan
+    ' Gunakan 3 kata pertama nama_tender sebagai query (lebih presisi)
+    Dim kataPertama As String
+    Dim parts() As String
+    parts = Split(namaTender, " ")
+    Dim nKata As Integer: nKata = IIf(UBound(parts) >= 3, 3, UBound(parts) + 1)
+    Dim k As Integer
+    kataPertama = ""
+    For k = 0 To nKata - 1
+        If kataPertama <> "" Then kataPertama = kataPertama & " "
+        kataPertama = kataPertama & parts(k)
+    Next k
+
+    ' timeMin = 60 hari lalu, timeMax = 180 hari ke depan
     Dim timeMin As String, timeMax As String
-    timeMin = Format(Now - 30, "yyyy-mm-dd") & "T00:00:00Z"
-    timeMax = Format(Now + 90, "yyyy-mm-dd") & "T00:00:00Z"
+    timeMin = Format(Now - 60, "yyyy-mm-dd") & "T00:00:00Z"
+    timeMax = Format(Now + 180, "yyyy-mm-dd") & "T00:00:00Z"
+
+    ' Encode spasi sebagai %20 untuk URL query
+    Dim qParam As String
+    qParam = Replace(kataPertama, " ", "%20")
 
     Dim gcUrl As String
     gcUrl = "https://www.googleapis.com/calendar/v3/calendars/primary/events" & _
-            "?maxResults=50" & _
+            "?maxResults=100" & _
             "&singleEvents=true" & _
             "&orderBy=startTime" & _
             "&timeMin=" & timeMin & _
             "&timeMax=" & timeMax & _
-            "&q=" & kodeTender
+            "&q=" & qParam
 
     Dim gcJson As String
     gcJson = HttpGetWithToken(gcUrl, accessToken)
-    If gcJson = "" Then Exit Sub
+    If gcJson = "" Then
+        MsgBox "Gagal mengambil data dari Google Calendar." & vbCrLf & _
+               "Cek koneksi internet atau login ulang di V19 Scheduler.", vbExclamation
+        Exit Sub
+    End If
 
-    ' Parse event: cari "Pembukaan Dokumen Penawaran" dan "Pembuktian"
+    ' Parse event: cari "Pembukaan" dan "Pembuktian"/"Penetapan"/"Klarifikasi"
     Dim pos As Long
     pos = 1
     Dim tglPembukaan As String, tglPembuktian As String
@@ -277,35 +348,37 @@ Private Sub IsiTanggalDariGCal(wsBA As Worksheet, kodeTender As String)
         itemStart = InStr(pos, gcJson, """summary""")
         If itemStart = 0 Then Exit Do
 
-        ' Ambil summary
         Dim sumStart As Long, sumEnd As Long
         sumStart = InStr(itemStart, gcJson, ":""") + 2
         sumEnd = InStr(sumStart, gcJson, """")
         Dim summary As String
         summary = Mid(gcJson, sumStart, sumEnd - sumStart)
 
-        ' Cari tanggal mulai (dateTime atau date)
+        ' Cari tanggal mulai event ini
         Dim dtStart As Long
         dtStart = InStr(itemStart, gcJson, """start""")
         Dim tgl As String
         tgl = ""
-        If dtStart > 0 And dtStart < InStr(pos + 1, gcJson, """summary""") + 500 Then
+        If dtStart > 0 Then
             Dim dtPos As Long
-            dtPos = InStr(dtStart, gcJson, """date")  ' match "date" atau "dateTime"
-            If dtPos > 0 Then
+            dtPos = InStr(dtStart, gcJson, """date")
+            If dtPos > 0 And dtPos < itemStart + 500 Then
                 Dim valS As Long, valE As Long
                 valS = InStr(dtPos, gcJson, ":""") + 2
                 valE = InStr(valS, gcJson, """")
-                tgl = Left(Mid(gcJson, valS, valE - valS), 10)  ' ambil YYYY-MM-DD
+                tgl = Left(Mid(gcJson, valS, valE - valS), 10)
             End If
         End If
 
-        ' Cocokkan keyword
-        If tglPembukaan = "" And (InStr(summary, "Pembukaan") > 0 Or InStr(summary, "pembukaan") > 0) Then
+        Dim sumLow As String
+        sumLow = LCase(summary)
+
+        If tglPembukaan = "" And InStr(sumLow, "pembukaan") > 0 Then
             tglPembukaan = tgl
         End If
-        If tglPembuktian = "" And (InStr(summary, "Pembuktian") > 0 Or InStr(summary, "pembuktian") > 0 Or _
-                                    InStr(summary, "Penetapan") > 0 Or InStr(summary, "penetapan") > 0) Then
+        If tglPembuktian = "" And (InStr(sumLow, "pembuktian") > 0 Or _
+                                    InStr(sumLow, "penetapan") > 0 Or _
+                                    InStr(sumLow, "klarifikasi") > 0) Then
             tglPembuktian = tgl
         End If
 
@@ -313,15 +386,31 @@ Private Sub IsiTanggalDariGCal(wsBA As Worksheet, kodeTender As String)
         If tglPembukaan <> "" And tglPembuktian <> "" Then Exit Do
     Loop
 
-    ' Tulis ke sheet: format date serial Excel
+    ' Tulis ke sheet dengan feedback
+    Dim pesanHasil As String
+    pesanHasil = "Hasil Sync Kalender untuk:" & vbCrLf & namaTender & vbCrLf & vbCrLf
+
     If tglPembukaan <> "" Then
         wsBA.Cells(ROW_TGL_PEMBUKAAN, 3).Value = CDate(tglPembukaan)
         wsBA.Cells(ROW_TGL_PEMBUKAAN, 3).NumberFormat = "dd/mm/yyyy"
+        pesanHasil = pesanHasil & "✔ Pembukaan Penawaran: " & tglPembukaan & vbCrLf
+    Else
+        pesanHasil = pesanHasil & "✘ Pembukaan Penawaran: tidak ditemukan" & vbCrLf
     End If
+
     If tglPembuktian <> "" Then
         wsBA.Cells(ROW_TGL_PEMBUKTIAN, 3).Value = CDate(tglPembuktian)
         wsBA.Cells(ROW_TGL_PEMBUKTIAN, 3).NumberFormat = "dd/mm/yyyy"
+        pesanHasil = pesanHasil & "✔ Pembuktian/Penetapan: " & tglPembuktian & vbCrLf
+    Else
+        pesanHasil = pesanHasil & "✘ Pembuktian/Penetapan: tidak ditemukan" & vbCrLf
     End If
+
+    If tglPembukaan = "" And tglPembuktian = "" Then
+        pesanHasil = pesanHasil & vbCrLf & "Keyword pencarian: """ & kataPertama & """"
+    End If
+
+    MsgBox pesanHasil, vbInformation, "Sync Kalender"
 End Sub
 
 

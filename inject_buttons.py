@@ -192,7 +192,8 @@ def inject_buttons(filepath):
             ]),
 
             ("0. Input BA", [
-                ("btnMuatInputBA", "Muat Input BA", "MuatInputBA", 1, 3, PURPLE),
+                ("btnMuatInputBA",  "Muat Input BA",  "MuatInputBA",  1, 3, PURPLE),
+                ("btnSyncKalender", "Sync Kalender",  "SyncKalender", 1, 4, TEAL),
             ]),
         ]
         
