@@ -144,7 +144,7 @@ def inject_buttons(filepath):
 
         # 3. Clean old buttons - langsung target 3 sheet yang diketahui ada tombolnya
         print("\n  Cleaning old buttons...")
-        target_clean = ["1. Input Data", "@ Master Data", "database_reviu", "database_dokpil", "3. KK Evaluasi Kualifikasi"]
+        target_clean = ["1. Input Data", "@ Master Data", "3. KK Evaluasi Kualifikasi", "0. Input BA"]
         for sheet_name in target_clean:
             try:
                 ws = wb.Sheets(sheet_name)
@@ -167,25 +167,25 @@ def inject_buttons(filepath):
 
         sheet_buttons = [
             ("@ Master Data", [
-                ("btnBukaBA",        "Buka BA PK",              "BukaBA",           3, 6, BLUE_WORD),
-                ("btnPrintBAReviu",  "Print BA Reviu",          "PrintBAReviuPDF",  3, 7, BLACK),
-
-                ("btnUndanganPDF",   "Print Undangan PDF",      "PrintUndanganPDF", 4, 6, RED_PDF),
-                ("btnPrintPembuktian", "Print BA Pembuktian",   "PrintPembuktianPDF", 4, 7, BLACK),
-                ("btnREvaluasi",       "Print REvaluasi",      "PrintREvaluasiPDF", 4, 8, BLACK),
-                ("btnPembuktianTimpang", "Print Timpang",      "PrintPembuktianTimpangPDF", 5, 6, BLACK),
-                ("btnMuatDraft",     "Muat Draft Paket",       "MuatDraftPaket",   5, 7, PURPLE),
-                ("btnKodeUnik",      "Kode Unik Surat",        "GenerateKodeUnik", 5, 8, TEAL),
-                ("btnRelink",        "Relink Template",        "RelinkTemplate",   6, 8, (255, 140, 0)),
-            ]),
-            ("database_reviu", [
-                ("btnBukaReviu",     "Buka Reviu",       "BukaReviu",        2, 7, BLUE_WORD),
-                ("btnPrintIsiReviu", "Print Isi Reviu",  "PrintIsiReviuPDF", 2, 8, BLACK),
-                ("btnPrintBAReviu",  "Print BA Reviu",   "PrintBAReviuPDF",  2, 9, BLACK),
-            ]),
-            ("database_dokpil", [
-                ("btnBukaDokpil",   "Buka Dokpil",   "BukaDokpil",   2, 6, BLUE_WORD),
-                ("btnPrintDokpil",  "Print Dokpil",  "PrintDokpilPDF",  2, 7, BLACK),
+                # Baris 3: BA PK
+                ("btnBukaBA",             "Buka BA PK",         "BukaBA",                    3, 6, BLUE_WORD),
+                ("btnPrintBAReviu",       "Print BA Reviu",     "PrintBAReviuPDF",            3, 7, BLACK),
+                # Baris 4: Undangan & Pembuktian
+                ("btnUndanganPDF",        "Print Undangan PDF", "PrintUndanganPDF",           4, 6, RED_PDF),
+                ("btnPrintPembuktian",    "Print BA Pembuktian","PrintPembuktianPDF",         4, 7, BLACK),
+                ("btnREvaluasi",          "Print REvaluasi",    "PrintREvaluasiPDF",          4, 8, BLACK),
+                # Baris 5: Timpang, Draft, Kode Unik
+                ("btnPembuktianTimpang",  "Print Timpang",      "PrintPembuktianTimpangPDF",  5, 6, BLACK),
+                ("btnMuatDraft",          "Muat Draft Paket",   "MuatDraftPaket",             5, 7, PURPLE),
+                ("btnKodeUnik",           "Kode Unik Surat",    "GenerateKodeUnik",           5, 8, TEAL),
+                # Baris 6: Reviu
+                ("btnBukaReviu",          "Buka Reviu",         "BukaReviu",                  6, 6, BLUE_WORD),
+                ("btnPrintIsiReviu",      "Print Isi Reviu",    "PrintIsiReviuPDF",           6, 7, BLACK),
+                ("btnPrintBAReviu2",      "Print BA Reviu",     "PrintBAReviuPDF",            6, 8, BLACK),
+                # Baris 7: Dokpil & Relink
+                ("btnBukaDokpil",         "Buka Dokpil",        "BukaDokpil",                 7, 6, BLUE_WORD),
+                ("btnPrintDokpil",        "Print Dokpil",       "PrintDokpilPDF",             7, 7, BLACK),
+                ("btnRelink",             "Relink Template",    "RelinkTemplate",             7, 8, (255, 140, 0)),
             ]),
             ("3. KK Evaluasi Kualifikasi", [
                 ("btnMuatKKEvaluasi", "Muat KK Evaluasi", "MuatKKEvaluasi", 1, 7, PURPLE),
