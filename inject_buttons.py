@@ -169,7 +169,7 @@ def inject_buttons(filepath):
             ("@ Master Data", [
                 ("btnBukaBA",        "Buka BA PK",              "BukaBA",           3, 6, BLUE_WORD),
                 ("btnPrintBAReviu",  "Print BA Reviu",          "PrintBAReviuPDF",  3, 7, BLACK),
-                ("btnImportWeb",     "Import Data LPSE",        "ImportHTML",       3, 8, GREEN),
+
                 ("btnUndanganPDF",   "Print Undangan PDF",      "PrintUndanganPDF", 4, 6, RED_PDF),
                 ("btnPrintPembuktian", "Print BA Pembuktian",   "PrintPembuktianPDF", 4, 7, BLACK),
                 ("btnREvaluasi",       "Print REvaluasi",      "PrintREvaluasiPDF", 4, 8, BLACK),
@@ -190,9 +190,7 @@ def inject_buttons(filepath):
             ("3. KK Evaluasi Kualifikasi", [
                 ("btnMuatKKEvaluasi", "Muat KK Evaluasi", "MuatKKEvaluasi", 1, 7, PURPLE),
             ]),
-            ("6. Harga Penawaran", [
-                ("btnMuatHargaPenawaran", "Muat Harga Penawaran", "MuatHargaPenawaran", 1, 4, PURPLE),
-            ]),
+
             ("0. Input BA", [
                 ("btnMuatInputBA", "Muat Input BA", "MuatInputBA", 1, 3, PURPLE),
             ]),

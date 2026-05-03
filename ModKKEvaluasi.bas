@@ -593,10 +593,8 @@ Public Sub MuatHargaPenawaran()
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:=listStr
         .ShowInput = True
     End With
-    ' Set default ke peserta pertama jika B1 kosong
-    If Trim(wsHP.Range("B1").Value) = "" Then
-        wsHP.Range("B1").Value = pesertaNama(0)
-    End If
+    ' Reset B1 ke peserta pertama (hapus nilai lama yang mungkin tidak valid)
+    wsHP.Range("B1").Value = pesertaNama(0)
 
     ' ── 3. Baca peserta yang dipilih di B1 ──
     Dim namaDipilih As String: namaDipilih = Trim(wsHP.Range("B1").Value)
