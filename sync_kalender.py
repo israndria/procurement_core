@@ -90,7 +90,7 @@ if __name__ == "__main__":
     # Baca nama dari file _sync_kalender_input.txt jika ada (hindari masalah special char di argv)
     inp_path = os.path.join(SCRIPT_DIR, "_sync_kalender_input.txt")
     if os.path.exists(inp_path):
-        with open(inp_path, "r", encoding="utf-8") as f:
+        with open(inp_path, "r", encoding="utf-8-sig") as f:  # utf-8-sig strip BOM otomatis
             nama = f.read().strip()
         os.remove(inp_path)
     else:
