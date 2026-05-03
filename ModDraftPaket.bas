@@ -1395,7 +1395,7 @@ End Function
 ' ============================================================
 Private Function FetchSupabase() As String
     Dim url As String
-    url = SB_URL & "/rest/v1/" & SB_TABLE & "?select=" & SB_SELECT & "&order=kode_pokja.asc"
+    url = SB_URL & "/rest/v1/" & SB_TABLE & "?select=" & SB_SELECT & "&nomor_pp=ilike.*2025*&order=kode_pokja.asc"
 
     Dim http As Object
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
