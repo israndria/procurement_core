@@ -157,9 +157,9 @@ Public Sub SyncKalender()
     End If
 
     Dim namaTender As String
-    namaTender = Trim(CStr(wsMD.Cells(3, 3).Value))
+    namaTender = Trim(CStr(wsMD.Cells(5, 3).Value))  ' C5 = nama_tender (C3=MAK, C4=kode_tender)
     If namaTender = "" Then
-        MsgBox "Nama tender belum terisi di '@ Master Data' C3." & vbCrLf & _
+        MsgBox "Nama tender belum terisi di '@ Master Data' C5." & vbCrLf & _
                "Klik 'Muat Draft Paket' terlebih dahulu.", vbExclamation
         Exit Sub
     End If
