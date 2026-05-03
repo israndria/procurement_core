@@ -46,6 +46,7 @@ Private Const ROW_PGL2_TANGGAL As Integer = 28
 Private Const ROW_PGL2_NOMOR As Integer = 29
 ' Poin 4: SKP
 Private Const ROW_SKP_KESIMPULAN As Integer = 30
+Private Const ROW_SKP_JP As Integer = 31
 Private Const ROW_SKP As Integer = 33
 ' Poin 5: NPWP/KSWP
 Private Const ROW_NPWP_KESIMPULAN As Integer = 34
@@ -182,6 +183,8 @@ Public Sub MuatKKEvaluasi()
             sbuKesimpulan = "Tidak Ada"
         End If
         wsKK.Cells(ROW_SBU_KESIMPULAN, col).Value = sbuKesimpulan
+        ' Force text agar nomor panjang tidak dikonversi scientific notation
+        wsKK.Cells(ROW_SBU_NOMOR, col).NumberFormat = "@"
         wsKK.Cells(ROW_SBU_NOMOR, col).Value = sbuNomor
         wsKK.Cells(ROW_SBU_BERLAKU, col).Value = GetF(it, "sbu_berlaku")
         wsKK.Cells(ROW_SBU_KUALIFIKASI, col).Value = sbuKualifikasi
@@ -206,7 +209,10 @@ Public Sub MuatKKEvaluasi()
         ' ── Poin 4: SKP ──────────────────────────────────────
         Dim skpVal As String: skpVal = GetF(it, "skp")
         Dim skpCatatan As String: skpCatatan = GetF(it, "skp_catatan")
+        Dim skpJpVal As String: skpJpVal = GetF(it, "skp_jp")
         wsKK.Cells(ROW_SKP_KESIMPULAN, col).Value = "Memenuhi"
+        ' C31: jumlah paket berjalan (0 jika kosong)
+        wsKK.Cells(ROW_SKP_JP, col).Value = IIf(skpJpVal <> "", skpJpVal, "0")
         ' Format "5 SKP" — ambil angka dari skp lalu tambah " SKP"
         Dim skpNum As String
         If skpVal <> "" Then
@@ -256,6 +262,8 @@ Public Sub MuatKKEvaluasi()
         wsKK.Cells(ROW_AKTA_P_NOTARIS, col).Value = GetF(it, "akta_p_notaris")
         wsKK.Cells(ROW_AKTA_K_KESIMPULAN, col).Value = IIf(aktaKNomor <> "", "Memenuhi", "-")
         wsKK.Cells(ROW_AKTA_K_NOMOR, col).Value = aktaKNomor
+        ' Force text agar tanggal tidak diformat ulang Excel
+        wsKK.Cells(ROW_AKTA_K_TANGGAL, col).NumberFormat = "@"
         wsKK.Cells(ROW_AKTA_K_TANGGAL, col).Value = GetF(it, "akta_k_tanggal")
         wsKK.Cells(ROW_AKTA_K_NOTARIS, col).Value = GetF(it, "akta_k_notaris")
         wsKK.Cells(ROW_PEMILIK_HEADER, col).Value = "-"
