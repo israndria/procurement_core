@@ -181,12 +181,18 @@ Public Sub SyncKalender()
     Kill outJson
     On Error GoTo ErrHandler
 
-    ' Encode nama tender (ganti " dengan \")
-    Dim namaArg As String
-    namaArg = Replace(namaTender, """", "'")
+    ' Tulis nama tender ke file input (hindari masalah special char di argumen)
+    Dim inpFile As String
+    inpFile = sd & "\_sync_kalender_input.txt"
+    Dim ado2 As Object
+    Set ado2 = CreateObject("ADODB.Stream")
+    ado2.Type = 2: ado2.Charset = "UTF-8": ado2.Open
+    ado2.WriteText namaTender
+    ado2.SaveToFile inpFile, 2
+    ado2.Close
 
     Dim cmd As String
-    cmd = """" & pyExe & """ """ & pyScript & """ """ & namaArg & """"
+    cmd = """" & pyExe & """ """ & pyScript & """"
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")

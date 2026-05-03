@@ -87,9 +87,17 @@ def cari_tanggal(nama_tender: str) -> dict:
 
 
 if __name__ == "__main__":
-    nama = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else ""
+    # Baca nama dari file _sync_kalender_input.txt jika ada (hindari masalah special char di argv)
+    inp_path = os.path.join(SCRIPT_DIR, "_sync_kalender_input.txt")
+    if os.path.exists(inp_path):
+        with open(inp_path, "r", encoding="utf-8") as f:
+            nama = f.read().strip()
+        os.remove(inp_path)
+    else:
+        nama = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else ""
+
     if not nama:
-        json.dump({"error": "nama_tender kosong"}, open(OUT_PATH, "w"), ensure_ascii=False)
+        json.dump({"error": "nama_tender kosong"}, open(OUT_PATH, "w", encoding="utf-8"), ensure_ascii=False)
         sys.exit(1)
 
     try:
