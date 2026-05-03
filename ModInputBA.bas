@@ -146,7 +146,7 @@ Public Sub SyncKalender()
         Exit Sub
     End If
 
-    ' Ambil nama_tender dari @ Master Data kolom C baris 3 (MD_E3)
+    ' Ambil nama_tender dari @ Master Data C3
     Dim wsMD As Worksheet
     On Error Resume Next
     Set wsMD = ThisWorkbook.Sheets("@ Master Data")
@@ -157,18 +157,105 @@ Public Sub SyncKalender()
     End If
 
     Dim namaTender As String
-    namaTender = Trim(CStr(wsMD.Cells(3, 3).Value))  ' C3 = nama_tender
+    namaTender = Trim(CStr(wsMD.Cells(3, 3).Value))
     If namaTender = "" Then
         MsgBox "Nama tender belum terisi di '@ Master Data' C3." & vbCrLf & _
                "Klik 'Muat Draft Paket' terlebih dahulu.", vbExclamation
         Exit Sub
     End If
 
+    ' Panggil Python (bisa refresh token, tidak blocking Excel)
+    Dim sd As String
+    sd = ModWordLink.ScriptDir_Public()
+    If sd = "" Then MsgBox "Script dir tidak ditemukan.", vbExclamation: Exit Sub
+
+    Dim pyExe As String
+    pyExe = sd & "\python\python.exe"
+    Dim pyScript As String
+    pyScript = sd & "\sync_kalender.py"
+    Dim outJson As String
+    outJson = sd & "\_sync_kalender.json"
+
+    ' Hapus output lama
+    On Error Resume Next
+    Kill outJson
+    On Error GoTo ErrHandler
+
+    ' Encode nama tender (ganti " dengan \")
+    Dim namaArg As String
+    namaArg = Replace(namaTender, """", "'")
+
+    Dim cmd As String
+    cmd = """" & pyExe & """ """ & pyScript & """ """ & namaArg & """"
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    Application.StatusBar = "Sync Kalender: mencari jadwal di Google Calendar..."
+    wsh.Run cmd, 0, True  ' hidden, blocking — Python selesai dulu baru Excel lanjut
+    Set wsh = Nothing
+    Application.StatusBar = False
+
+    ' Baca hasil JSON
+    If Dir(outJson) = "" Then
+        MsgBox "sync_kalender.py tidak menghasilkan output." & vbCrLf & _
+               "Pastikan token.json valid (login dulu di V19 Scheduler).", vbExclamation
+        Exit Sub
+    End If
+
+    Dim ado As Object
+    Set ado = CreateObject("ADODB.Stream")
+    ado.Type = 2: ado.Charset = "UTF-8": ado.Open
+    ado.LoadFromFile outJson
+    Dim jsonStr As String
+    jsonStr = ado.ReadText
+    ado.Close
+
+    Dim errMsg As String
+    errMsg = ExtractVal(jsonStr, "error")
+    If errMsg <> "" And errMsg <> "null" Then
+        MsgBox "Error dari GCal: " & errMsg & vbCrLf & _
+               "Coba login ulang di V19 Scheduler.", vbExclamation
+        Exit Sub
+    End If
+
+    Dim tglPembukaan As String
+    Dim tglPembuktian As String
+    Dim keyword As String
+    tglPembukaan  = ExtractVal(jsonStr, "tgl_pembukaan")
+    tglPembuktian = ExtractVal(jsonStr, "tgl_pembuktian")
+    keyword       = ExtractVal(jsonStr, "keyword")
+
     wsBA.Unprotect
-    Call IsiTanggalDariGCal(wsBA, namaTender)
+
+    Dim pesanHasil As String
+    pesanHasil = "Hasil Sync Kalender:" & vbCrLf & _
+                 "Paket: " & namaTender & vbCrLf & vbCrLf
+
+    If tglPembukaan <> "" And tglPembukaan <> "null" Then
+        wsBA.Cells(ROW_TGL_PEMBUKAAN, 3).Value = CDate(tglPembukaan)
+        wsBA.Cells(ROW_TGL_PEMBUKAAN, 3).NumberFormat = "dd/mm/yyyy"
+        pesanHasil = pesanHasil & Chr(10) & "Pembukaan Penawaran: " & tglPembukaan
+    Else
+        pesanHasil = pesanHasil & Chr(10) & "Pembukaan Penawaran: tidak ditemukan"
+    End If
+
+    If tglPembuktian <> "" And tglPembuktian <> "null" Then
+        wsBA.Cells(ROW_TGL_PEMBUKTIAN, 3).Value = CDate(tglPembuktian)
+        wsBA.Cells(ROW_TGL_PEMBUKTIAN, 3).NumberFormat = "dd/mm/yyyy"
+        pesanHasil = pesanHasil & Chr(10) & "Pembuktian/Penetapan: " & tglPembuktian
+    Else
+        pesanHasil = pesanHasil & Chr(10) & "Pembuktian/Penetapan: tidak ditemukan"
+    End If
+
+    If tglPembukaan = "" And tglPembuktian = "" Then
+        pesanHasil = pesanHasil & vbCrLf & vbCrLf & "Keyword: """ & keyword & """"
+    End If
+
+    MsgBox pesanHasil, vbInformation, "Sync Kalender"
     Exit Sub
 
 ErrHandler:
+    Application.StatusBar = False
     MsgBox "Error SyncKalender: " & Err.Description, vbCritical
 End Sub
 
@@ -263,7 +350,7 @@ End Sub
 ' Isi tanggal dari Google Calendar via V19 token
 ' Cari event berdasarkan kata kunci di title
 ' ============================================================
-Private Sub IsiTanggalDariGCal(wsBA As Worksheet, namaTender As String)
+Private Sub IsiTanggalDariGCal_UNUSED(wsBA As Worksheet, namaTender As String)
     ' Format event GCal V19: "{Tahap} - {Nama_Paket}"
     ' Cari berdasarkan kata kunci pertama nama_tender (agar match partial)
     Dim scriptDir As String
