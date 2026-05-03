@@ -32,13 +32,18 @@ Private Const ROW_PERSONEL_2      As Integer = 14
 Private Const ROW_ALAT_1          As Integer = 17
 Private Const ROW_ALAT_2          As Integer = 18
 Private Const ROW_ALAT_3          As Integer = 19
+Private Const ROW_ALAT_4          As Integer = 20
+Private Const ROW_ALAT_5          As Integer = 21
+Private Const ROW_ALAT_6          As Integer = 22
 ' Blok Dokumen Penawaran
-Private Const ROW_JML_DAFTAR      As Integer = 22
-Private Const ROW_JML_KIRIM       As Integer = 23
-Private Const ROW_JML_TDK_KIRIM   As Integer = 24
+Private Const ROW_JML_DAFTAR      As Integer = 25
+Private Const ROW_JML_KIRIM       As Integer = 26
+Private Const ROW_JML_TDK_KIRIM   As Integer = 27
+Private Const ROW_JML_TDK_LENGKAP As Integer = 28
+Private Const ROW_JML_TDK_BUKA    As Integer = 29
 ' Blok Hasil (dari KK Evaluasi)
-Private Const ROW_SKP             As Integer = 27
-Private Const ROW_HASIL_PEMBUKTIAN As Integer = 28
+Private Const ROW_SKP             As Integer = 32
+Private Const ROW_HASIL_PEMBUKTIAN As Integer = 33
 
 
 ' ============================================================
@@ -169,6 +174,9 @@ Private Sub IsiIdentitasPeserta(wsBA As Worksheet, kodeTender As String)
         wsBA.Cells(ROW_ALAT_1, col).Value           = ExtractVal(obj, "alat_1")
         wsBA.Cells(ROW_ALAT_2, col).Value           = ExtractVal(obj, "alat_2")
         wsBA.Cells(ROW_ALAT_3, col).Value           = ExtractVal(obj, "alat_3")
+        wsBA.Cells(ROW_ALAT_4, col).Value           = ExtractVal(obj, "alat_4")
+        wsBA.Cells(ROW_ALAT_5, col).Value           = ExtractVal(obj, "alat_5")
+        wsBA.Cells(ROW_ALAT_6, col).Value           = ExtractVal(obj, "alat_6")
 
         startPos = objEnd + 1
         col = col + 1
@@ -204,9 +212,11 @@ Private Sub IsiDokumenPenawaran(wsBA As Worksheet, kodeTender As String)
     jmlKirim  = CInt(Val(ExtractVal(obj, "jml_kirim")))
     jmlTdk    = CInt(Val(ExtractVal(obj, "jml_tidak_kirim")))
 
-    wsBA.Cells(ROW_JML_DAFTAR, 3).Value    = jmlDaftar
-    wsBA.Cells(ROW_JML_KIRIM, 3).Value     = jmlKirim
-    wsBA.Cells(ROW_JML_TDK_KIRIM, 3).Value = jmlTdk
+    wsBA.Cells(ROW_JML_DAFTAR, 3).Value      = jmlDaftar
+    wsBA.Cells(ROW_JML_KIRIM, 3).Value       = jmlKirim
+    wsBA.Cells(ROW_JML_TDK_KIRIM, 3).Value   = jmlTdk
+    wsBA.Cells(ROW_JML_TDK_LENGKAP, 3).Value = CInt(Val(ExtractVal(obj, "jml_tidak_lengkap")))
+    wsBA.Cells(ROW_JML_TDK_BUKA, 3).Value    = CInt(Val(ExtractVal(obj, "jml_tidak_dapat_dibuka")))
 End Sub
 
 
