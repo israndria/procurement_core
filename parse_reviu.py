@@ -436,19 +436,30 @@ def _parse_rk3k(pdf_or_path, hasil):
             if "identifikasi" in col and "bahaya" in col: idx_bahaya = ii
             if "uraian" in col and "pekerjaan" in col: idx_uraian = ii
             if "detail" in col or "item" in col: idx_detail = ii
-            if any(kw in col for kw in ["keterangan", "risiko", "tingkat", "level"]): idx_risiko = ii
+            # Prioritas: sasaran k3 (berisi "Fatal/Cukup Fatal") > keterangan/tingkat/level > risiko umum
+            if "sasaran" in col and "k3" in col: idx_risiko = ii; break
+            elif any(kw in col for kw in ["keterangan", "tingkat", "level"]) and idx_risiko == -1: idx_risiko = ii
+            elif "risiko" in col and idx_risiko == -1: idx_risiko = ii
         if idx_detail == -1 and idx_uraian != -1 and len(header) > idx_uraian + 1: idx_detail = idx_uraian + 1
-        
+
+        # Track baris dengan risiko tertinggi (prioritas: "fatal" tanpa "cukup")
+        highest_score = 0
         for row in table[1:]:
             if len(row) > idx_bahaya:
                 b_val = bersihkan(row[idx_bahaya])
                 if b_val and len(b_val) > 5 and not b_val.isdigit() and "identifikasi" not in b_val.lower():
                     bahaya_list.append(b_val)
                     is_highest = False
+                    score = 0
                     if idx_risiko != -1 and len(row) > idx_risiko:
                         r_val = str(row[idx_risiko] or "").lower()
-                        high_keywords = ["tertinggi", "besar", "sangat besar", "tinggi", "ekstrem", "kritis", "high", "extreme", "major", "fatal", "sangat fatal", "meninggal", "cacat"]
-                        if any(kw in r_val for kw in high_keywords): is_highest = True
+                        if any(kw in r_val for kw in ["sangat fatal", "sangat besar", "ekstrem", "extreme", "meninggal"]): score = 4
+                        elif re.search(r"\bfatal\b", r_val) and "cukup fatal" not in r_val: score = 3
+                        elif any(kw in r_val for kw in ["tertinggi", "kritis", "high", "major", "cacat"]): score = 2
+                        elif any(kw in r_val for kw in ["besar", "tinggi", "cukup fatal"]): score = 1
+                        if score > highest_score:
+                            highest_score = score
+                            is_highest = True
                     if is_highest:
                         u_val = bersihkan(row[idx_uraian]) if idx_uraian != -1 and len(row) > idx_uraian else ""
                         d_val = bersihkan(row[idx_detail]) if idx_detail != -1 and len(row) > idx_detail else ""

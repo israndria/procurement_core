@@ -18,7 +18,7 @@ Private Const SHEET_INPUT As String = "1. Input Data"
 Private Const CELL_SELECTOR As String = "F1"   ' Dropdown pilih paket (di @ Master Data)
 
 ' Kolom yang di-fetch (efisien, tidak perlu semua)
-Private Const SB_SELECT As String = "kode_tender,nama_tender,mak,kode_rup,nilai_pagu,nilai_hps,kode_pokja,nomor_pp,nomor_surat_dinas,nama_dinas,nama_ppk,jangka_waktu,sumber_anggaran,anggota_1,anggota_2,anggota_3,bidang,sbu_baru,sbu_lama"
+Private Const SB_SELECT As String = "kode_tender,nama_tender,mak,kode_rup,nilai_pagu,nilai_hps,kode_pokja,nomor_pp,nomor_surat_dinas,nama_dinas,nama_ppk,jangka_waktu,sumber_anggaran,anggota_1,anggota_2,anggota_3,bidang,sbu_baru,sbu_lama,nip_ppk,sk_ppk"
 
 ' ── @ Master Data row constants (fixed layout) ──
 Private Const MD_SHEET As String = "@ Master Data"
@@ -306,9 +306,17 @@ Public Sub PilihDraftPaket(selectedLabel As String)
                 ppkNamaBersih = ppkNama
                 wsMD.Cells(MD_E19, 3).Value = ppkNama
             End If
-            ' Lookup NIP PPK + Nomor SK
+            ' NIP PPK + Nomor SK: dari Supabase dulu, fallback ke sheet lokal
             Dim nipPPK As String, skPPK As String, gelarPPK As String
-            LookupPPK ppkNamaBersih, nipPPK, skPPK, gelarPPK
+            nipPPK = Trim(CStr(item(19)))
+            skPPK  = Trim(CStr(item(20)))
+            If nipPPK = "" Or skPPK = "" Then
+                Dim nipLookup As String, skLookup As String, gelarLookup As String
+                LookupPPK ppkNamaBersih, nipLookup, skLookup, gelarLookup
+                If nipPPK = "" Then nipPPK = nipLookup
+                If skPPK  = "" Then skPPK  = skLookup
+                If gelarPPK = "" Then gelarPPK = gelarLookup
+            End If
             If nipPPK <> "" Then
                 wsMD.Cells(MD_E20, 3).NumberFormat = "@"
                 wsMD.Cells(MD_E20, 3).Value = nipPPK
@@ -1474,7 +1482,7 @@ Private Function ParseDraftJSON(json As String) As Collection
     Dim ch As String
     Dim obj As String
     Do
-        Dim item(18) As Variant
+        Dim item(20) As Variant
         braceStart = InStr(pos, json, "{")
         If braceStart = 0 Then Exit Do
         ' Cari matching } dengan brace counting (skip isi string)
@@ -1519,6 +1527,8 @@ Private Function ParseDraftJSON(json As String) As Collection
         item(16) = ExtractJSONVal(obj, "bidang")
         item(17) = ExtractJSONVal(obj, "sbu_baru")
         item(18) = ExtractJSONVal(obj, "sbu_lama")
+        item(19) = ExtractJSONVal(obj, "nip_ppk")
+        item(20) = ExtractJSONVal(obj, "sk_ppk")
 
         col.Add item
         pos = braceEnd + 1
