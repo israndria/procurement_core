@@ -83,6 +83,9 @@ def bersihkan(s):
     s = re.sub(r"(?<=[\d,])\s*�+\s*(?=[\d,])", " – ", s)
     # Hapus replacement char yang tersisa
     s = s.replace("�", "")
+    # Fix PDF hyphenation: "kata- kata" -> "katakara"
+    import re as _re
+    s = _re.sub(r"(\w+)-\s+(\w)", lambda m: m.group(1) + m.group(2), s)
     return " ".join(s.split()).strip()
 
 def normalisasi_pengalaman(s):
@@ -229,12 +232,37 @@ def _parse_fung_bangunan(pdf_or_path, hasil):
                 hasil["reviu"]["E2"]["status"] = "terisi"
                 return True
 
-        # Pola 3: Tujuan/Maksud — ambil baris pertama saja (bukan semua sampai \Z)
-        m = re.search(r"(?:Tujuan|Maksud)\s*[:/]?\s*\n*([^\n]{20,200})", teks, re.IGNORECASE)
+        # Pola 3: Judul dokumen / nama pekerjaan dari header KAK/RKS
+        # Contoh: "PEMBANGUAN BANGUNAN CYTOTOXIC - RSUD DATU SANGGUL KABUPATEN TAPIN"
+        # Untuk E2, ambil bagian nama pekerjaan saja (sebelum " - " jika ada)
+        m_judul = re.search(
+            r"(?:KERANGKA ACUAN KERJA|SPESIFIKASI TEKNIS|RKS)\s*\n+([^\n]{10,150})",
+            teks, re.IGNORECASE
+        )
+        if m_judul:
+            val_full = bersihkan(m_judul.group(1))
+            # Potong bagian nama instansi setelah " - " atau " – "
+            val = re.split(r"\s+[-–]\s+", val_full)[0].strip()
+            if len(val) < 10:
+                val = val_full  # fallback jika terlalu pendek setelah split
+            val_lower = val.lower()
+            if (10 < len(val) < 150
+                    and not any(kw in val_lower for kw in FORBIDDEN_KEYWORDS)
+                    and any(kw in val_lower for kw in VALID_KEYWORDS)):
+                hasil["reviu"]["E2"]["nilai"] = val
+                hasil["reviu"]["E2"]["status"] = "terisi"
+                return True
+
+        # Pola 4: Tujuan/Maksud — ambil baris pertama saja, maksimum 80 karakter
+        m = re.search(r"(?:Tujuan|Maksud)\s+dari\s+(?:pelaksanaan\s+)?(?:pekerjaan\s+)?([^\n]{10,80})", teks, re.IGNORECASE)
+        if not m:
+            m = re.search(r"(?:Tujuan|Maksud)\s*[:/]?\s*\n*([^\n]{20,80})", teks, re.IGNORECASE)
         if m:
             val = bersihkan(m.group(1))
+            # Buang awalan yang tidak informatif
+            val = re.sub(r"^(?:adalah|ini|untuk|agar|supaya)\s+", "", val, flags=re.IGNORECASE).strip()
             val_lower = val.lower()
-            if (20 < len(val) < 200
+            if (10 < len(val) < 80
                     and not any(kw in val_lower for kw in FORBIDDEN_KEYWORDS)
                     and any(kw in val_lower for kw in VALID_KEYWORDS)):
                 hasil["reviu"]["E2"]["nilai"] = val
@@ -273,20 +301,28 @@ def _parse_peralatan(pdf_or_path, hasil):
             nama_raw = str(row[idx_nama] or "").strip()
             if not nama_raw or nama_raw.isdigit() or len(nama_raw) < 3: continue
             if any(kw in nama_raw.lower() for kw in ["no", "jenis", "peralatan", "nama"]): continue
-            
-            # Cek jika ada multiple item dalam satu baris (biasanya terpisah \n di PDF atau baris baru di DOCX)
-            namas = [v.strip() for v in nama_raw.split("\n") if len(v.strip()) > 2]
-            kaps = [v.strip() for v in str(row[idx_kap] or "").split("\n")] if idx_kap != -1 else [""] * len(namas)
-            jmls = [v.strip() for v in str(row[idx_jml] or "").split("\n")] if idx_jml != -1 else ["1"] * len(namas)
-            
-            for i, n_item in enumerate(namas):
-                n = bersihkan(n_item)
-                if not n or n.isdigit() or any(kw in n.lower() for kw in ["no", "jenis", "peralatan", "nama"]): continue
-                k = bersihkan(kaps[i]) if i < len(kaps) else (bersihkan(" ".join(kaps)) if i == 0 else "")
-                j = bersihkan(jmls[i]) if i < len(jmls) else (bersihkan(" ".join(jmls)) if i == 0 else "1 Unit")
-                if not any(c.isdigit() for c in j): j = "1 Unit"
-                elif "unit" not in j.lower(): j += " Unit"
-                alat_list.append({"nama": n, "kapasitas": k, "jumlah": j})
+
+            # Gabungkan multiline dalam satu cell menjadi satu nama alat (pisahkan dengan spasi)
+            # Contoh: "Alat pancang mini\npile." → "Alat pancang mini pile."
+            nama_joined = " ".join(v.strip() for v in nama_raw.split("\n") if v.strip())
+            nama_joined = re.sub(r"\s+", " ", nama_joined).strip()
+
+            kap_raw = str(row[idx_kap] or "").strip() if idx_kap != -1 else ""
+            kap_joined = " ".join(v.strip() for v in kap_raw.split("\n") if v.strip())
+            kap_joined = re.sub(r"\s+", " ", kap_joined).strip()
+
+            jml_raw = str(row[idx_jml] or "").strip() if idx_jml != -1 else "1"
+            jml_joined = " ".join(v.strip() for v in jml_raw.split("\n") if v.strip())
+            jml_joined = re.sub(r"\s+", " ", jml_joined).strip() or "1"
+
+            n = bersihkan(nama_joined)
+            if not n or n.isdigit() or any(kw in n.lower() for kw in ["no", "jenis", "peralatan", "nama"]):
+                continue
+            k = bersihkan(kap_joined)
+            j = bersihkan(jml_joined)
+            if not any(c.isdigit() for c in j): j = "1 Unit"
+            elif "unit" not in j.lower() and "set" not in j.lower(): j += " Unit"
+            alat_list.append({"nama": n, "kapasitas": k, "jumlah": j})
     
     if not alat_list: return False
 
@@ -593,26 +629,44 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
         
         # E16: Kegiatan/Sub Kegiatan
         if not hasil["input_data"]["E16"]["nilai"]:
-            # Kata yang bukan nama kegiatan
             _BUKAN_KEGIATAN = [
                 "tujuan", "latar", "bermaksud", "menjalin", "melaksanakan", "dengan ini",
-                "pemerintah", "kami", "bahwa", "dalam rangka", "untuk menjalin"
+                "pemerintah", "kami", "bahwa", "dalam rangka", "untuk menjalin",
+                "satuan kerja", "kuasa pengguna", "pengguna anggaran", "pejabat pembuat",
+                "konsultan", "kontraktor", "pengawas",
             ]
-            # Pola 1: Label eksplisit "Sub Kegiatan :" / "Kegiatan :"
-            m_keg = re.search(
-                r"(?:Sub\s+)?Kegiatan\s*[:/]\s*([^\n]{5,150})",
+
+            # Pola 1: judul KAK/RKS — PRIORITAS UTAMA karena paling bersih
+            # Contoh: "KERANGKA ACUAN KERJA\nPEMBANGUAN BANGUNAN CYTOTOXIC - RSUD DATU SANGGUL"
+            m_kak = re.search(
+                r"(?:KERANGKA ACUAN KERJA|SPESIFIKASI TEKNIS|RENCANA KERJA DAN SYARAT)\s*\n+([^\n]{10,150})",
                 txt, re.IGNORECASE
             )
-            if m_keg:
-                val = bersihkan(m_keg.group(1))
+            if m_kak:
+                val = bersihkan(m_kak.group(1))
                 val_lower = val.lower()
-                if (len(val) > 5
+                if (len(val) > 10
                         and not any(kw in val_lower for kw in _BUKAN_KEGIATAN)
-                        and not val_lower.startswith(("dan ", "atau ", "ini ", "itu "))):
+                        and not val_lower.startswith(("tahun", "nomor", "tentang", "oleh", "a.", "b.", "1."))):
                     hasil["input_data"]["E16"]["nilai"] = val
                     hasil["input_data"]["E16"]["status"] = "terisi"
 
-            # Pola 2: "Nama Paket :" — alternatif
+            # Pola 2: Label eksplisit "Sub Kegiatan :" / "Kegiatan :" — hanya jika bukan "Satuan Kerja"
+            if not hasil["input_data"]["E16"]["nilai"]:
+                m_keg = re.search(
+                    r"\bSub\s+Kegiatan\s*[:/]\s*([^\n]{5,150})",
+                    txt, re.IGNORECASE
+                )
+                if m_keg:
+                    val = bersihkan(m_keg.group(1))
+                    val_lower = val.lower()
+                    if (len(val) > 5
+                            and not any(kw in val_lower for kw in _BUKAN_KEGIATAN)
+                            and not val_lower.startswith(("dan ", "atau ", "ini ", "itu "))):
+                        hasil["input_data"]["E16"]["nilai"] = val
+                        hasil["input_data"]["E16"]["status"] = "terisi"
+
+            # Pola 3: "Nama Paket :" — alternatif
             if not hasil["input_data"]["E16"]["nilai"]:
                 m_paket = re.search(r"Nama\s+Paket\s*[:/]\s*([^\n]{5,150})", txt, re.IGNORECASE)
                 if m_paket:
@@ -620,6 +674,13 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
                     if len(val) > 5 and not any(kw in val.lower() for kw in _BUKAN_KEGIATAN):
                         hasil["input_data"]["E16"]["nilai"] = val
                         hasil["input_data"]["E16"]["status"] = "terisi"
+
+            # Pola 4: fallback dari nama_tender (sudah dikirim via argfile baris ke-4)
+            if not hasil["input_data"]["E16"]["nilai"]:
+                nama_tender_fb = getattr(parse_pdf_enhanced, "_nama_tender_fallback", "")
+                if nama_tender_fb:
+                    hasil["input_data"]["E16"]["nilai"] = bersihkan(nama_tender_fb)
+                    hasil["input_data"]["E16"]["status"] = "terisi"
 
         # E32: Lokasi Pekerjaan
         _BUKAN_LOKASI = [
