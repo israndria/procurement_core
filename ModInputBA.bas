@@ -239,7 +239,7 @@ Public Sub SyncKalender()
 
     If tglPembukaan <> "" And tglPembukaan <> "null" Then
         wsBA.Cells(ROW_TGL_PEMBUKAAN, 3).Value = CDate(tglPembukaan)
-        wsBA.Cells(ROW_TGL_PEMBUKAAN, 3).NumberFormat = "dd/mm/yyyy"
+        wsBA.Cells(ROW_TGL_PEMBUKAAN, 3).NumberFormat = "dd mmmm yyyy"
         pesanHasil = pesanHasil & Chr(10) & "Pembukaan Penawaran: " & tglPembukaan
     Else
         pesanHasil = pesanHasil & Chr(10) & "Pembukaan Penawaran: tidak ditemukan"
@@ -247,7 +247,7 @@ Public Sub SyncKalender()
 
     If tglPembuktian <> "" And tglPembuktian <> "null" Then
         wsBA.Cells(ROW_TGL_PEMBUKTIAN, 3).Value = CDate(tglPembuktian)
-        wsBA.Cells(ROW_TGL_PEMBUKTIAN, 3).NumberFormat = "dd/mm/yyyy"
+        wsBA.Cells(ROW_TGL_PEMBUKTIAN, 3).NumberFormat = "dd mmmm yyyy"
         pesanHasil = pesanHasil & Chr(10) & "Pembuktian/Penetapan: " & tglPembuktian
     Else
         pesanHasil = pesanHasil & Chr(10) & "Pembuktian/Penetapan: tidak ditemukan"
@@ -485,7 +485,7 @@ Private Sub IsiTanggalDariGCal_UNUSED(wsBA As Worksheet, namaTender As String)
 
     If tglPembukaan <> "" Then
         wsBA.Cells(ROW_TGL_PEMBUKAAN, 3).Value = CDate(tglPembukaan)
-        wsBA.Cells(ROW_TGL_PEMBUKAAN, 3).NumberFormat = "dd/mm/yyyy"
+        wsBA.Cells(ROW_TGL_PEMBUKAAN, 3).NumberFormat = "dd mmmm yyyy"
         pesanHasil = pesanHasil & "✔ Pembukaan Penawaran: " & tglPembukaan & vbCrLf
     Else
         pesanHasil = pesanHasil & "✘ Pembukaan Penawaran: tidak ditemukan" & vbCrLf
@@ -493,7 +493,7 @@ Private Sub IsiTanggalDariGCal_UNUSED(wsBA As Worksheet, namaTender As String)
 
     If tglPembuktian <> "" Then
         wsBA.Cells(ROW_TGL_PEMBUKTIAN, 3).Value = CDate(tglPembuktian)
-        wsBA.Cells(ROW_TGL_PEMBUKTIAN, 3).NumberFormat = "dd/mm/yyyy"
+        wsBA.Cells(ROW_TGL_PEMBUKTIAN, 3).NumberFormat = "dd mmmm yyyy"
         pesanHasil = pesanHasil & "✔ Pembuktian/Penetapan: " & tglPembuktian & vbCrLf
     Else
         pesanHasil = pesanHasil & "✘ Pembuktian/Penetapan: tidak ditemukan" & vbCrLf
