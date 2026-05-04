@@ -218,10 +218,15 @@ Public Sub ParseDraftTerpilih()
         MsgBox "Pilih paket dari dropdown " & CELL_SELECTOR & " terlebih dahulu.", vbExclamation, "Belum Ada Pilihan"
         Exit Sub
     End If
-    If m_DataCache Is Nothing Or m_DataCache.Count = 0 Then
-        MsgBox "Data belum dimuat. Klik 'Muat Draft Paket' terlebih dahulu.", vbExclamation, "Data Kosong"
-        Exit Sub
+    ' Auto-load jika cache kosong (misal setelah reopen workbook)
+    If m_DataCache Is Nothing Then
+        MuatDraftPaket
+    ElseIf m_DataCache.Count = 0 Then
+        MuatDraftPaket
     End If
+    ' Cek ulang setelah load
+    If m_DataCache Is Nothing Then Exit Sub
+    If m_DataCache.Count = 0 Then Exit Sub
     PilihDraftPaket val
 End Sub
 
