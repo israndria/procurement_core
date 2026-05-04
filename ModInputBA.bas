@@ -131,8 +131,15 @@ End Sub
 
 
 ' ============================================================
+' MUAT & SYNC: gabungan MuatInputBA + SyncKalender dalam 1 tombol
+' ============================================================
+Public Sub MuatDanSync()
+    MuatInputBA
+    SyncKalender
+End Sub
+
+
 ' SYNC KALENDER: isi C3/C4 dari Google Calendar
-' Dipanggil dari tombol "Sync Kalender" di sheet "0. Input BA"
 ' ============================================================
 Public Sub SyncKalender()
     Dim wsBA As Worksheet

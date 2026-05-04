@@ -97,15 +97,7 @@ def inject_buttons(filepath):
         # 2b. Inject Workbook_Open auto-relink ke ThisWorkbook module
         auto_relink_code = (
             "Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)\n"
-            "    If Sh.Name = \"1. Input Data\" Then\n"
-            "        If Not Intersect(Target, Sh.Range(\"E2\")) Is Nothing Then\n"
-            "            Dim val As String\n"
-            "            val = Trim(CStr(Sh.Range(\"E2\").Value))\n"
-            "            If val <> \"\" Then\n"
-            "                ModDraftPaket.PilihDraftPaket val\n"
-            "            End If\n"
-            "        End If\n"
-            "    End If\n"
+            "    ' Placeholder — parsing dipicu manual via tombol Parse Draft\n"
             "End Sub\n"
             "\n"
             "Private Sub Workbook_Open()\n"
@@ -174,10 +166,11 @@ def inject_buttons(filepath):
                 ("btnUndanganPDF",        "Print Undangan PDF", "PrintUndanganPDF",           4, 6, RED_PDF),
                 ("btnPrintPembuktian",    "Print BA Pembuktian","PrintPembuktianPDF",         4, 7, BLACK),
                 ("btnREvaluasi",          "Print REvaluasi",    "PrintREvaluasiPDF",          4, 8, BLACK),
-                # Baris 5: Timpang, Draft, Kode Unik
+                # Baris 5: Timpang, Draft, Parse Draft, Kode Unik
                 ("btnPembuktianTimpang",  "Print Timpang",      "PrintPembuktianTimpangPDF",  5, 6, BLACK),
                 ("btnMuatDraft",          "Muat Draft Paket",   "MuatDraftPaket",             5, 7, PURPLE),
-                ("btnKodeUnik",           "Kode Unik Surat",    "GenerateKodeUnik",           5, 8, TEAL),
+                ("btnParseDraft",         "Parse Draft",        "ParseDraftTerpilih",         5, 8, GREEN),
+                ("btnKodeUnik",           "Kode Unik Surat",    "GenerateKodeUnik",           5, 9, TEAL),
                 # Baris 6: Reviu
                 ("btnBukaReviu",          "Buka Reviu",         "BukaReviu",                  6, 6, BLUE_WORD),
                 ("btnPrintIsiReviu",      "Print Isi Reviu",    "PrintIsiReviuPDF",           6, 7, BLACK),
@@ -192,8 +185,7 @@ def inject_buttons(filepath):
             ]),
 
             ("0. Input BA", [
-                ("btnMuatInputBA",  "Muat Input BA",  "MuatInputBA",  1, 3, PURPLE),
-                ("btnSyncKalender", "Sync Kalender",  "SyncKalender", 1, 4, TEAL),
+                ("btnMuatDanSync", "Muat & Sync", "MuatDanSync", 1, 3, PURPLE),
             ]),
         ]
         

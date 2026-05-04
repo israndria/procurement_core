@@ -63,7 +63,11 @@ def deteksi_cara_pembayaran(daftar_cp, bidang=""):
     id_pilih = "monthly_certificate" if is_binamarga else "termin"
     for cp in daftar_cp:
         if cp["id"] == id_pilih:
-            return cp["id"], cp["teks"]
+            # Bersihkan teks cara pembayaran dari redundansi
+            teks = cp["teks"]
+            teks = re.sub(r"\bsecara cara\b", "secara", teks)
+            teks = re.sub(r"\s{2,}", " ", teks).strip()
+            return cp["id"], teks
     return daftar_cp[0]["id"], daftar_cp[0]["teks"]
 
 # ─── Helpers ────────────────────────────────────────────────────────────
@@ -179,9 +183,9 @@ def find_files_by_keywords(directory, keywords):
 # ─── Logic Parsers Per Bagian ───────────────────────────────────────────────
 
 def _parse_fung_bangunan(pdf_or_path, hasil):
-    """E2: Fungsi Bangunan"""
-    fname = os.path.basename(pdf_or_path if isinstance(pdf_or_path, str) else pdf_or_path.stream.name if hasattr(pdf_or_path, "stream") else "").lower()
-    if "gambar" in fname: return False # Skip file gambar/stempel
+    """E2: Fungsi Bangunan — cari di KAK/DOCX, bukan Draft PDF"""
+    fname = os.path.basename(pdf_or_path if isinstance(pdf_or_path, str) else "").lower()
+    if "gambar" in fname or "draft_pokja" in fname: return False
 
     if isinstance(pdf_or_path, str):
         if pdf_or_path.lower().endswith(".docx"):
@@ -190,23 +194,49 @@ def _parse_fung_bangunan(pdf_or_path, hasil):
     else:
         teks_list = [p.extract_text() or "" for p in pdf_or_path.pages]
 
-    FORBIDDEN_KEYWORDS = ["digambar oleh", "diperiksa oleh", "no. gambar", "judul gambar", "skala :", "proyek :", "koordinator", "rencana kerja"]
-    
+    # Kata yang menunjukkan ini BUKAN nama fungsi bangunan (pihak, koordinator, dll)
+    FORBIDDEN_KEYWORDS = [
+        "digambar oleh", "diperiksa oleh", "no. gambar", "judul gambar", "skala :", "proyek :",
+        "koordinator", "rencana kerja", "konsultan", "pemberi tugas", "pengawas", "cv ", "pt ",
+        "dinas ", "unit kerja", "satuan kerja", "upt ", "badan ", "kepala "
+    ]
+    # Kata yang HARUS ada agar match dianggap fungsi bangunan
+    VALID_KEYWORDS = [
+        "gedung", "bangunan", "jalan", "jembatan", "irigasi", "saluran", "drainase",
+        "instalasi", "jaringan", "konstruksi", "infrastruktur", "fasilitas", "rehabilitasi",
+        "renovasi", "pemeliharaan", "peningkatan", "pembangunan"
+    ]
+
     for teks in teks_list:
-        # Pola Pekerjaan : [Nama Pekerjaan]
+        # Pola 1: "Nama Pekerjaan :" atau "Pekerjaan :"
         m_pek = re.search(r"(?:Nama\s+)?Pekerjaan\s*[:/]\s*([^\n]{10,200})", teks, re.IGNORECASE)
         if m_pek:
             val = bersihkan(m_pek.group(1))
-            if not any(kw in val.lower() for kw in FORBIDDEN_KEYWORDS) and 10 < len(val) < 180:
+            val_lower = val.lower()
+            if (10 < len(val) < 180
+                    and not any(kw in val_lower for kw in FORBIDDEN_KEYWORDS)
+                    and any(kw in val_lower for kw in VALID_KEYWORDS)):
                 hasil["reviu"]["E2"]["nilai"] = val
                 hasil["reviu"]["E2"]["status"] = "terisi"
                 return True
-                
-        # Pola Tujuan / Maksud
-        m = re.search(r"(?:Tujuan|Maksud)\s*[:/]?\s*\n*(.*?)(?=\n\s*\d+\.|\Z)", teks, re.DOTALL | re.IGNORECASE)
+
+        # Pola 2: "Fungsi Bangunan :" atau "Jenis Bangunan :"
+        m_fung = re.search(r"(?:Fungsi|Jenis)\s+Bangunan\s*[:/]\s*([^\n]{5,100})", teks, re.IGNORECASE)
+        if m_fung:
+            val = bersihkan(m_fung.group(1))
+            if 5 < len(val) < 100:
+                hasil["reviu"]["E2"]["nilai"] = val
+                hasil["reviu"]["E2"]["status"] = "terisi"
+                return True
+
+        # Pola 3: Tujuan/Maksud — ambil baris pertama saja (bukan semua sampai \Z)
+        m = re.search(r"(?:Tujuan|Maksud)\s*[:/]?\s*\n*([^\n]{20,200})", teks, re.IGNORECASE)
         if m:
             val = bersihkan(m.group(1))
-            if 20 < len(val) < 250:
+            val_lower = val.lower()
+            if (20 < len(val) < 200
+                    and not any(kw in val_lower for kw in FORBIDDEN_KEYWORDS)
+                    and any(kw in val_lower for kw in VALID_KEYWORDS)):
                 hasil["reviu"]["E2"]["nilai"] = val
                 hasil["reviu"]["E2"]["status"] = "terisi"
                 return True
@@ -561,52 +591,99 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
             txt = extract_text_from_docx(f)
         else: continue
         
-        # E16: Kegiatan
+        # E16: Kegiatan/Sub Kegiatan
         if not hasil["input_data"]["E16"]["nilai"]:
-            m_keg = re.search(r"(?:Kegiatan|Sub\s+Kegiatan|Nama\s+Paket)\s*[:/]?\s*([^\n]{5,150})", txt, re.IGNORECASE)
-            if m_keg: 
+            # Kata yang bukan nama kegiatan
+            _BUKAN_KEGIATAN = [
+                "tujuan", "latar", "bermaksud", "menjalin", "melaksanakan", "dengan ini",
+                "pemerintah", "kami", "bahwa", "dalam rangka", "untuk menjalin"
+            ]
+            # Pola 1: Label eksplisit "Sub Kegiatan :" / "Kegiatan :"
+            m_keg = re.search(
+                r"(?:Sub\s+)?Kegiatan\s*[:/]\s*([^\n]{5,150})",
+                txt, re.IGNORECASE
+            )
+            if m_keg:
                 val = bersihkan(m_keg.group(1))
-                if len(val) > 5 and not any(kw in val.lower() for kw in ["tujuan", "latar"]):
+                val_lower = val.lower()
+                if (len(val) > 5
+                        and not any(kw in val_lower for kw in _BUKAN_KEGIATAN)
+                        and not val_lower.startswith(("dan ", "atau ", "ini ", "itu "))):
                     hasil["input_data"]["E16"]["nilai"] = val
                     hasil["input_data"]["E16"]["status"] = "terisi"
-        
-        # E32: Lokasi — skip jika nilai mengandung kata-kata RK3K/teknis yang bukan lokasi
-        _BUKAN_LOKASI = ["resiko", "risiko", "tingkat", "uraian", "bahaya", "pengendalian",
-                         "ibprp", "rk3k", "k3", "pekerjaan persiapan"]
-        if not hasil["input_data"]["E32"]["nilai"]:
-            # Pola 1: nilai di baris sama setelah "Lokasi Pekerjaan :"
-            m_lok = re.search(r"Lokasi\s*(?:Pekerjaan)?\s*[:/]?\s*([^\n]{5,100})", txt, re.IGNORECASE)
-            # Pola 2: nilai di baris berikutnya (PDF kolom, nilai pada baris setelah label)
-            m_lok2 = re.search(r"Lokasi\s*(?:Pekerjaan)?\s*[:/]?\s*\n([^\n]{5,100})", txt, re.IGNORECASE)
-            for m_try in [m_lok2, m_lok]:
-                if m_try:
-                    val_lok = bersihkan(m_try.group(1))
-                    if val_lok and not any(kw in val_lok.lower() for kw in _BUKAN_LOKASI):
-                        # Cek apakah ada baris lanjutan yang bisa digabung
-                        pos_end = m_try.end()
-                        m_next = re.search(r"([^\n]{3,60})\n", txt[pos_end:pos_end+100])
-                        if m_next and not re.match(r"^\d+\s+\d{2,}|^[A-Z\s:]{10,}|^\.|^\d+\s+[A-Z]", m_next.group(1)):
-                            val_lok = val_lok + " " + bersihkan(m_next.group(1))
-                        hasil["input_data"]["E32"]["nilai"] = val_lok
-                        hasil["input_data"]["E32"]["status"] = "terisi"
-                        break
 
-        # E33: Sumber Dana — skip jika nilai hanya angka tahun atau bukan sumber dana
+            # Pola 2: "Nama Paket :" — alternatif
+            if not hasil["input_data"]["E16"]["nilai"]:
+                m_paket = re.search(r"Nama\s+Paket\s*[:/]\s*([^\n]{5,150})", txt, re.IGNORECASE)
+                if m_paket:
+                    val = bersihkan(m_paket.group(1))
+                    if len(val) > 5 and not any(kw in val.lower() for kw in _BUKAN_KEGIATAN):
+                        hasil["input_data"]["E16"]["nilai"] = val
+                        hasil["input_data"]["E16"]["status"] = "terisi"
+
+        # E32: Lokasi Pekerjaan
+        _BUKAN_LOKASI = [
+            "resiko", "risiko", "tingkat", "uraian", "bahaya", "pengendalian",
+            "ibprp", "rk3k", "k3", "pekerjaan persiapan", "fasilitas penunjang",
+            "ruang lingkup", "pengadaan pekerjaan", "konsultan", "pemberi tugas",
+        ]
+        _KATA_LOKASI = [
+            "kabupaten", "kota", "provinsi", "kecamatan", "kelurahan", "desa",
+            "jalan", "jl.", "rsud", "puskesmas", "sdn", "dinas", "kantor",
+            "gedung", "bangunan", "alamat", "lingkungan", "kawasan"
+        ]
+        if not hasil["input_data"]["E32"]["nilai"]:
+            # Pola 1: nilai di baris berikutnya setelah label "Lokasi Pekerjaan"
+            m_lok2 = re.search(r"Lokasi\s*(?:Pekerjaan)?\s*[:/]?\s*\n([^\n]{5,120})", txt, re.IGNORECASE)
+            # Pola 2: nilai di baris yang sama setelah label
+            m_lok1 = re.search(r"Lokasi\s*(?:Pekerjaan)?\s*[:/]\s*([^\n]{5,120})", txt, re.IGNORECASE)
+            for m_try in [m_lok2, m_lok1]:
+                if not m_try: continue
+                val_lok = bersihkan(m_try.group(1))
+                val_lower = val_lok.lower()
+                if not val_lok: continue
+                if any(kw in val_lower for kw in _BUKAN_LOKASI): continue
+                # Nilai lokasi harus mengandung setidaknya satu kata penanda lokasi
+                if not any(kw in val_lower for kw in _KATA_LOKASI) and len(val_lok) < 15: continue
+                hasil["input_data"]["E32"]["nilai"] = val_lok
+                hasil["input_data"]["E32"]["status"] = "terisi"
+                break
+
+        # E33: Sumber Dana
+        _BUKAN_SUMBER_DANA = [
+            "dan perkiraan biaya", "perkiraan biaya", "biaya pelaksanaan",
+            "rencana anggaran", "jumlah biaya", "total biaya", "hps",
+        ]
         if not hasil["input_data"]["E33"]["nilai"]:
-            m_sd = re.search(r"(?:Sumber\s+Dana|Sumber\s+Anggaran|Anggaran)\s*[:/]?\s*([^\n]{5,60})", txt, re.IGNORECASE)
+            # Pola 1: "Sumber Dana :" atau "Sumber Anggaran :" dengan nilai bermakna
+            m_sd = re.search(r"(?:Sumber\s+(?:Dana|Anggaran))\s*[:/]\s*([^\n]{5,80})", txt, re.IGNORECASE)
             if m_sd:
                 val_sd = bersihkan(m_sd.group(1))
-                # Skip jika hanya angka (tahun) atau mengandung kata-kata teknis
-                if not re.fullmatch(r"\d{4}", val_sd) and re.search(r"[A-Za-z]", val_sd):
+                val_lower_sd = val_sd.lower()
+                if (not re.fullmatch(r"\d{4}", val_sd)
+                        and re.search(r"[A-Za-z]", val_sd)
+                        and not any(kw in val_lower_sd for kw in _BUKAN_SUMBER_DANA)):
                     hasil["input_data"]["E33"]["nilai"] = val_sd
                     hasil["input_data"]["E33"]["status"] = "terisi"
+
+            # Pola 2: "APBD/APBN Tahun XXXX Kabupaten/Provinsi ..."
             if not hasil["input_data"]["E33"]["nilai"]:
-                m_sd2 = re.search(r"(APBD|APBN)\s+(?:Tahun\s+)?(\d{4})", txt, re.IGNORECASE)
+                m_sd2 = re.search(
+                    r"(APBD|APBN)\s+(?:Kabupaten|Kota|Provinsi|Tahun)?\s*([^\n]{0,60}?)(\d{4})",
+                    txt, re.IGNORECASE
+                )
                 if m_sd2:
-                    hasil["input_data"]["E33"]["nilai"] = f"{m_sd2.group(1)} {m_sd2.group(2)}"
+                    jenis = m_sd2.group(1).upper()
+                    tengah = bersihkan(m_sd2.group(2))
+                    tahun = m_sd2.group(3)
+                    if tengah:
+                        hasil["input_data"]["E33"]["nilai"] = f"{jenis} {tengah} {tahun}".strip()
+                    else:
+                        hasil["input_data"]["E33"]["nilai"] = f"{jenis} {tahun}"
                     hasil["input_data"]["E33"]["status"] = "terisi"
+
+            # Pola 3: "Anggaran Tahun XXXX" → asumsi APBD
             if not hasil["input_data"]["E33"]["nilai"]:
-                # Pola: "Anggaran 2025" atau "Anggaran Tahun 2025" → asumsi APBD
                 m_sd3 = re.search(r"Anggaran\s+(?:Tahun\s+)?(\d{4})\b", txt, re.IGNORECASE)
                 if m_sd3:
                     hasil["input_data"]["E33"]["nilai"] = f"APBD {m_sd3.group(1)}"
@@ -618,6 +695,13 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
     hasil["dokpil"]["E16"]["nilai"] = teks_cp
     hasil["dokpil"]["E16"]["id_cp"] = id_cp
     hasil["dokpil"]["E16"]["status"] = "terisi"
+
+    # 4b. Fallback E2 (Fungsi Bangunan) dari nama_tender jika masih kosong
+    if hasil["reviu"]["E2"]["status"] != "terisi":
+        nama_tender_arg = getattr(parse_pdf_enhanced, "_nama_tender_fallback", "")
+        if nama_tender_arg:
+            hasil["reviu"]["E2"]["nilai"] = bersihkan(nama_tender_arg)
+            hasil["reviu"]["E2"]["status"] = "terisi"
 
     # 5. Normalisasi akhir: field yang masih "kosong" setelah semua proses → "tidak_ada"
     # (artinya sudah dicoba parse tapi tidak ditemukan)
@@ -638,6 +722,7 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
 
 def main():
     bidang = ""
+    nama_tender = ""
     if len(sys.argv) >= 3 and sys.argv[1] == "--argfile":
         argfile = sys.argv[2]
         with open(argfile, encoding="utf-8") as f:
@@ -645,14 +730,18 @@ def main():
         path_pdf = lines[0] if len(lines) > 0 else ""
         folder_output = lines[1] if len(lines) > 1 else ""
         bidang = lines[2] if len(lines) > 2 else ""
+        nama_tender = lines[3] if len(lines) > 3 else ""
     elif len(sys.argv) >= 3:
         path_pdf = sys.argv[1]
         folder_output = sys.argv[2]
         bidang = sys.argv[3] if len(sys.argv) > 3 else ""
+        nama_tender = sys.argv[4] if len(sys.argv) > 4 else ""
     else:
-        print("Usage: python parse_reviu.py <path_pdf_or_dir> <folder_output> [bidang]")
+        print("Usage: python parse_reviu.py <path_pdf_or_dir> <folder_output> [bidang] [nama_tender]")
         sys.exit(1)
 
+    # Kirim nama_tender sebagai fallback untuk E2 via attribute sementara
+    parse_pdf_enhanced._nama_tender_fallback = nama_tender
     hasil, err = parse_pdf_enhanced(path_pdf, bidang)
     if err:
         hasil = {"error": err, "reviu": {}, "dokpil": {}, "input_data": {}}

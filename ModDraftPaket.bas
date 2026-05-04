@@ -15,7 +15,7 @@ Private Const SB_TABLE As String = "draft_paket"
 
 ' Sheet & Cell target
 Private Const SHEET_INPUT As String = "1. Input Data"
-Private Const CELL_SELECTOR As String = "E1"   ' Dropdown pilih paket (di @ Master Data)
+Private Const CELL_SELECTOR As String = "F1"   ' Dropdown pilih paket (di @ Master Data)
 
 ' Kolom yang di-fetch (efisien, tidak perlu semua)
 Private Const SB_SELECT As String = "kode_tender,nama_tender,mak,kode_rup,nilai_pagu,nilai_hps,kode_pokja,nomor_pp,nomor_surat_dinas,nama_dinas,nama_ppk,jangka_waktu,sumber_anggaran,anggota_1,anggota_2,anggota_3,bidang,sbu_baru,sbu_lama"
@@ -175,32 +175,54 @@ Public Sub MuatDraftPaket(Optional bFromOpen As Boolean = False)
         .ShowError = False
     End With
 
-    ' Simpan nilai E2 yang sudah dipilih sebelum rebuild dropdown
+    ' Simpan nilai dropdown yang sudah dipilih sebelum rebuild
     Dim savedLabel As String
-    savedLabel = Trim(CStr(ws.Range(CELL_SELECTOR).Value))
-
-    If savedLabel = "" Then
-        ' Belum ada pilihan — tampilkan MsgBox panduan
-        ws.Range(CELL_SELECTOR).Value = ""
-        MsgBox m_DataCache.Count & " paket berhasil dimuat." & vbCrLf & _
-               "Pilih paket di cell " & CELL_SELECTOR & " untuk mengisi data.", vbInformation, "Draft Paket Dimuat"
-    ElseIf bFromOpen Then
-        ' Dipanggil dari Workbook_Open — restore dropdown saja, tidak parse ulang
-        ' (data sudah ada di sheet dari sesi sebelumnya)
-        Application.EnableEvents = False
-        ws.Range(CELL_SELECTOR).Value = savedLabel
-        Application.EnableEvents = True
+    Dim selCell As Range: Set selCell = ws.Range(CELL_SELECTOR)
+    If selCell.MergeCells Then
+        savedLabel = Trim(CStr(selCell.MergeArea.Cells(1, 1).Value))
     Else
-        ' Dipanggil manual (klik tombol) — parse ulang untuk refresh data
+        savedLabel = Trim(CStr(selCell.Value))
+    End If
+
+    ' Restore pilihan dropdown tanpa trigger event
+    If savedLabel <> "" Then
         Application.EnableEvents = False
         ws.Range(CELL_SELECTOR).Value = savedLabel
         Application.EnableEvents = True
-        PilihDraftPaket savedLabel
     End If
+
+    MsgBox m_DataCache.Count & " paket berhasil dimuat." & vbCrLf & _
+           "Pilih paket di cell " & CELL_SELECTOR & ", lalu klik 'Parse Draft' untuk mengisi data.", _
+           vbInformation, "Draft Paket Dimuat"
     Exit Sub
 
 ErrHandler:
     MsgBox "Error MuatDraftPaket: " & Err.Description, vbCritical
+End Sub
+
+
+' ============================================================
+' PARSE DRAFT: Dipanggil tombol "Parse Draft" — baca pilihan dropdown lalu parse
+' ============================================================
+Public Sub ParseDraftTerpilih()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets(MD_SHEET)
+    Dim selCell As Range: Set selCell = ws.Range(CELL_SELECTOR)
+    Dim val As String
+    If selCell.MergeCells Then
+        val = Trim(CStr(selCell.MergeArea.Cells(1, 1).Value))
+    Else
+        val = Trim(CStr(selCell.Value))
+    End If
+    If val = "" Then
+        MsgBox "Pilih paket dari dropdown " & CELL_SELECTOR & " terlebih dahulu.", vbExclamation, "Belum Ada Pilihan"
+        Exit Sub
+    End If
+    If m_DataCache Is Nothing Or m_DataCache.Count = 0 Then
+        MsgBox "Data belum dimuat. Klik 'Muat Draft Paket' terlebih dahulu.", vbExclamation, "Data Kosong"
+        Exit Sub
+    End If
+    PilihDraftPaket val
 End Sub
 
 
@@ -297,7 +319,8 @@ Public Sub PilihDraftPaket(selectedLabel As String)
             Dim kodeTender As String: kodeTender = CStr(item(6))
             Dim kodePokja2 As String: kodePokja2 = CStr(item(0))
             Dim bidang2 As String: bidang2 = CStr(item(16))
-            ParsaDanIsiDariPDF kodeTender, kodePokja2, bidang2
+            Dim namaTender2 As String: namaTender2 = CStr(item(1))
+            ParsaDanIsiDariPDF kodeTender, kodePokja2, bidang2, namaTender2
 
             ' ── SBU → @ Master Data DATABASE REVIU: E6=SBU Baru (baris 26), E7=SBU Lama (baris 27) ──
             Dim sbuBaru As String: sbuBaru = CStr(item(17))
@@ -329,7 +352,7 @@ End Sub
 ' ============================================================
 ' PARSE PDF: Cari Draft_Pokja_XXX.pdf → panggil Python → isi sheet
 ' ============================================================
-Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String, Optional bidang As String = "")
+Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String, Optional bidang As String = "", Optional namaTender As String = "")
     Dim folderWorkbook As String
     folderWorkbook = ThisWorkbook.Path
 
@@ -408,6 +431,7 @@ Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String, Optiona
     Print #fArg, Replace(pathPDF, "\", "/")
     Print #fArg, Replace(folderWorkbook, "\", "/")
     Print #fArg, bidang
+    Print #fArg, namaTender
     Close #fArg
 
     ' Gunakan junction C:\pokja2026 agar path tidak mengandung @
@@ -1395,7 +1419,7 @@ End Function
 ' ============================================================
 Private Function FetchSupabase() As String
     Dim url As String
-    url = SB_URL & "/rest/v1/" & SB_TABLE & "?select=" & SB_SELECT & "&nomor_pp=ilike.*2025*&order=kode_pokja.asc"
+    url = SB_URL & "/rest/v1/" & SB_TABLE & "?select=" & SB_SELECT & "&nomor_pp=ilike.*" & Year(Now) & "*&order=kode_pokja.asc"
 
     Dim http As Object
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
