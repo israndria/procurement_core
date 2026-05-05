@@ -188,16 +188,6 @@ def setup_paket_baru(folder_name=None):
         else:
             print(f"  [SKIP] {wf_dst} (sudah ada)")
             
-        # Copy file (Merged) jika ada
-        # Pola: Nama File - Template.docx -> Nama File - 086 (Merged).docx
-        wf_tpl_merged = wf_tpl.replace("- Template", "- Template (Merged)").replace(".docm", ".docx")
-        if os.path.exists(os.path.join(TEMPLATE_DIR, wf_tpl_merged)):
-            wf_dst_merged = wf_dst.replace(".docm", ".docx").replace(".docx", " (Merged).docx")
-            dst_path_merged = os.path.join(target_dir, wf_dst_merged)
-            if not os.path.exists(dst_path_merged):
-                shutil.copy2(os.path.join(TEMPLATE_DIR, wf_tpl_merged), dst_path_merged)
-                print(f"  [OK] (Merged) {wf_tpl_merged} -> {wf_dst_merged}")
-        
         dst_word_map.append((dst_path, wf_dst, sheet_name))
     
     # Auto-link setiap Word ke sheet yang benar
