@@ -393,7 +393,7 @@ def _parse_personil(pdf_or_path, hasil):
             if not p_teknis: p_teknis = p
             
     if p_teknis:
-        hasil["reviu"]["E27"]["nilai"] = p_teknis["jabatan"]
+        hasil["reviu"]["E27"]["nilai"] = "Pelaksana Lapangan"
         hasil["reviu"]["E27"]["status"] = "terisi"
         hasil["reviu"]["E28"]["nilai"] = p_teknis["pengalaman"]
         hasil["reviu"]["E28"]["status"] = "terisi"
@@ -401,9 +401,9 @@ def _parse_personil(pdf_or_path, hasil):
         hasil["reviu"]["E29"]["nilai"] = skt
         hasil["reviu"]["E29"]["status"] = "terisi" if skt else "tidak_ada"
     if p_k3:
-        hasil["reviu"]["E30"]["nilai"] = p_k3["jabatan"]
+        hasil["reviu"]["E30"]["nilai"] = "Petugas K3 Konstruksi"
         hasil["reviu"]["E30"]["status"] = "terisi"
-        hasil["reviu"]["E31"]["nilai"] = p_k3["pengalaman"]
+        hasil["reviu"]["E31"]["nilai"] = "-"
         hasil["reviu"]["E31"]["status"] = "terisi"
         sert_k3 = p_k3["sertifikat"]
         hasil["reviu"]["E32"]["nilai"] = sert_k3
@@ -685,7 +685,11 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
                     hasil["input_data"]["E16"]["nilai"] = bersihkan(nama_tender_fb)
                     hasil["input_data"]["E16"]["status"] = "terisi"
 
-        # E32: Lokasi Pekerjaan
+        # E32: Lokasi Pekerjaan — fixed "Kabupaten Tapin" (tidak perlu parse)
+        hasil["input_data"]["E32"]["nilai"] = "Kabupaten Tapin"
+        hasil["input_data"]["E32"]["status"] = "terisi"
+
+        # E32: Lokasi Pekerjaan (kode lama dipertahankan sebagai fallback jika suatu saat perlu)
         _BUKAN_LOKASI = [
             "resiko", "risiko", "tingkat", "uraian", "bahaya", "pengendalian",
             "ibprp", "rk3k", "k3", "pekerjaan persiapan", "fasilitas penunjang",
@@ -738,52 +742,17 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
                     hasil["input_data"]["E32"]["nilai"] = kandidat_lokasi[0][1]
                     hasil["input_data"]["E32"]["status"] = "terisi"
 
-        # E33: Sumber Dana
-        _BUKAN_SUMBER_DANA = [
-            "dan perkiraan biaya", "perkiraan biaya", "biaya pelaksanaan",
-            "rencana anggaran", "jumlah biaya", "total biaya", "hps",
-        ]
-        if not hasil["input_data"]["E33"]["nilai"]:
-            # Pola 1: "Sumber Dana :" atau "Sumber Anggaran :" dengan nilai bermakna
-            m_sd = re.search(r"(?:Sumber\s+(?:Dana|Anggaran))\s*[:/]\s*([^\n]{5,80})", txt, re.IGNORECASE)
-            if m_sd:
-                val_sd = bersihkan(m_sd.group(1))
-                val_lower_sd = val_sd.lower()
-                if (not re.fullmatch(r"\d{4}", val_sd)
-                        and re.search(r"[A-Za-z]", val_sd)
-                        and not any(kw in val_lower_sd for kw in _BUKAN_SUMBER_DANA)):
-                    hasil["input_data"]["E33"]["nilai"] = val_sd
-                    hasil["input_data"]["E33"]["status"] = "terisi"
-
-            # Pola 2: "APBD/APBN ... Kabupaten/Kota ... Tahun XXXX" (bisa multiline)
-            if not hasil["input_data"]["E33"]["nilai"]:
-                # Normalisasi newline dulu agar pola multiline tidak gagal
-                txt_oneline = re.sub(r"\s*\n\s*", " ", txt)
-                m_sd2 = re.search(
-                    r"(APBD|APBN)\s+(?:Kabupaten|Kota|Provinsi)?\s*([^\d]{0,50}?)(?:tahun\s+)?Anggaran\s*(\d{4})",
-                    txt_oneline, re.IGNORECASE
-                )
-                if not m_sd2:
-                    m_sd2 = re.search(
-                        r"(APBD|APBN)\s+(?:Kabupaten|Kota|Provinsi)?\s*([a-zA-Z\s]{0,40}?)(\d{4})",
-                        txt_oneline, re.IGNORECASE
-                    )
-                if m_sd2:
-                    jenis = m_sd2.group(1).upper()
-                    tengah = bersihkan(m_sd2.group(2))
-                    tahun = m_sd2.group(3)
-                    if tengah and len(tengah) > 2:
-                        hasil["input_data"]["E33"]["nilai"] = f"{jenis} {tengah} tahun Anggaran {tahun}".strip()
-                    else:
-                        hasil["input_data"]["E33"]["nilai"] = f"{jenis} tahun Anggaran {tahun}"
-                    hasil["input_data"]["E33"]["status"] = "terisi"
-
-            # Pola 3: "Anggaran Tahun XXXX" → asumsi APBD
-            if not hasil["input_data"]["E33"]["nilai"]:
-                m_sd3 = re.search(r"Anggaran\s+(?:Tahun\s+)?(\d{4})\b", txt, re.IGNORECASE)
-                if m_sd3:
-                    hasil["input_data"]["E33"]["nilai"] = f"APBD {m_sd3.group(1)}"
-                    hasil["input_data"]["E33"]["status"] = "terisi"
+        # E33: Sumber Dana — semi-fix: deteksi APBD/APBDP dari PDF, sisa format difix
+        # Format output: "APBD/APBDP Kabupaten Tapin Tahun Anggaran {tahun}"
+        _tahun_berjalan = str(__import__("datetime").date.today().year)
+        _jenis_apbd = "APBD"  # default
+        txt_oneline_sd = re.sub(r"\s*\n\s*", " ", txt)
+        m_jenis = re.search(r"\b(APBDP|APBD\s*P|APBD)\b", txt_oneline_sd, re.IGNORECASE)
+        if m_jenis:
+            raw = m_jenis.group(1).upper().replace(" ", "")
+            _jenis_apbd = "APBDP" if "P" in raw else "APBD"
+        hasil["input_data"]["E33"]["nilai"] = f"{_jenis_apbd} Kabupaten Tapin Tahun Anggaran {_tahun_berjalan}"
+        hasil["input_data"]["E33"]["status"] = "terisi"
 
     # 4. Cara Pembayaran
     daftar_cp = fetch_cara_pembayaran()
