@@ -587,10 +587,11 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
     file_map = {
         "alat": find_files_by_keywords(base_dir, ["Peralatan", "Alat"]),
         "personil": find_files_by_keywords(base_dir, ["Personil", "Tenaga"]),
-        "rk3k": find_files_by_keywords(base_dir, ["RK3K", "Keselamatan"]),
+        "rk3k": find_files_by_keywords(base_dir, ["RK3K", "Keselamatan", "K3"]),
         "dokpil": find_files_by_keywords(base_dir, ["Kuantitas", "BoQ", "RAB"]),
         "uraian": find_files_by_keywords(base_dir, ["Uraian Singkat", "KAK", "Spek"]),
-        "merged": [path_or_dir] if os.path.isfile(path_or_dir) else find_files_by_keywords(base_dir, ["Draft_Pokja"])
+        "merged": [path_or_dir] if os.path.isfile(path_or_dir) else find_files_by_keywords(base_dir, ["Draft_Pokja"]),
+        "rks": find_files_by_keywords(base_dir, ["RKS", "Spesifikasi", "Teknis"]),
     }
 
     # Helper untuk memproses file berdasarkan ekstensi
@@ -604,31 +605,22 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
                 if func(f, hasil): return True
         return False
 
-    process_file(file_map["uraian"] + file_map["merged"], _parse_fung_bangunan, hasil)
-    process_file(file_map["alat"] + file_map["merged"], _parse_peralatan, hasil)
-    process_file(file_map["personil"] + file_map["merged"], _parse_personil, hasil)
-    # RK3K: DOCX terpisah dulu (E33 bagus), lalu Draft_Pokja PDF hanya untuk E34 jika masih kosong
+    process_file(file_map["uraian"] + file_map["rks"] + file_map["merged"], _parse_fung_bangunan, hasil)
+    process_file(file_map["alat"] + file_map["rks"] + file_map["merged"], _parse_peralatan, hasil)
+    process_file(file_map["personil"] + file_map["rks"] + file_map["merged"], _parse_personil, hasil)
+    # RK3K: hanya dari file yang namanya eksplisit mengandung RK3K/K3/Keselamatan
+    # JANGAN parse dari Draft_Pokja — tabel di Draft PDF tidak reliabel untuk K3
     for f in file_map["rk3k"]:
-        if f.lower().endswith(".docx"):
+        ext = f.lower().split(".")[-1]
+        if ext == "pdf":
+            with pdfplumber.open(f) as pdf:
+                _parse_rk3k(pdf, hasil)
+        elif ext == "docx":
             _parse_rk3k(f, hasil)
-    # Jika E34 masih kosong, coba dari Draft_Pokja PDF
-    if hasil["reviu"]["E34"]["status"] != "terisi":
-        for f in file_map["merged"]:
-            if f.lower().endswith(".pdf"):
-                with pdfplumber.open(f) as pdf:
-                    _parse_rk3k(pdf, hasil)
-                break
-    # Fallback: jika E33 masih kosong juga, ambil dari Draft PDF
-    if hasil["reviu"]["E33"]["status"] != "terisi":
-        for f in file_map["merged"]:
-            if f.lower().endswith(".pdf"):
-                with pdfplumber.open(f) as pdf:
-                    _parse_rk3k(pdf, hasil)
-                break
     process_file(file_map["dokpil"] + file_map["merged"], _parse_dokpil_uraian, hasil)
 
     # 3. Common Fields (Input Data) dari SEMUA file (biasanya ada di RK3K atau KAK)
-    all_files = file_map["uraian"] + file_map["rk3k"] + file_map["personil"] + file_map["merged"]
+    all_files = file_map["uraian"] + file_map["rks"] + file_map["rk3k"] + file_map["personil"] + file_map["merged"]
     for f in all_files:
         ext = f.lower().split(".")[-1]
         if ext == "pdf":
@@ -720,6 +712,31 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
                 hasil["input_data"]["E32"]["nilai"] = val_lok
                 hasil["input_data"]["E32"]["status"] = "terisi"
                 break
+            # Pola 3 (fallback): ambil dari judul dokumen — baris yang mengandung kata penanda lokasi
+            # Prioritaskan baris yang HANYA berisi nama instansi/lokasi (bukan judul pekerjaan)
+            if not hasil["input_data"]["E32"]["nilai"]:
+                _JUDUL_PEKERJAAN = ["pembangunan", "rehabilitasi", "renovasi", "peningkatan",
+                                    "pemeliharaan", "pengadaan", "belanja modal"]
+                # Kata lokasi yang TIDAK termasuk kata pekerjaan (hapus "bangunan", "gedung", dll)
+                _KATA_LOKASI_STRICT = [
+                    "kabupaten", "kota", "provinsi", "kecamatan", "kelurahan", "desa",
+                    "jalan", "jl.", "rsud", "puskesmas", "sdn", "smpn", "sman", "smkn",
+                    "dinas", "kantor", "alamat", "lingkungan", "kawasan"
+                ]
+                kandidat_lokasi = []
+                for line in txt.split("\n")[:25]:
+                    line_clean = bersihkan(line)
+                    line_lower = line_clean.lower()
+                    if not (len(line_clean) > 5 and len(line_clean) < 100): continue
+                    if not any(kw in line_lower for kw in _KATA_LOKASI_STRICT): continue
+                    if any(kw in line_lower for kw in _BUKAN_LOKASI): continue
+                    if any(kw in line_lower for kw in ["kerangka acuan", "rencana kerja", "spesifikasi", "kontrak"]): continue
+                    has_pekerjaan = any(kw in line_lower for kw in _JUDUL_PEKERJAAN)
+                    kandidat_lokasi.append((0 if has_pekerjaan else 1, line_clean))
+                if kandidat_lokasi:
+                    kandidat_lokasi.sort(key=lambda x: x[0], reverse=True)
+                    hasil["input_data"]["E32"]["nilai"] = kandidat_lokasi[0][1]
+                    hasil["input_data"]["E32"]["status"] = "terisi"
 
         # E33: Sumber Dana
         _BUKAN_SUMBER_DANA = [
@@ -738,20 +755,27 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
                     hasil["input_data"]["E33"]["nilai"] = val_sd
                     hasil["input_data"]["E33"]["status"] = "terisi"
 
-            # Pola 2: "APBD/APBN Tahun XXXX Kabupaten/Provinsi ..."
+            # Pola 2: "APBD/APBN ... Kabupaten/Kota ... Tahun XXXX" (bisa multiline)
             if not hasil["input_data"]["E33"]["nilai"]:
+                # Normalisasi newline dulu agar pola multiline tidak gagal
+                txt_oneline = re.sub(r"\s*\n\s*", " ", txt)
                 m_sd2 = re.search(
-                    r"(APBD|APBN)\s+(?:Kabupaten|Kota|Provinsi|Tahun)?\s*([^\n]{0,60}?)(\d{4})",
-                    txt, re.IGNORECASE
+                    r"(APBD|APBN)\s+(?:Kabupaten|Kota|Provinsi)?\s*([^\d]{0,50}?)(?:tahun\s+)?Anggaran\s*(\d{4})",
+                    txt_oneline, re.IGNORECASE
                 )
+                if not m_sd2:
+                    m_sd2 = re.search(
+                        r"(APBD|APBN)\s+(?:Kabupaten|Kota|Provinsi)?\s*([a-zA-Z\s]{0,40}?)(\d{4})",
+                        txt_oneline, re.IGNORECASE
+                    )
                 if m_sd2:
                     jenis = m_sd2.group(1).upper()
                     tengah = bersihkan(m_sd2.group(2))
                     tahun = m_sd2.group(3)
-                    if tengah:
-                        hasil["input_data"]["E33"]["nilai"] = f"{jenis} {tengah} {tahun}".strip()
+                    if tengah and len(tengah) > 2:
+                        hasil["input_data"]["E33"]["nilai"] = f"{jenis} {tengah} tahun Anggaran {tahun}".strip()
                     else:
-                        hasil["input_data"]["E33"]["nilai"] = f"{jenis} {tahun}"
+                        hasil["input_data"]["E33"]["nilai"] = f"{jenis} tahun Anggaran {tahun}"
                     hasil["input_data"]["E33"]["status"] = "terisi"
 
             # Pola 3: "Anggaran Tahun XXXX" → asumsi APBD
