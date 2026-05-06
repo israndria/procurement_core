@@ -366,13 +366,34 @@ Attribute GenerateKodeUnik.VB_ProcData.VB_Invoke_Func = "R\n14"
     On Error GoTo 0
     
     wsMD.Range("G2").Value = hasil
-    
+
     On Error Resume Next
     wsMD.Protect Password:="pokja2026", AllowFormattingCells:=True
     On Error GoTo 0
-    
+
+    ' Upsert kode_unik ke Supabase via Python (non-blocking)
+    Dim kodeTender As String
+    On Error Resume Next
+    kodeTender = CStr(ThisWorkbook.Sheets("1. Input Data").Range("E5").Value)
+    On Error GoTo 0
+
+    If kodeTender <> "" Then
+        ' Bangun path ke WPy64 dari lokasi Excel (2 level di atas)
+        Dim xlDir As String
+        xlDir = ThisWorkbook.Path
+        Dim wpy64Dir As String
+        wpy64Dir = xlDir & "\..\..\V19_Scheduler\WPy64-313110"
+
+        Dim wshUp As Object
+        Set wshUp = CreateObject("WScript.Shell")
+        Dim cmdUp As String
+        cmdUp = """" & wpy64Dir & "\python\python.exe"" """ & wpy64Dir & "\upsert_kode_unik.py"" """ & kodeTender & """ """ & hasil & """"
+        wshUp.Run cmdUp, 0, False
+        Set wshUp = Nothing
+    End If
+
     MsgBox "Kode unik disimpan di G2 @ Master Data:" & vbCrLf & hasil, vbInformation
-    
+
     wsMD.Activate
     wsMD.Range("G2").Select
 End Sub

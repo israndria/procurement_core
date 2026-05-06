@@ -114,8 +114,10 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
     import win32com.client
 
     folder = os.path.dirname(word_path)
-    base = os.path.splitext(os.path.basename(word_path))[0]
-    copy_path = os.path.join(folder, f"{base} (Merged).docx")
+    base, ext = os.path.splitext(os.path.basename(word_path))
+    if ext.lower() not in (".docx", ".docm"):
+        ext = ".docx"
+    copy_path = os.path.join(folder, f"{base} (Merged){ext}")
 
     # Copy template ke (Merged) - template asli tidak diubah
     shutil.copy2(word_path, copy_path)
