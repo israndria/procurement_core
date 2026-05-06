@@ -312,17 +312,20 @@ Private Function FindWordFile(pattern As String) As String
     folder = ThisWorkbook.Path
 
     Dim f As String
-    f = Dir(folder & "\*.docx")
-    Do While f <> ""
-        If Left(f, Len(pattern)) = pattern Then
-            FindWordFile = f
-            Exit Function
-        End If
-        f = Dir()
-    Loop
+    Dim ext As Variant
+    For Each ext In Array("*.docx", "*.docm")
+        f = Dir(folder & "\" & ext)
+        Do While f <> ""
+            If Left(f, Len(pattern)) = pattern Then
+                FindWordFile = f
+                Exit Function
+            End If
+            f = Dir()
+        Loop
+    Next ext
 
     MsgBox "File Word tidak ditemukan." & vbCrLf & _
-           "Pastikan ada file .docx yang diawali dengan: """ & pattern & """", _
+           "Pastikan ada file .docx/.docm yang diawali dengan: """ & pattern & """", _
            vbExclamation, "File Tidak Ditemukan"
     FindWordFile = ""
 End Function
