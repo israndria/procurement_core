@@ -378,11 +378,11 @@ Attribute GenerateKodeUnik.VB_ProcData.VB_Invoke_Func = "R\n14"
     On Error GoTo 0
 
     If kodeTender <> "" Then
-        ' Bangun path ke WPy64 dari lokasi Excel (2 level di atas)
+        ' Bangun path ke WPy64 dari lokasi Excel (1 level di atas = root POKJA)
         Dim xlDir As String
         xlDir = ThisWorkbook.Path
         Dim wpy64Dir As String
-        wpy64Dir = xlDir & "\..\..\V19_Scheduler\WPy64-313110"
+        wpy64Dir = xlDir & "\..\V19_Scheduler\WPy64-313110"
 
         Dim wshUp As Object
         Set wshUp = CreateObject("WScript.Shell")
