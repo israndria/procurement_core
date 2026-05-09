@@ -639,18 +639,29 @@ with tab_tambah:
                     df_res = pd.concat(res, ignore_index=True)
                     update_local_database(df_res, hash_map)
 
+                    # Commit ke GitHub agar GH Actions bisa track perubahan
+                    s.write("🔄 Menyinkronkan database ke GitHub...")
+                    if commit_db_to_github():
+                        s.write("✅ Database tersinkron ke GitHub.")
+                    else:
+                        s.write("⚠️ Gagal sync ke GitHub, tapi data tetap disimpan lokal.")
+
                     svc = get_service()
                     for url, grp in df_res.groupby('Source'):
                         s.write(f"📅 Memproses: {grp.iloc[0]['Nama_Paket']}")
+                        # Fetch history perubahan per tahap dari SPSE
+                        stage_history = fetch_jadwal_history_v19(url)
                         delete_existing_events_by_source(svc, url)
                         for _, r in grp.iterrows():
                             ds = parse_spse_date(r['Mulai'])
                             de = parse_spse_date(r['Sampai'])
                             if ds:
                                 if not de: de = ds + datetime.timedelta(hours=1)
+                                stage_key = str(r['Tahap']).strip().lower()
+                                stage_diff = stage_history.get(stage_key, '')
                                 evt = {
                                     'summary': f"{r['Tahap']} - {r['Nama_Paket']}",
-                                    'description': format_desc(r['Source'], r['Perubahan'], r['Anggota_Pokja']),
+                                    'description': format_desc(r['Source'], r['Perubahan'], r['Anggota_Pokja'], diff_info=stage_diff),
                                     'start': {'dateTime': ds.isoformat(), 'timeZone': 'Asia/Jakarta'},
                                     'end': {'dateTime': de.isoformat(), 'timeZone': 'Asia/Jakarta'},
                                     'reminders': get_reminders(r['Tahap'])
