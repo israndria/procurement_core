@@ -197,13 +197,14 @@ def commit_db_to_github():
             return False
 
         cwd = BASE_DIR
-        _sub.run([git_exe, 'add', 'database_tender.csv'], cwd=cwd, capture_output=True, timeout=10)
-        result = _sub.run([git_exe, 'diff', '--cached', '--quiet'], cwd=cwd, capture_output=True, timeout=10)
+        _no_win = _sub.CREATE_NO_WINDOW
+        _sub.run([git_exe, 'add', 'database_tender.csv'], cwd=cwd, capture_output=True, timeout=10, creationflags=_no_win)
+        result = _sub.run([git_exe, 'diff', '--cached', '--quiet'], cwd=cwd, capture_output=True, timeout=10, creationflags=_no_win)
         if result.returncode == 0:
             return  # Tidak ada perubahan, skip
         _sub.run([git_exe, 'commit', '-m', f'chore: update database_tender.csv via Streamlit [{get_indonesian_timestamp()}]'],
-                 cwd=cwd, capture_output=True, timeout=30)
-        _sub.run([git_exe, 'push', 'origin', 'master'], cwd=cwd, capture_output=True, timeout=60)
+                 cwd=cwd, capture_output=True, timeout=30, creationflags=_no_win)
+        _sub.run([git_exe, 'push', 'origin', 'master'], cwd=cwd, capture_output=True, timeout=60, creationflags=_no_win)
         return True
     except Exception as e:
         st.warning(f"⚠️ Auto-push ke GitHub gagal: {e}")
@@ -544,6 +545,7 @@ with tab_monitor:
                     [_python_exe, _sync_script],
                     capture_output=True, text=True, timeout=120,
                     cwd=BASE_DIR,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
                 )
             _output = (_proc.stdout + _proc.stderr).strip()
             if _proc.returncode == 0:
