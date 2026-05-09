@@ -6,9 +6,9 @@ name: 📅 Auto Sync Jadwal Tender
 # ============================================================
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'  # Setiap 15 menit
-  workflow_dispatch:          # Trigger manual dari GitHub Actions tab
+  # Cron dinonaktifkan — SPSE blacklist IP datacenter GitHub (semua daerah)
+  # Sync jadwal dihandle Task Scheduler lokal (sync_jadwal_silent.vbs, tiap 15 menit)
+  workflow_dispatch:          # Trigger manual dari GitHub Actions tab (jika diperlukan)
 
 permissions:
   contents: write
