@@ -1,12 +1,10 @@
 import streamlit as st
-import urllib.request
-import urllib.parse
 import json
 import re
 import logging
 import subprocess
+import requests
 import pandas as pd
-import cloudscraper
 from io import StringIO, BytesIO
 from supabase import create_client
 import os
@@ -15,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="SPSE Scraper V2.1", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="SPSE Scraper V3.0", page_icon="🏗️", layout="wide")
 
 st.markdown("""
     <style>
@@ -184,20 +182,16 @@ def get_last_update(kode_lpse, kategori_selected, bulk_map=None):
     except: return "-"
 
 # --- 4. ENGINE SCRAPING ---
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/147.0.0.0 Safari/537.36"
+
 def buat_opener():
-    """Buat cloudscraper session — meniru TLS fingerprint Chrome agar lolos Cloudflare."""
-    return cloudscraper.create_scraper(
-        browser={"browser": "chrome", "platform": "windows", "mobile": False}
-    )
+    """Buat requests.Session — cookie otomatis, tidak perlu cloudscraper."""
+    s = requests.Session()
+    s.headers.update({"User-Agent": UA, "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7"})
+    return s
 
 def fetch_html(opener, url, referer=None, data=None):
-    """GET atau POST menggunakan cloudscraper session.
-    Parameter 'opener' sekarang adalah cloudscraper session (bukan urllib opener).
-    """
-    headers = {
-        "Referer": referer or url,
-        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-    }
+    headers = {"Referer": referer or url}
     if data:
         headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
         headers["X-Requested-With"] = "XMLHttpRequest"
@@ -713,8 +707,18 @@ with tab_dashboard:
         st.write("---")
 
         # --- Dataframe ---
-        kolom_tampil = ["kode_tender", "nama_paket", "instansi", "tahapan",
-                        "nilai_hps", "nama_pemenang", "harga_kontrak", "kontrak_mulai", "link_detail"]
+        if dash_kat == "tender":
+            kolom_tampil = [
+                "kode_tender", "nama_paket", "instansi", "tahapan",
+                "sumber_dana", "lokasi_pekerjaan", "jenis_kontrak",
+                "nilai_hps", "jumlah_peserta",
+                "nama_pemenang", "harga_negosiasi", "harga_kontrak",
+                "nilai_pdn", "kontrak_mulai", "link_detail",
+            ]
+        else:
+            kolom_tampil = ["kode_tender", "nama_paket", "instansi", "tahapan",
+                            "nilai_hps", "nama_pemenang", "harga_kontrak", "kontrak_mulai", "link_detail"]
+
         kolom_ada = [c for c in kolom_tampil if c in df_page.columns]
         df_tampil = df_page[kolom_ada].copy()
 
@@ -723,12 +727,52 @@ with tab_dashboard:
             use_container_width=True,
             height=400,
             column_config={
-                "link_detail": st.column_config.LinkColumn("Link Detail", display_text="Buka"),
-                "nama_paket":  st.column_config.TextColumn("Nama Paket", width="large"),
-                "nilai_hps":   st.column_config.TextColumn("Nilai HPS"),
-                "harga_kontrak": st.column_config.TextColumn("Harga Kontrak"),
+                "link_detail":    st.column_config.LinkColumn("Link", display_text="Buka"),
+                "nama_paket":     st.column_config.TextColumn("Nama Paket", width="large"),
+                "lokasi_pekerjaan": st.column_config.TextColumn("Lokasi"),
+                "nilai_hps":      st.column_config.TextColumn("Nilai HPS"),
+                "harga_negosiasi":st.column_config.TextColumn("Harga Negosiasi"),
+                "harga_kontrak":  st.column_config.TextColumn("Harga Kontrak"),
+                "nilai_pdn":      st.column_config.TextColumn("Nilai PDN"),
+                "jumlah_peserta": st.column_config.NumberColumn("Peserta"),
             }
         )
+
+        # --- Sub-tabel peserta (hanya untuk tabel tender) ---
+        if dash_kat == "tender":
+            st.write("---")
+            with st.expander("👥 Data Peserta Tender", expanded=False):
+                kode_dipilih = st.selectbox(
+                    "Pilih paket untuk lihat peserta",
+                    options=df["kode_tender"].tolist(),
+                    format_func=lambda k: f"{k} — {df[df['kode_tender']==k]['nama_paket'].values[0][:60] if not df[df['kode_tender']==k].empty else k}",
+                    key="sel_kode_peserta"
+                )
+                if kode_dipilih:
+                    @st.cache_data(ttl=300)
+                    def _load_peserta(kode):
+                        r = _sb().table("tender_peserta").select("*").eq("kode_tender", kode).order("urutan").execute()
+                        return pd.DataFrame(r.data) if r.data else pd.DataFrame()
+
+                    df_peserta = _load_peserta(kode_dipilih)
+                    if not df_peserta.empty:
+                        kolom_peserta = ["urutan", "nama_peserta", "npwp", "harga_penawaran",
+                                         "harga_terkoreksi", "harga_negosiasi",
+                                         "skor_administrasi", "skor_teknis", "skor_harga", "skor_akhir",
+                                         "alasan_gugur", "is_pemenang"]
+                        kolom_p_ada = [c for c in kolom_peserta if c in df_peserta.columns]
+                        st.dataframe(
+                            df_peserta[kolom_p_ada],
+                            use_container_width=True,
+                            column_config={
+                                "is_pemenang": st.column_config.CheckboxColumn("Pemenang"),
+                                "skor_akhir":  st.column_config.NumberColumn("Skor Akhir"),
+                                "nama_peserta":st.column_config.TextColumn("Nama Peserta", width="large"),
+                            }
+                        )
+                        st.caption(f"{len(df_peserta)} peserta")
+                    else:
+                        st.info("Data peserta belum tersedia untuk paket ini.")
 
         st.write("---")
         ex1, ex2 = st.columns(2)
