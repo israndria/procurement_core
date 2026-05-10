@@ -11,6 +11,7 @@ import sys
 import os
 import json
 import re
+import concurrent.futures as _cf
 from bs4 import BeautifulSoup
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -605,19 +606,28 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
                 if func(f, hasil): return True
         return False
 
-    process_file(file_map["uraian"] + file_map["rks"] + file_map["merged"], _parse_fung_bangunan, hasil)
-    process_file(file_map["alat"] + file_map["rks"] + file_map["merged"], _parse_peralatan, hasil)
-    process_file(file_map["personil"] + file_map["rks"] + file_map["merged"], _parse_personil, hasil)
-    # RK3K: hanya dari file yang namanya eksplisit mengandung RK3K/K3/Keselamatan
-    # JANGAN parse dari Draft_Pokja — tabel di Draft PDF tidak reliabel untuk K3
-    for f in file_map["rk3k"]:
-        ext = f.lower().split(".")[-1]
-        if ext == "pdf":
-            with pdfplumber.open(f) as pdf:
-                _parse_rk3k(pdf, hasil)
-        elif ext == "docx":
-            _parse_rk3k(f, hasil)
-    process_file(file_map["dokpil"] + file_map["merged"], _parse_dokpil_uraian, hasil)
+    def _t1():
+        process_file(file_map["uraian"] + file_map["rks"] + file_map["merged"], _parse_fung_bangunan, hasil)
+    def _t2():
+        process_file(file_map["alat"] + file_map["rks"] + file_map["merged"], _parse_peralatan, hasil)
+    def _t3():
+        process_file(file_map["personil"] + file_map["rks"] + file_map["merged"], _parse_personil, hasil)
+    def _t4():
+        # RK3K: hanya dari file yang namanya eksplisit mengandung RK3K/K3/Keselamatan
+        # JANGAN parse dari Draft_Pokja — tabel di Draft PDF tidak reliabel untuk K3
+        for f in file_map["rk3k"]:
+            ext = f.lower().split(".")[-1]
+            if ext == "pdf":
+                with pdfplumber.open(f) as pdf:
+                    _parse_rk3k(pdf, hasil)
+            elif ext == "docx":
+                _parse_rk3k(f, hasil)
+    def _t5():
+        process_file(file_map["dokpil"] + file_map["merged"], _parse_dokpil_uraian, hasil)
+
+    with _cf.ThreadPoolExecutor(max_workers=5) as _pool:
+        for _fut in _cf.as_completed([_pool.submit(t) for t in [_t1, _t2, _t3, _t4, _t5]]):
+            _fut.result()
 
     # 3. Common Fields (Input Data) dari SEMUA file (biasanya ada di RK3K atau KAK)
     all_files = file_map["uraian"] + file_map["rks"] + file_map["rk3k"] + file_map["personil"] + file_map["merged"]
