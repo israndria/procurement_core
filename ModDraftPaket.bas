@@ -724,10 +724,10 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
         savedC(r) = wsHP.Cells(r, 3).Value
     Next r
     ' Clear layout A:D semua baris (kolom C diisi ulang: INPUT DATA dari saved, REVIU/DOKPIL dari JSON)
-    wsHP.Range("A2:D70").UnMerge
-    wsHP.Range("A2:D70").ClearContents
-    wsHP.Range("A2:D70").Interior.Pattern = xlNone
-    wsHP.Range("A2:D70").Font.Bold = False
+    wsHP.Range("A2:E70").UnMerge
+    wsHP.Range("A2:E70").ClearContents
+    wsHP.Range("A2:E70").Interior.Pattern = xlNone
+    wsHP.Range("A2:E70").Font.Bold = False
     ' Kembalikan nilai INPUT DATA ke kolom C (akan di-override oleh TulisBarisHasil jika JSON punya nilai)
     For r = 3 To 22
         If savedC(r) <> "" Then wsHP.Cells(r, 3).Value = savedC(r)
@@ -740,9 +740,10 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
         .Range("C1").Value = "Nilai / Keterangan"
         .Range("D1").Value = "Navigasi"
         ' E1 = dropdown pilih paket (JANGAN dihapus/tulis ulang)
-        .Range("A1:D1").Font.Bold = True
-        .Range("A1:D1").Interior.Color = RGB(68, 114, 196)
-        .Range("A1:D1").Font.Color = RGB(255, 255, 255)
+        .Range("E1").Value = "Sumber"
+        .Range("A1:E1").Font.Bold = True
+        .Range("A1:E1").Interior.Color = RGB(68, 114, 196)
+        .Range("A1:E1").Font.Color = RGB(255, 255, 255)
     End With
 
     Dim baris As Integer: baris = 2
@@ -817,7 +818,7 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
             statusInp = ""
         End If
         Dim blokFake As String
-        blokFake = "{""label"":""" & inpLabels(si) & """,""nilai"":""" & nilaiInp & """,""status"":""" & statusInp & """}"
+        blokFake = "{""label"":""" & inpLabels(si) & """,""nilai"":""" & nilaiInp & """,""status"":""" & statusInp & """,""sumber"":""Supabase""}"
         If mdRowInp > 0 Then
             TulisBarisHasil wsHP, mdRowInp, blokFake, inpCells(si), "1. Input Data", _
                             jmlTerisi, jmlKosong, jmlKeputusan, jmlTidakAda
@@ -1055,6 +1056,12 @@ Private Sub TulisBarisHasil(ws As Worksheet, baris As Integer, blok As String, _
                     TextToDisplay:="Buka " & cellAddr
             End If
             On Error GoTo 0
+        End If
+
+        ' Kolom E: sumber data
+        Dim sumber As String: sumber = ExtractJSONVal(blok, "sumber")
+        If sumber <> "" Then
+            .Cells(baris, 5).Value = sumber
         End If
     End With
 End Sub

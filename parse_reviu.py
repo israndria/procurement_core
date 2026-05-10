@@ -532,53 +532,53 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
 
     hasil = {
         "input_data": {
-            "E16": {"nilai": "", "status": "kosong", "label": "Kegiatan/Sub Kegiatan"},
-            "E32": {"nilai": "", "status": "kosong", "label": "Lokasi Pekerjaan"},
-            "E33": {"nilai": "", "status": "kosong", "label": "Sumber Dana"},
+            "E16": {"nilai": "", "status": "kosong", "label": "Kegiatan/Sub Kegiatan", "sumber": ""},
+            "E32": {"nilai": "", "status": "kosong", "label": "Lokasi Pekerjaan", "sumber": ""},
+            "E33": {"nilai": "", "status": "kosong", "label": "Sumber Dana", "sumber": ""},
         },
         "reviu": {
-            "E2":  {"nilai": "", "status": "kosong", "label": "Fungsi Bangunan"},
-            "E6":  {"nilai": "", "status": "kosong", "label": "SBU KBLI 2020"},
-            "E7":  {"nilai": "", "status": "kosong", "label": "SBU KBLI 2015"},
-            "E9":  {"nilai": "", "status": "kosong", "label": "Alat 1"},
-            "E10": {"nilai": "", "status": "kosong", "label": "Alat 2"},
-            "E11": {"nilai": "", "status": "kosong", "label": "Alat 3"},
-            "E12": {"nilai": "", "status": "kosong", "label": "Alat 4"},
-            "E13": {"nilai": "", "status": "kosong", "label": "Alat 5"},
-            "E14": {"nilai": "", "status": "kosong", "label": "Alat 6"},
-            "E15": {"nilai": "", "status": "kosong", "label": "Kapasitas 1"},
-            "E16": {"nilai": "", "status": "kosong", "label": "Kapasitas 2"},
-            "E17": {"nilai": "", "status": "kosong", "label": "Kapasitas 3"},
-            "E18": {"nilai": "", "status": "kosong", "label": "Kapasitas 4"},
-            "E19": {"nilai": "", "status": "kosong", "label": "Kapasitas 5"},
-            "E20": {"nilai": "", "status": "kosong", "label": "Kapasitas 6"},
-            "E21": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 1"},
-            "E22": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 2"},
-            "E23": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 3"},
-            "E24": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 4"},
-            "E25": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 5"},
-            "E26": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 6"},
-            "E27": {"nilai": "", "status": "kosong", "label": "Jabatan Teknis"},
-            "E28": {"nilai": 0,  "status": "kosong", "label": "Pengalaman Teknis (Tahun)"},
-            "E29": {"nilai": "", "status": "kosong", "label": "Nama SKK/SKT"},
-            "E30": {"nilai": "", "status": "kosong", "label": "Jabatan K3"},
-            "E31": {"nilai": 0,  "status": "kosong", "label": "Pengalaman K3 (Tahun)"},
-            "E32": {"nilai": "", "status": "kosong", "label": "Sertifikat K3"},
-            "E33": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan RK3"},
-            "E34": {"nilai": "", "status": "kosong", "label": "Risiko Tertinggi RK3"},
+            "E2":  {"nilai": "", "status": "kosong", "label": "Fungsi Bangunan", "sumber": ""},
+            "E6":  {"nilai": "", "status": "kosong", "label": "SBU KBLI 2020", "sumber": ""},
+            "E7":  {"nilai": "", "status": "kosong", "label": "SBU KBLI 2015", "sumber": ""},
+            "E9":  {"nilai": "", "status": "kosong", "label": "Alat 1", "sumber": ""},
+            "E10": {"nilai": "", "status": "kosong", "label": "Alat 2", "sumber": ""},
+            "E11": {"nilai": "", "status": "kosong", "label": "Alat 3", "sumber": ""},
+            "E12": {"nilai": "", "status": "kosong", "label": "Alat 4", "sumber": ""},
+            "E13": {"nilai": "", "status": "kosong", "label": "Alat 5", "sumber": ""},
+            "E14": {"nilai": "", "status": "kosong", "label": "Alat 6", "sumber": ""},
+            "E15": {"nilai": "", "status": "kosong", "label": "Kapasitas 1", "sumber": ""},
+            "E16": {"nilai": "", "status": "kosong", "label": "Kapasitas 2", "sumber": ""},
+            "E17": {"nilai": "", "status": "kosong", "label": "Kapasitas 3", "sumber": ""},
+            "E18": {"nilai": "", "status": "kosong", "label": "Kapasitas 4", "sumber": ""},
+            "E19": {"nilai": "", "status": "kosong", "label": "Kapasitas 5", "sumber": ""},
+            "E20": {"nilai": "", "status": "kosong", "label": "Kapasitas 6", "sumber": ""},
+            "E21": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 1", "sumber": ""},
+            "E22": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 2", "sumber": ""},
+            "E23": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 3", "sumber": ""},
+            "E24": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 4", "sumber": ""},
+            "E25": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 5", "sumber": ""},
+            "E26": {"nilai": "", "status": "kosong", "label": "Jumlah Alat 6", "sumber": ""},
+            "E27": {"nilai": "", "status": "kosong", "label": "Jabatan Teknis", "sumber": ""},
+            "E28": {"nilai": 0,  "status": "kosong", "label": "Pengalaman Teknis (Tahun)", "sumber": ""},
+            "E29": {"nilai": "", "status": "kosong", "label": "Nama SKK/SKT", "sumber": ""},
+            "E30": {"nilai": "", "status": "kosong", "label": "Jabatan K3", "sumber": ""},
+            "E31": {"nilai": 0,  "status": "kosong", "label": "Pengalaman K3 (Tahun)", "sumber": ""},
+            "E32": {"nilai": "", "status": "kosong", "label": "Sertifikat K3", "sumber": ""},
+            "E33": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan RK3", "sumber": ""},
+            "E34": {"nilai": "", "status": "kosong", "label": "Risiko Tertinggi RK3", "sumber": ""},
         },
         "dokpil": {
-            "E6":  {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 1"},
-            "E7":  {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 2"},
-            "E8":  {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 3"},
-            "E9":  {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 4"},
-            "E10": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 5"},
-            "E11": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 6"},
-            "E12": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 7"},
-            "E13": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 8"},
-            "E14": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 9"},
-            "E15": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 10"},
-            "E16": {"nilai": "", "status": "kosong", "label": "Cara Pembayaran", "id_cp": ""},
+            "E6":  {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 1", "sumber": ""},
+            "E7":  {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 2", "sumber": ""},
+            "E8":  {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 3", "sumber": ""},
+            "E9":  {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 4", "sumber": ""},
+            "E10": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 5", "sumber": ""},
+            "E11": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 6", "sumber": ""},
+            "E12": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 7", "sumber": ""},
+            "E13": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 8", "sumber": ""},
+            "E14": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 9", "sumber": ""},
+            "E15": {"nilai": "", "status": "kosong", "label": "Uraian Pekerjaan 10", "sumber": ""},
+            "E16": {"nilai": "", "status": "kosong", "label": "Cara Pembayaran", "id_cp": "", "sumber": ""},
         },
         "error": ""
     }
@@ -782,6 +782,13 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
             # E28/E31 (pengalaman): jika nilai 0 dan tidak ada personil, kosongkan
             if k in ("E28", "E31") and hasil[bagian][k]["nilai"] == 0:
                 hasil[bagian][k]["nilai"] = ""
+
+    # Backfill sumber dengan nama file input
+    _src_name = os.path.basename(path_or_dir)
+    for sec in ("input_data", "reviu", "dokpil"):
+        for key, item in hasil[sec].items():
+            if isinstance(item, dict) and item.get("status") not in ("kosong", "") and item.get("sumber") == "":
+                item["sumber"] = _src_name
 
     return hasil, ""
 
