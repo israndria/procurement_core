@@ -389,7 +389,7 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, incremental=False)
 # --- 5. UI UTAMA (TABS) ---
 # ============================================================
 st.title("🏗️ SPSE Scraper V3.0")
-tab_scraper, tab_dashboard, tab_log = st.tabs(["🚀 Scraper", "📊 Dashboard", "📋 Log & Status"])
+tab_scraper, tab_dashboard, tab_cek, tab_log = st.tabs(["🚀 Scraper", "📊 Dashboard", "🔍 Cek Penyedia", "📋 Log & Status"])
 
 # ============================================================
 # TAB 1: SCRAPER
@@ -742,10 +742,12 @@ with tab_dashboard:
         if dash_kat == "tender":
             st.write("---")
             with st.expander("👥 Data Peserta Tender", expanded=False):
+                kode_list = df["kode_tender"].tolist()
+                nama_list = [f"{k} — {df[df['kode_tender']==k]['nama_paket'].values[0][:60]}" for k in kode_list]
                 kode_dipilih = st.selectbox(
                     "Pilih paket untuk lihat peserta",
-                    options=df["kode_tender"].tolist(),
-                    format_func=lambda k: f"{k} — {df[df['kode_tender']==k]['nama_paket'].values[0][:60] if not df[df['kode_tender']==k].empty else k}",
+                    options=kode_list,
+                    format_func=lambda k: next((n for n in nama_list if n.startswith(k)), k),
                     key="sel_kode_peserta"
                 )
                 if kode_dipilih:
@@ -761,16 +763,40 @@ with tab_dashboard:
                                          "skor_administrasi", "skor_teknis", "skor_harga", "skor_akhir",
                                          "alasan_gugur", "is_pemenang"]
                         kolom_p_ada = [c for c in kolom_peserta if c in df_peserta.columns]
-                        st.dataframe(
-                            df_peserta[kolom_p_ada],
-                            use_container_width=True,
-                            column_config={
-                                "is_pemenang": st.column_config.CheckboxColumn("Pemenang"),
-                                "skor_akhir":  st.column_config.NumberColumn("Skor Akhir"),
-                                "nama_peserta":st.column_config.TextColumn("Nama Peserta", width="large"),
-                            }
-                        )
-                        st.caption(f"{len(df_peserta)} peserta")
+                        df_p_tampil = df_peserta[kolom_p_ada].copy()
+
+                        # Highlight baris pemenang pakai HTML table
+                        def _render_peserta_html(df_p):
+                            cols = df_p.columns.tolist()
+                            header = "".join(f'<th style="padding:6px 10px;text-align:left;border-bottom:2px solid #ddd;font-size:12px;white-space:nowrap;">{c}</th>' for c in cols)
+                            rows_html = ""
+                            for _, row in df_p.iterrows():
+                                is_win = bool(row.get("is_pemenang", False))
+                                bg = "#d4edda" if is_win else "white"
+                                fw = "bold" if is_win else "normal"
+                                cells = ""
+                                for c in cols:
+                                    val = row[c]
+                                    if c == "is_pemenang":
+                                        val = "✅ Pemenang" if val else ""
+                                    elif c == "alasan_gugur" and (val is None or str(val) == "None" or str(val) == ""):
+                                        val = ""
+                                    elif val is None or str(val) == "None":
+                                        val = "-"
+                                    # Skor: tampilkan sebagai angka dengan 2 desimal
+                                    if c in ("skor_administrasi", "skor_teknis", "skor_harga", "skor_akhir"):
+                                        try:
+                                            val = f"{float(val):.2f}"
+                                        except:
+                                            pass
+                                    cells += f'<td style="padding:5px 10px;font-size:12px;background:{bg};font-weight:{fw};">{val}</td>'
+                                rows_html += f"<tr>{cells}</tr>"
+                            return f'''<div style="overflow-x:auto;"><table style="border-collapse:collapse;width:100%;font-family:monospace;">
+                            <thead><tr style="background:#f8f9fa;">{header}</tr></thead>
+                            <tbody>{rows_html}</tbody></table></div>'''
+
+                        st.markdown(_render_peserta_html(df_p_tampil), unsafe_allow_html=True)
+                        st.caption(f"{len(df_peserta)} peserta | 🟢 = pemenang")
                     else:
                         st.info("Data peserta belum tersedia untuk paket ini.")
 
@@ -802,7 +828,186 @@ with tab_dashboard:
         st.rerun()
 
 # ============================================================
-# TAB 3: LOG & STATUS
+# TAB 3: CEK PENYEDIA (DETEKSI SKP OVER-LIMIT)
+# ============================================================
+with tab_cek:
+    st.subheader("🔍 Cek Penyedia — Deteksi SKP Berjalan")
+    st.caption("Cari penyedia berdasarkan nama atau NPWP di seluruh data tender. SKP maksimal = 5 paket berjalan bersamaan.")
+
+    cek_col1, cek_col2 = st.columns([3, 1])
+    with cek_col1:
+        cek_query = st.text_input("Nama penyedia atau NPWP (minimal 3 karakter)", key="cek_query",
+                                   placeholder="contoh: PT Maju Jaya  atau  12.345.678.9-001.000")
+    with cek_col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        cek_btn = st.button("🔍 Cari", type="primary", use_container_width=True, key="cek_btn")
+
+    def _is_berjalan(tahapan):
+        if not tahapan:
+            return False
+        t = str(tahapan).strip().lower()
+        if "selesai" in t or "dibatalkan" in t or "gagal" in t:
+            return False
+        return True
+
+    @st.cache_data(ttl=120)
+    def _cari_penyedia(query):
+        """Cari di tabel tender_peserta by nama_peserta atau npwp, join info paket dari tabel tender."""
+        try:
+            sb = _sb()
+            r1 = sb.table("tender_peserta").select(
+                "kode_tender,urutan,nama_peserta,npwp,harga_penawaran,harga_negosiasi,"
+                "skor_akhir,alasan_gugur,is_pemenang"
+            ).ilike("nama_peserta", f"%{query}%").limit(200).execute()
+
+            r2 = sb.table("tender_peserta").select(
+                "kode_tender,urutan,nama_peserta,npwp,harga_penawaran,harga_negosiasi,"
+                "skor_akhir,alasan_gugur,is_pemenang"
+            ).ilike("npwp", f"%{query}%").limit(200).execute()
+
+            semua = r1.data + r2.data
+            seen = set()
+            unik = []
+            for row in semua:
+                key = (row.get("kode_tender"), row.get("urutan"))
+                if key not in seen:
+                    seen.add(key)
+                    unik.append(row)
+
+            if not unik:
+                return pd.DataFrame(), pd.DataFrame()
+
+            df_psd = pd.DataFrame(unik)
+
+            kode_list = df_psd["kode_tender"].unique().tolist()
+            r3 = sb.table("tender").select(
+                "kode_tender,nama_paket,instansi,tahapan,kontrak_mulai,kontrak_selesai,link_detail"
+            ).in_("kode_tender", kode_list).execute()
+
+            df_tender = pd.DataFrame(r3.data) if r3.data else pd.DataFrame()
+            return df_psd, df_tender
+        except Exception as e:
+            st.error(f"Error query: {e}")
+            return pd.DataFrame(), pd.DataFrame()
+
+    if cek_btn and cek_query and len(cek_query.strip()) >= 3:
+        with st.spinner("Mencari data penyedia di seluruh LPSE..."):
+            df_psd, df_tender = _cari_penyedia(cek_query.strip())
+
+        if df_psd.empty:
+            st.warning(f"Tidak ada data penyedia yang cocok dengan: **{cek_query}**")
+        else:
+            if not df_tender.empty:
+                df_merged = df_psd.merge(df_tender, on="kode_tender", how="left")
+            else:
+                df_merged = df_psd.copy()
+                for c in ["nama_paket", "instansi", "tahapan", "kontrak_mulai", "kontrak_selesai", "link_detail"]:
+                    df_merged[c] = "-"
+
+            df_merged["_berjalan"] = df_merged["tahapan"].apply(_is_berjalan)
+            df_merged["_pemenang_berjalan"] = df_merged["is_pemenang"] & df_merged["_berjalan"]
+
+            nama_unik = df_merged["nama_peserta"].dropna().unique()
+
+            for nama_psd in sorted(nama_unik):
+                df_nama = df_merged[df_merged["nama_peserta"] == nama_psd]
+                total_ikut = len(df_nama)
+                menang = df_nama["is_pemenang"].sum()
+                berjalan = df_nama["_berjalan"].sum()
+                menang_berjalan = df_nama["_pemenang_berjalan"].sum()
+                npwp_val = df_nama["npwp"].dropna().iloc[0] if not df_nama["npwp"].dropna().empty else "-"
+
+                skp_over = menang_berjalan > 5
+                card_color = "#f8d7da" if skp_over else ("#fff3cd" if menang_berjalan >= 4 else "#d4edda")
+                flag = "🔴 OVER LIMIT!" if skp_over else ("🟡 Mendekati Limit" if menang_berjalan >= 4 else "🟢 Aman")
+
+                st.markdown(f"""
+<div style="background:{card_color};border-radius:8px;padding:12px 16px;margin-bottom:8px;border-left:4px solid {'#dc3545' if skp_over else ('#ffc107' if menang_berjalan>=4 else '#28a745')};">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <strong style="font-size:15px;">{nama_psd}</strong><br>
+      <span style="font-size:12px;color:#666;">NPWP: {npwp_val}</span>
+    </div>
+    <div style="text-align:right;">
+      <span style="font-size:18px;font-weight:bold;">{flag}</span><br>
+      <span style="font-size:12px;">SKP berjalan sebagai pemenang: <strong>{menang_berjalan}</strong>/5</span>
+    </div>
+  </div>
+  <div style="display:flex;gap:24px;margin-top:8px;font-size:13px;">
+    <span>📦 Total ikut tender: <strong>{total_ikut}</strong></span>
+    <span>🏆 Menang: <strong>{menang}</strong></span>
+    <span>⚙️ Paket masih berjalan: <strong>{berjalan}</strong></span>
+    <span>⚠️ Menang & berjalan: <strong>{menang_berjalan}</strong></span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+            st.write("---")
+
+            st.markdown(f"**📋 Detail Semua Paket ({len(df_merged)} baris)**")
+
+            kolom_cek = ["nama_peserta", "npwp", "nama_paket", "instansi", "tahapan",
+                         "harga_penawaran", "harga_negosiasi", "skor_akhir",
+                         "alasan_gugur", "is_pemenang", "kontrak_mulai", "kontrak_selesai", "link_detail"]
+            kolom_ada = [c for c in kolom_cek if c in df_merged.columns]
+            df_cek_tampil = df_merged[kolom_ada].sort_values(
+                ["nama_peserta", "is_pemenang"], ascending=[True, False]
+            )
+
+            def _render_cek_html(df_c):
+                cols = df_c.columns.tolist()
+                header = "".join(
+                    f'<th style="padding:6px 10px;text-align:left;border-bottom:2px solid #ddd;font-size:11px;white-space:nowrap;background:#f8f9fa;">{c}</th>'
+                    for c in cols
+                )
+                rows_html = ""
+                for _, row in df_c.iterrows():
+                    is_win = bool(row.get("is_pemenang", False))
+                    berjalan_row = _is_berjalan(row.get("tahapan", ""))
+                    if is_win and berjalan_row:
+                        bg = "#fff3cd"
+                    elif is_win:
+                        bg = "#d4edda"
+                    else:
+                        bg = "white"
+                    cells = ""
+                    for c in cols:
+                        val = row.get(c, "-")
+                        if c == "is_pemenang":
+                            val = "✅" if val else ""
+                        elif c == "link_detail" and val and val != "-":
+                            val = f'<a href="{val}" target="_blank" style="font-size:11px;">Buka</a>'
+                        elif val is None or str(val) in ("None", "nan", ""):
+                            val = "-"
+                        cells += f'<td style="padding:5px 10px;font-size:11px;background:{bg};max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{str(val)}">{val}</td>'
+                    rows_html += f"<tr>{cells}</tr>"
+                return f'''<div style="overflow-x:auto;max-height:500px;overflow-y:auto;">
+                <table style="border-collapse:collapse;width:100%;font-family:monospace;">
+                <thead style="position:sticky;top:0;z-index:1;"><tr>{header}</tr></thead>
+                <tbody>{rows_html}</tbody></table></div>
+                <p style="font-size:11px;color:#888;margin-top:4px;">🟢 Menang & selesai | 🟡 Menang & masih berjalan | ⚠️ Cek SKP jika kolom ini banyak kuning</p>'''
+
+            st.markdown(_render_cek_html(df_cek_tampil), unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            csv_cek = df_cek_tampil.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("⬇️ Download CSV Hasil Pencarian", csv_cek,
+                               file_name=f"cek_penyedia_{cek_query.strip()[:20]}.csv",
+                               mime="text/csv")
+
+    elif cek_btn:
+        st.warning("Masukkan minimal 3 karakter untuk mencari.")
+    else:
+        st.info("Masukkan nama penyedia atau NPWP di kotak pencarian di atas, lalu klik 🔍 Cari.")
+        st.markdown("""
+**Cara pakai:**
+- Ketik sebagian nama: `PT Karya` → tampil semua penyedia dengan nama mengandung "PT Karya"
+- Ketik NPWP: `12.345.678` → cari berdasarkan NPWP
+- Interpretasi warna: 🟡 = pemenang tapi paket masih berjalan (dihitung dalam SKP), 🟢 = menang sudah selesai
+- **Batas SKP**: maksimal 5 paket berjalan sebagai pemenang (Perpres 16/2018). Jika merah → investigasi lebih lanjut
+""")
+
+# ============================================================
+# TAB 4: LOG & STATUS
 # ============================================================
 with tab_log:
     st.subheader("📋 Log Scraper & Status Task Scheduler")
