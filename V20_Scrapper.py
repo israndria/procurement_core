@@ -388,7 +388,7 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, incremental=False)
 # ============================================================
 # --- 5. UI UTAMA (TABS) ---
 # ============================================================
-st.title("🏗️ SPSE Scraper V2.1")
+st.title("🏗️ SPSE Scraper V3.0")
 tab_scraper, tab_dashboard, tab_log = st.tabs(["🚀 Scraper", "📊 Dashboard", "📋 Log & Status"])
 
 # ============================================================
@@ -424,7 +424,7 @@ with tab_scraper:
     col_opts, col_mode = st.columns([2, 3])
     with col_opts:
         max_workers_input = st.slider("Parallel Workers", min_value=1, max_value=3, value=1,
-                                      help="Non Tender & Pencatatan disarankan pakai 1 worker agar tidak kena rate limit Cloudflare (429)")
+                                      help="1 worker = aman, 2-3 worker lebih cepat tapi rawan rate limit (429) dari server SPSE")
     with col_mode:
         mode_scrape = st.radio(
             "Mode Scrape",
@@ -433,7 +433,7 @@ with tab_scraper:
             help="Incremental: hanya fetch detail paket baru atau yang berubah tahapan. Lebih cepat."
         )
         incremental_mode = "Incremental" in mode_scrape
-    st.info("ℹ️ V2.1 menggunakan cloudscraper (bypass Cloudflare TLS fingerprint).")
+    st.info("ℹ️ V3.0 menggunakan requests.Session — cookie otomatis, tanpa cloudscraper.")
 
     c_start, c_stop = st.columns([4, 1])
     with c_start:
