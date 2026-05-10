@@ -31,8 +31,20 @@ _load_env()
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
-# ─── Fetch cara_pembayaran dari Supabase ─────────────────────────────────────
+# ─── Fetch cara_pembayaran dari Supabase (cache lokal TTL 1 jam) ─────────────
+_CP_CACHE_FILE = os.path.join(BASE_DIR, "_cara_pembayaran_cache.json")
+
 def fetch_cara_pembayaran():
+    import time as _time
+    # Pakai cache lokal jika ada dan belum expire (TTL 3600s)
+    try:
+        if os.path.exists(_CP_CACHE_FILE):
+            _age = _time.time() - os.path.getmtime(_CP_CACHE_FILE)
+            if _age < 3600:
+                with open(_CP_CACHE_FILE, encoding="utf-8") as _fc:
+                    return json.load(_fc)
+    except Exception:
+        pass
     try:
         import httpx
         r = httpx.get(
@@ -41,7 +53,13 @@ def fetch_cara_pembayaran():
             timeout=10
         )
         if r.status_code == 200:
-            return r.json()
+            data = r.json()
+            try:
+                with open(_CP_CACHE_FILE, "w", encoding="utf-8") as _fw:
+                    json.dump(data, _fw, ensure_ascii=False)
+            except Exception:
+                pass
+            return data
     except Exception:
         pass
     return [
@@ -595,6 +613,23 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
         "rks": find_files_by_keywords(base_dir, ["RKS", "Spesifikasi", "Teknis"]),
     }
 
+    # Cache teks PDF per path — hindari re-open file yang sama berkali-kali
+    _text_cache = {}
+    _text_cache_lock = __import__("threading").Lock()
+
+    def _get_pdf_text(path, max_pages=10):
+        with _text_cache_lock:
+            if path in _text_cache:
+                return _text_cache[path]
+        try:
+            with pdfplumber.open(path) as _pdf:
+                txt = "\n".join([p.extract_text() or "" for p in _pdf.pages[:max_pages]])
+        except Exception:
+            txt = ""
+        with _text_cache_lock:
+            _text_cache[path] = txt
+        return txt
+
     # Helper untuk memproses file berdasarkan ekstensi
     def process_file(file_list, func, hasil):
         for f in file_list:
@@ -630,12 +665,12 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
             _fut.result()
 
     # 3. Common Fields (Input Data) dari SEMUA file (biasanya ada di RK3K atau KAK)
+    # Gunakan _get_pdf_text() — cache hasil extract agar file tidak dibuka ulang
     all_files = file_map["uraian"] + file_map["rks"] + file_map["rk3k"] + file_map["personil"] + file_map["merged"]
     for f in all_files:
         ext = f.lower().split(".")[-1]
         if ext == "pdf":
-            with pdfplumber.open(f) as pdf:
-                txt = "\n".join([p.extract_text() or "" for p in pdf.pages[:10]])
+            txt = _get_pdf_text(f, max_pages=10)
         elif ext == "docx":
             txt = extract_text_from_docx(f)
         else: continue
