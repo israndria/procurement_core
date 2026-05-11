@@ -24,6 +24,7 @@ def inject_buttons(filepath):
         "ModDraftPaket",    # Load draft paket dari Supabase + autofill
         "ModKKEvaluasi",    # Muat data KK Evaluasi Kualifikasi dari Supabase
         "ModInputBA",       # Muat sheet "0. Input BA" dari Supabase + GCal
+        "ModSyncDraft",     # Sync Data Draft + Diff Highlight ke Supabase
     ]
 
     # Verify semua .bas file ada
@@ -179,6 +180,9 @@ def inject_buttons(filepath):
                 ("btnBukaDokpil",         "Buka Dokpil",        "BukaDokpil",                 7, 6, BLUE_WORD),
                 ("btnPrintDokpil",        "Print Dokpil",       "PrintDokpilPDF",             7, 7, BLACK),
                 ("btnRelink",             "Relink Template",    "RelinkTemplate",             7, 8, (255, 140, 0)),
+                # Baris 8: Sync Data Draft
+                ("btnSyncDraft",          "Sync Data Draft",    "SyncDataDraft",              8, 6, (0, 112, 192)),
+                ("btnDiffHighlight",      "Diff Highlight",     "DiffHighlight",              8, 7, (255, 165, 0)),
             ]),
             ("3. KK Evaluasi Kualifikasi", [
                 ("btnMuatKKEvaluasi", "Muat KK Evaluasi", "MuatKKEvaluasi", 1, 7, PURPLE),

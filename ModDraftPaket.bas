@@ -356,6 +356,9 @@ Public Sub PilihDraftPaket(selectedLabel As String)
 
             ' ── Muat HPS dari Supabase → isi sheet "5. HPS" ───────────────────
             MuatHPS kodeTender
+
+            ' ── Diff Highlight: bandingkan vs snapshot Supabase ───────────────
+            ModSyncDraft.DiffHighlight kodeTender
             Exit For
         End If
     Next i
