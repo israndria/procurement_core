@@ -79,7 +79,10 @@ Public Sub MuatInputBA()
     ' ── 2. Dokumen penawaran dari Supabase ──────────────────
     Call IsiDokumenPenawaran(wsBA, kodeTender)
 
-    ' ── 3. SKP + Hasil Pembuktian dari KK Evaluasi ──────────
+    ' ── 3. Conflict check personil/alat ─────────────────────
+    Call IsiConflictCheck(wsBA, kodeTender)
+
+    ' ── 4. SKP + Hasil Pembuktian dari KK Evaluasi ──────────
     On Error Resume Next
     Set wsKK = ThisWorkbook.Sheets(SHEET_KK)
     If Not wsKK Is Nothing Then
@@ -357,6 +360,230 @@ Private Sub IsiDokumenPenawaran(wsBA As Worksheet, kodeTender As String)
     wsBA.Cells(ROW_JML_TDK_LENGKAP, 3).Value = CInt(Val(ExtractVal(obj, "jml_tidak_lengkap")))
     wsBA.Cells(ROW_JML_TDK_BUKA, 3).Value    = CInt(Val(ExtractVal(obj, "jml_tidak_dapat_dibuka")))
 End Sub
+
+
+' ============================================================
+' Conflict check personil/alat via Python conflict_check.py
+' Isi kolom F/G/H (peserta 1/2/3) untuk baris personil & alat
+' ============================================================
+Private Sub IsiConflictCheck(wsBA As Worksheet, kodeTender As String)
+    Dim sd As String
+    sd = ScriptDirBA()
+    If sd = "" Then Exit Sub
+
+    Dim pyExe    As String: pyExe    = sd & "\python\python.exe"
+    Dim pyScript As String: pyScript = sd & "\conflict_check.py"
+    Dim outJson  As String: outJson  = sd & "\_conflict_check.json"
+
+    If Not FileExistsBA(pyExe) Or Not FileExistsBA(pyScript) Then Exit Sub
+
+    ' Hapus output lama
+    On Error Resume Next
+    Kill outJson
+    On Error GoTo 0
+
+    ' Panggil Python: conflict_check.py <kode_tender>
+    Dim cmd As String
+    cmd = """" & pyExe & """ """ & pyScript & """ " & kodeTender
+
+    Application.StatusBar = "Conflict Check: memeriksa riwayat personil/alat..."
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, True
+    Application.StatusBar = False
+
+    If Not FileExistsBA(outJson) Then Exit Sub
+
+    ' Baca JSON output
+    Dim result As String
+    result = ReadFileBA(outJson)
+
+    If ExtractVal(result, "error") <> "" And ExtractVal(result, "error") <> "null" Then
+        Exit Sub  ' silent — conflict check opsional
+    End If
+
+    ' Bersihkan kolom F/G/H baris personil & alat dulu
+    Dim r As Integer
+    For r = ROW_PERSONEL_1 To ROW_ALAT_6
+        wsBA.Cells(r, 6).Value = ""
+        wsBA.Cells(r, 7).Value = ""
+        wsBA.Cells(r, 8).Value = ""
+        wsBA.Cells(r, 6).Interior.ColorIndex = -4142
+        wsBA.Cells(r, 7).Interior.ColorIndex = -4142
+        wsBA.Cells(r, 8).Interior.ColorIndex = -4142
+    Next r
+
+    ' Mapping peserta_id → kolom (C=3, D=4, E=5 → F=6, G=7, H=8)
+    ' Kolom C = peserta 1, D = peserta 2, E = peserta 3
+    ' Status isi ke F (peserta 1), G (peserta 2), H (peserta 3)
+
+    ' Personil: baris ROW_PERSONEL_1 = personil_1, ROW_PERSONEL_2 = personil_2
+    Dim pesertaCols(1 To 3) As Integer
+    pesertaCols(1) = 6  ' F
+    pesertaCols(2) = 7  ' G
+    pesertaCols(3) = 8  ' H
+
+    ' Ekstrak status per peserta per field — format JSON flat per peserta_id
+    ' Karena peserta_id dari Supabase urut asc, kita map index 1/2/3 ke kolom
+    Dim pIdx As Integer
+    For pIdx = 1 To 3
+        ' Cari blok peserta ke-pIdx di "personil"
+        Dim p1Key As String: p1Key = "personil_1"
+        Dim p2Key As String: p2Key = "personil_2"
+
+        ' Ekstrak status personil_1 peserta ke-pIdx
+        Dim st1 As String: st1 = GetConflictPesan(result, "personil", pIdx, "personil_1")
+        Dim st2 As String: st2 = GetConflictPesan(result, "personil", pIdx, "personil_2")
+
+        If st1 <> "" Then
+            wsBA.Cells(ROW_PERSONEL_1, pesertaCols(pIdx)).Value = st1
+            TerapkanWarna wsBA.Cells(ROW_PERSONEL_1, pesertaCols(pIdx)), GetConflictStatus(result, "personil", pIdx, "personil_1")
+        End If
+        If st2 <> "" Then
+            wsBA.Cells(ROW_PERSONEL_2, pesertaCols(pIdx)).Value = st2
+            TerapkanWarna wsBA.Cells(ROW_PERSONEL_2, pesertaCols(pIdx)), GetConflictStatus(result, "personil", pIdx, "personil_2")
+        End If
+
+        ' Alat: alat_1..6 → ROW_ALAT_1..6
+        Dim aIdx As Integer
+        Dim aRows(1 To 6) As Integer
+        aRows(1) = ROW_ALAT_1: aRows(2) = ROW_ALAT_2: aRows(3) = ROW_ALAT_3
+        aRows(4) = ROW_ALAT_4: aRows(5) = ROW_ALAT_5: aRows(6) = ROW_ALAT_6
+        For aIdx = 1 To 6
+            Dim aKey As String: aKey = "alat_" & aIdx
+            Dim ast As String: ast = GetConflictPesan(result, "alat", pIdx, aKey)
+            If ast <> "" Then
+                wsBA.Cells(aRows(aIdx), pesertaCols(pIdx)).Value = ast
+                TerapkanWarna wsBA.Cells(aRows(aIdx), pesertaCols(pIdx)), GetConflictStatus(result, "alat", pIdx, aKey)
+            End If
+        Next aIdx
+    Next pIdx
+End Sub
+
+
+' Warna sel berdasarkan status
+Private Sub TerapkanWarna(cel As Range, status As String)
+    Select Case status
+        Case "warning", "proses"
+            cel.Interior.Color = RGB(255, 200, 0)   ' Kuning peringatan
+        Case "ok"
+            cel.Interior.Color = RGB(198, 239, 206)  ' Hijau muda
+        Case Else
+            cel.Interior.ColorIndex = -4142
+    End Select
+End Sub
+
+
+' Ekstrak "pesan" dari nested JSON: result["personil"][peserta_idx]["key"]["pesan"]
+' JSON flat — kita parse manual dengan InStr bertingkat
+Private Function GetConflictPesan(json As String, tipe As String, pesertaIdx As Integer, key As String) As String
+    GetConflictPesan = GetConflictField(json, tipe, pesertaIdx, key, "pesan")
+End Function
+
+Private Function GetConflictStatus(json As String, tipe As String, pesertaIdx As Integer, key As String) As String
+    GetConflictStatus = GetConflictField(json, tipe, pesertaIdx, key, "status")
+End Function
+
+Private Function GetConflictField(json As String, tipe As String, pesertaIdx As Integer, itemKey As String, field As String) As String
+    GetConflictField = ""
+
+    ' Cari blok tipe ("personil" atau "alat")
+    Dim pTipe As Long: pTipe = InStr(json, """" & tipe & """")
+    If pTipe = 0 Then Exit Function
+
+    ' Cari objek peserta ke-pesertaIdx (skip pesertaIdx-1 buka kurung kurawal dalam blok tipe)
+    Dim braceStart As Long: braceStart = InStr(pTipe, json, "{")
+    If braceStart = 0 Then Exit Function
+
+    ' Masuk ke dalam blok tipe — cari peserta ke-pesertaIdx (key = peserta_id string)
+    ' Format: "personil": { "pid1": { "personil_1": {...} }, "pid2": {...} }
+    ' Kita skip pesertaIdx-1 pasang key:{ untuk sampai ke peserta yang dimaksud
+    Dim depth As Integer: depth = 0
+    Dim pos As Long: pos = braceStart
+    Dim pesertaCount As Integer: pesertaCount = 0
+    Dim pesertaBlokStart As Long: pesertaBlokStart = 0
+
+    ' Masuk brace pertama (blok tipe)
+    depth = 1
+    pos = braceStart + 1
+
+    Do While pos <= Len(json) And depth > 0
+        Dim ch As String: ch = Mid(json, pos, 1)
+        If ch = "{" Then
+            depth = depth + 1
+            If depth = 2 Then
+                ' Ini buka blok peserta baru
+                pesertaCount = pesertaCount + 1
+                If pesertaCount = pesertaIdx Then
+                    pesertaBlokStart = pos
+                    Exit Do
+                End If
+            End If
+        ElseIf ch = "}" Then
+            depth = depth - 1
+        End If
+        pos = pos + 1
+    Loop
+
+    If pesertaBlokStart = 0 Then Exit Function
+
+    ' Cari itemKey di dalam blok peserta
+    Dim pItem As Long: pItem = InStr(pesertaBlokStart, json, """" & itemKey & """")
+    If pItem = 0 Then Exit Function
+
+    ' Cari blok { setelah itemKey
+    Dim pBrace As Long: pBrace = InStr(pItem, json, "{")
+    If pBrace = 0 Then Exit Function
+
+    ' Ekstrak blok item
+    Dim d2 As Integer: d2 = 0
+    Dim p2 As Long: p2 = pBrace
+    Dim itemBlok As String
+    Do While p2 <= Len(json)
+        Dim c2 As String: c2 = Mid(json, p2, 1)
+        If c2 = "{" Then d2 = d2 + 1
+        If c2 = "}" Then
+            d2 = d2 - 1
+            If d2 = 0 Then
+                itemBlok = Mid(json, pBrace, p2 - pBrace + 1)
+                Exit Do
+            End If
+        End If
+        p2 = p2 + 1
+    Loop
+
+    If itemBlok = "" Then Exit Function
+    GetConflictField = ExtractVal(itemBlok, field)
+End Function
+
+
+' Helper: cari script dir (WPy64-313110)
+Private Function ScriptDirBA() As String
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim pokjaRoot As String
+    pokjaRoot = fso.GetParentFolderName(ThisWorkbook.Path)
+    Dim candidate As String
+    candidate = pokjaRoot & "\V19_Scheduler\WPy64-313110"
+    If Dir(candidate, vbDirectory) <> "" Then
+        ScriptDirBA = candidate
+    End If
+End Function
+
+Private Function FileExistsBA(path As String) As Boolean
+    On Error Resume Next
+    FileExistsBA = (Dir(path) <> "")
+    On Error GoTo 0
+End Function
+
+Private Function ReadFileBA(path As String) As String
+    Dim ado As Object
+    Set ado = CreateObject("ADODB.Stream")
+    ado.Type = 2: ado.Charset = "UTF-8": ado.Open
+    ado.LoadFromFile path
+    ReadFileBA = ado.ReadText
+    ado.Close
+End Function
 
 
 ' ============================================================
