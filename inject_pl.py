@@ -116,10 +116,16 @@ def inject_pl(filepath: str):
             ws = wb.Sheets("@ Master Data")
 
             # Hapus tombol lama
-            for shp in list(ws.Shapes):
+            names_to_delete = []
+            for shp in ws.Shapes:
                 if shp.Name in ("btnMuatPL", "btnIsiPL"):
-                    shp.Delete()
-                    print(f"  Tombol lama {shp.Name} dihapus")
+                    names_to_delete.append(shp.Name)
+            for name in names_to_delete:
+                try:
+                    ws.Shapes(name).Delete()
+                    print(f"  Tombol lama {name} dihapus")
+                except Exception:
+                    pass
 
             BLUE = (43, 87, 154)
             GREEN = (40, 167, 69)

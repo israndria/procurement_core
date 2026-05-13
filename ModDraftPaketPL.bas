@@ -243,18 +243,17 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         ' Kontrak & dokpil
         .Cells(PLR_JENIS_KONTRAK, 3).Value = CStr(item(6))  ' jenis_kontrak
 
-        ' Tahun anggaran: dari tahun sekarang (atau dari kode RUP jika ada 4 digit)
-        Dim tahun As String: tahun = Trim(CStr(item(3)))
-        If Len(tahun) >= 4 Then
-            ' Coba ambil 4 digit pertama jika kode RUP diawali tahun
-            If IsNumeric(Left(tahun, 4)) And CInt(Left(tahun, 4)) > 2020 Then
-                tahun = Left(tahun, 4)
-            Else
-                tahun = CStr(Year(Now))
+        ' Tahun anggaran: dari sumber_anggaran "APBD YYYY", fallback Year(Now)
+        Dim tahun As String: tahun = ""
+        Dim srcAng As String: srcAng = Trim(CStr(item(13)))
+        If srcAng <> "" Then
+            Dim posSpasi As Long: posSpasi = InStrRev(srcAng, " ")
+            If posSpasi > 0 Then
+                Dim tStr As String: tStr = Mid(srcAng, posSpasi + 1)
+                If Len(tStr) = 4 And IsNumeric(tStr) Then tahun = tStr
             End If
-        Else
-            tahun = CStr(Year(Now))
         End If
+        If tahun = "" Then tahun = CStr(Year(Now))
         .Cells(PLR_TAHUN_ANGGARAN, 3).Value = tahun
 
         ' DPA nomor
