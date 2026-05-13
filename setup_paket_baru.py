@@ -19,6 +19,7 @@ import re
 
 from config import (
     POKJA_ROOT, TEMPLATE_DIR, EXCEL_TEMPLATE, WORD_SHEET_MAP,
+    TEMPLATE_DIR_PL, EXCEL_TEMPLATE_PL, WORD_SHEET_MAP_PL,
     excel_to_file_uri,
 )
 
@@ -111,29 +112,20 @@ def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
         return False
 
 
-def setup_paket_baru(folder_name=None):
-    """Setup paket baru: copy template + auto-link mail merge."""
-    
+def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map):
+    """Inti setup: copy template + auto-link mail merge ke folder baru."""
     print("=" * 60)
     print("  SETUP PAKET BARU")
     print("  Otomasi Copy Template + Auto-Link Mail Merge")
     print("=" * 60)
-    
-    # Input nama folder
-    if not folder_name:
-        print("\nContoh: '19. Pokja 091'")
-        folder_name = input("Nama folder paket baru: ").strip()
-    
+
     if not folder_name:
         print("[BATAL] Nama folder kosong.")
         return
 
-    # Sanitize: ganti karakter tidak valid Windows dengan "-"
     folder_name = re.sub(r'[<>:"/\\|?*]', '-', folder_name).strip()
-
     target_dir = os.path.join(OUTPUT_BASE, folder_name)
-    
-    # Cek folder existing
+
     if os.path.exists(target_dir):
         print(f"\n[WARN] Folder '{folder_name}' sudah ada!")
         files_exist = os.listdir(target_dir)
@@ -141,7 +133,6 @@ def setup_paket_baru(folder_name=None):
             print(f"  Isi: {len(files_exist)} file")
             for f in files_exist[:5]:
                 print(f"    - {f}")
-        import sys
         if sys.stdin.isatty():
             jawab = input("\nLanjutkan? File yang sudah ada tidak akan di-overwrite. (y/n): ").strip().lower()
             if jawab != 'y':
@@ -151,49 +142,41 @@ def setup_paket_baru(folder_name=None):
             print("[AUTO] Non-interaktif — lanjut, file existing tidak di-overwrite.")
     else:
         os.makedirs(target_dir)
-    
-    # Extract Pokja Number untuk suffix (misal: "086")
+
+    # Extract suffix dari nomor (misal "086" dari "Pokja 086" atau angka depan "1." dari PL)
     pokja_suffix = ""
     m_pokja = re.search(r"Pokja\s+(\d+)", folder_name, re.IGNORECASE)
     if m_pokja:
         pokja_suffix = m_pokja.group(1)
-    
+
     print(f"\n[1/3] Folder: {target_dir}")
-    if pokja_suffix:
-        print(f"      Pokja detected: {pokja_suffix}")
-    
-    # Copy files with renaming
-    print("\n[2/3] Copy & Rename template files...")
-    
-    # 1. Excel
-    excel_name_dst = EXCEL_TEMPLATE.replace("Template", pokja_suffix) if pokja_suffix else EXCEL_TEMPLATE
+
+    # 1. Excel — tidak rename untuk mode PL (nama selalu sama)
+    excel_name_dst = excel_template.replace("Template", pokja_suffix) if pokja_suffix else excel_template
     dst_excel = os.path.join(target_dir, excel_name_dst)
-    
+
+    print("\n[2/3] Copy & Rename template files...")
     if not os.path.exists(dst_excel):
-        shutil.copy2(os.path.join(TEMPLATE_DIR, EXCEL_TEMPLATE), dst_excel)
-        print(f"  [OK] {EXCEL_TEMPLATE} -> {excel_name_dst}")
+        shutil.copy2(os.path.join(template_dir, excel_template), dst_excel)
+        print(f"  [OK] {excel_template} -> {excel_name_dst}")
     else:
         print(f"  [SKIP] {excel_name_dst} (sudah ada)")
-    
+
     # 2. Word files
-    dst_word_map = [] # list of (new_word_path, sheet_name)
-    for wf_tpl, sheet_name in WORD_SHEET_MAP:
+    dst_word_map = []
+    for wf_tpl, sheet_name in word_sheet_map:
         wf_dst = wf_tpl.replace("Template", pokja_suffix) if pokja_suffix else wf_tpl
         dst_path = os.path.join(target_dir, wf_dst)
-        
-        # Copy Template Asli
         if not os.path.exists(dst_path):
-            shutil.copy2(os.path.join(TEMPLATE_DIR, wf_tpl), dst_path)
+            shutil.copy2(os.path.join(template_dir, wf_tpl), dst_path)
             print(f"  [OK] {wf_tpl} -> {wf_dst}")
         else:
             print(f"  [SKIP] {wf_dst} (sudah ada)")
-            
         dst_word_map.append((dst_path, wf_dst, sheet_name))
-    
-    # Auto-link setiap Word ke sheet yang benar
+
+    # 3. Auto-link Word → Excel
     print("\n[3/3] Auto-link Word Mail Merge -> Excel...")
     abs_excel = os.path.abspath(dst_excel)
-    
     success_count = 0
     for dst_path, wf_dst, sheet_name in dst_word_map:
         ok = link_word_to_excel(dst_path, abs_excel, sheet_name)
@@ -202,23 +185,38 @@ def setup_paket_baru(folder_name=None):
             success_count += 1
         else:
             print(f"  [FAIL] {wf_dst}")
-    
-    # Summary
+
     print(f"\n{'='*60}")
     print(f"  SETUP SELESAI!")
     print(f"{'='*60}")
     print(f"\n  Folder : {target_dir}")
     print(f"  Excel  : {excel_name_dst}")
-    print(f"  Word   : {success_count}/{len(WORD_SHEET_MAP)} terhubung")
-    print(f"\n  Langkah selanjutnya:")
-    print(f"  1. Buka Excel -> isi data paket baru")
-    print(f"  2. Buka Word  -> Mailings -> Preview Results")
-    print(f"  3. Finish & Merge -> Print/PDF")
+    print(f"  Word   : {success_count}/{len(word_sheet_map)} terhubung")
+
+
+def setup_paket_baru(folder_name=None):
+    """Setup paket baru mode Tender (PK): copy template + auto-link mail merge."""
+    if not folder_name:
+        print("\nContoh: '19. Pokja 091'")
+        folder_name = input("Nama folder paket baru: ").strip()
+    _setup_folder(folder_name, TEMPLATE_DIR, EXCEL_TEMPLATE, WORD_SHEET_MAP)
+
+
+def setup_paket_baru_pl(folder_name=None):
+    """Setup paket baru mode Pengadaan Langsung (PL): copy template BAPLJKK + auto-link."""
+    if not folder_name:
+        print("\nContoh: '1. PLJKK - Perencanaan Pembangunan Jalan ...'")
+        folder_name = input("Nama folder paket PL: ").strip()
+    _setup_folder(folder_name, TEMPLATE_DIR_PL, EXCEL_TEMPLATE_PL, WORD_SHEET_MAP_PL)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        name = " ".join(sys.argv[1:])
-        setup_paket_baru(name)
+    args = sys.argv[1:]
+    mode_pl = "--mode" in args and args[args.index("--mode") + 1] == "pl" if "--mode" in args else False
+    name_args = [a for a in args if not a.startswith("--") and a != "pl"]
+    folder_name = " ".join(name_args).strip() or None
+
+    if mode_pl:
+        setup_paket_baru_pl(folder_name)
     else:
-        setup_paket_baru()
+        setup_paket_baru(folder_name)

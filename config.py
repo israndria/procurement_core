@@ -42,6 +42,23 @@ WORD_KEYWORD_MAP = {
     "Dokpil":  SHEET_DOKPIL,
 }
 
+# ===== PL (Pengadaan Langsung) TEMPLATE =====
+TEMPLATE_DIR_PL = os.path.join(
+    POKJA_ROOT,
+    "Paket Experiment - Pengadaan Langsung - Konsultan Konstuksi",
+    "Development",
+)
+EXCEL_TEMPLATE_PL = "0. BAPLJKK - Template.xlsm"
+SHEET_BA_PL    = "satu_data"
+SHEET_REVIU_PL = "list_reviu"
+SHEET_DOKPIL_PL = "list_dokpil"
+
+WORD_SHEET_MAP_PL = [
+    ("1. Full Dokumen BA PLJKK v1.docx",    SHEET_BA_PL),
+    ("2. Isi Reviu PLJKK - Template.docm",  SHEET_REVIU_PL),
+    ("3. Dokpil Full PLJKK v1.docx",        SHEET_DOKPIL_PL),
+]
+
 # ===== VBA PDF MODES =====
 # mode_name → (word_const, sheet_const, status_template)
 PDF_MODES = {
