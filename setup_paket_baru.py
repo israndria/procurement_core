@@ -172,11 +172,10 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     else:
         print(f"  [SKIP] {excel_name_dst} (sudah ada)")
 
-    # 2. Word files — hanya rename jika nama Word mengandung "Template" DAN bukan file PL
-    # (file PL Word tidak perlu rename: "1. Full Dokumen BA PLJKK v1.docx" tidak ada "Template")
+    # 2. Word files — rename "Template" → suffix jika ada kata "Template" di nama file
     dst_word_map = []
     for wf_tpl, sheet_name in word_sheet_map:
-        if pokja_suffix and "Template" in wf_tpl and "PLJKK" not in wf_tpl and "PLPK" not in wf_tpl:
+        if pokja_suffix and "Template" in wf_tpl:
             wf_dst = wf_tpl.replace("Template", pokja_suffix)
         else:
             wf_dst = wf_tpl

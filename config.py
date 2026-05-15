@@ -54,9 +54,9 @@ SHEET_REVIU_PL = "list_reviu"
 SHEET_DOKPIL_PL = "list_dokpil"
 
 WORD_SHEET_MAP_PL = [
-    ("1. Full Dokumen BA PLJKK v1.docx",    SHEET_BA_PL),
-    ("2. Isi Reviu PLJKK - Template.docm",  SHEET_REVIU_PL),
-    ("3. Dokpil Full PLJKK v1.docx",        SHEET_DOKPIL_PL),
+    ("1. Full Dokumen BA PLJKK - Template.docx",  SHEET_BA_PL),
+    ("2. Isi Reviu PLJKK - Template.docm",        SHEET_REVIU_PL),
+    ("3. Dokpil Full PLJKK - Template.docx",      SHEET_DOKPIL_PL),
 ]
 
 # Output folder per jenis PL (folder tujuan buat folder baru)
