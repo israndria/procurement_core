@@ -458,10 +458,12 @@ Public Sub RelinkPL()
 
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 1, True  ' tunggu selesai, tampilkan jendela
+    wsh.Run cmd, 0, True  ' hidden, tunggu selesai
     Set wsh = Nothing
 
-    MsgBox "Relink selesai! Tutup dan buka ulang file Word untuk melihat hasilnya.", vbInformation
+    MsgBox "Relink selesai!" & vbCrLf & _
+           "Tutup dan buka ulang file Word untuk melihat hasilnya.", _
+           vbInformation, "Relink Word PL"
 End Sub
 
 Private Sub RunMergePL(ByVal mode As String, ByVal wordPattern As String, ByVal sheetName As String)
