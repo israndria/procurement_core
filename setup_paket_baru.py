@@ -145,15 +145,23 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     else:
         os.makedirs(target_dir)
 
-    # Extract suffix dari nomor (misal "086" dari "Pokja 086" atau angka depan "1." dari PL)
+    # Extract suffix untuk rename Excel
+    # Tender:  "Pokja 086" → "086"
+    # PL JKK:  "1. PLJKK - Nama Paket" → "Nama Paket"
+    # PL PK:   "1. PLPK - Nama Paket"  → "Nama Paket"
     pokja_suffix = ""
     m_pokja = re.search(r"Pokja\s+(\d+)", folder_name, re.IGNORECASE)
     if m_pokja:
         pokja_suffix = m_pokja.group(1)
+    else:
+        # Mode PL: ambil bagian setelah "PLJKK - " atau "PLPK - "
+        m_pl = re.search(r"PL(?:JKK|PK)\s+-\s+(.+)$", folder_name, re.IGNORECASE)
+        if m_pl:
+            pokja_suffix = m_pl.group(1).strip()
 
     print(f"\n[1/3] Folder: {target_dir}")
 
-    # 1. Excel — tidak rename untuk mode PL (nama selalu sama)
+    # 1. Excel — rename "Template" → suffix
     excel_name_dst = excel_template.replace("Template", pokja_suffix) if pokja_suffix else excel_template
     dst_excel = os.path.join(target_dir, excel_name_dst)
 
@@ -164,10 +172,14 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     else:
         print(f"  [SKIP] {excel_name_dst} (sudah ada)")
 
-    # 2. Word files
+    # 2. Word files — hanya rename jika nama Word mengandung "Template" DAN bukan file PL
+    # (file PL Word tidak perlu rename: "1. Full Dokumen BA PLJKK v1.docx" tidak ada "Template")
     dst_word_map = []
     for wf_tpl, sheet_name in word_sheet_map:
-        wf_dst = wf_tpl.replace("Template", pokja_suffix) if pokja_suffix else wf_tpl
+        if pokja_suffix and "Template" in wf_tpl and "PLJKK" not in wf_tpl and "PLPK" not in wf_tpl:
+            wf_dst = wf_tpl.replace("Template", pokja_suffix)
+        else:
+            wf_dst = wf_tpl
         dst_path = os.path.join(target_dir, wf_dst)
         if not os.path.exists(dst_path):
             shutil.copy2(os.path.join(template_dir, wf_tpl), dst_path)

@@ -117,8 +117,9 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL")
             for shp in ws.Shapes:
-                if shp.Name in ("btnMuatPL", "btnIsiPL"):
+                if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
             for name in names_to_delete:
                 try:
@@ -127,16 +128,15 @@ def inject_pl(filepath: str):
                 except Exception:
                     pass
 
-            BLUE = (43, 87, 154)
-            GREEN = (40, 167, 69)
-
-            # Tombol "Muat Paket PL" di G1
-            BLUE = (43, 87, 154)
+            BLUE    = (43, 87, 154)
             GREEN_C = (40, 167, 69)
+            ORANGE  = (200, 100, 0)
+            PURPLE  = (102, 51, 153)
+            TEAL    = (0, 128, 128)
 
-            def add_btn(name, label, macro, row, col, rgb):
+            def add_btn(name, label, macro, row, col, rgb, width=120):
                 cell = ws.Cells(row, col)
-                shp = ws.Shapes.AddShape(5, cell.Left, cell.Top, 120, 28)
+                shp = ws.Shapes.AddShape(5, cell.Left, cell.Top, width, 28)
                 shp.Name = name
                 r, g, b = rgb
                 shp.Fill.ForeColor.RGB = r + (g * 256) + (b * 65536)
@@ -151,8 +151,14 @@ def inject_pl(filepath: str):
                 shp.OnAction = macro
                 print(f"  [OK] {name} ({label}) -> {macro}")
 
-            add_btn("btnMuatPL", "Muat Paket PL", "MuatDraftPaketPL", 1, 7, BLUE)
-            add_btn("btnIsiPL",  "Isi Data PL",   "IsiDataPL",         1, 8, GREEN_C)
+            # Baris 1: Muat + Isi Data
+            add_btn("btnMuatPL",          "Muat Paket PL",  "MuatDraftPaketPL",  1, 7, BLUE)
+            add_btn("btnIsiPL",           "Isi Data PL",    "IsiDataPL",          1, 8, GREEN_C)
+            # Baris 2: Buka Word dokumen + Relink
+            add_btn("btnBukaBA_PL",       "Buka BA",        "BukaBAPlJkk",        2, 7, ORANGE)
+            add_btn("btnBukaReviu_PL",    "Buka Reviu",     "BukaReviuPlJkk",     2, 8, PURPLE)
+            add_btn("btnBukaDokpil_PL",   "Buka Dokpil",    "BukaDokpilPlJkk",    2, 9, TEAL)
+            add_btn("btnRelinkPL",        "Relink Word",    "RelinkPL",            2, 10, (128, 0, 0))
 
         except Exception as e:
             print(f"  [WARN] Tombol @ Master Data: {e}")

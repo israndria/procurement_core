@@ -25,6 +25,14 @@ Attribute VB_Name = "ModDraftPaketPL"
 Private Const SB_URL As String = "%%SUPABASE_URL%%"
 Private Const SB_KEY As String = "%%SUPABASE_KEY%%"
 
+' Word Merge — pattern nama file + sheet name
+Private Const WM_SHEET_BA     As String = "satu_data"
+Private Const WM_SHEET_REVIU  As String = "list_reviu"
+Private Const WM_SHEET_DOKPIL As String = "list_dokpil"
+Private Const WM_PAT_BA       As String = "1. Full Dokumen BA PLJKK"
+Private Const WM_PAT_REVIU    As String = "2. Isi Reviu PLJKK"
+Private Const WM_PAT_DOKPIL   As String = "3. Dokpil Full PLJKK"
+
 ' Sheet & Cell selector
 Private Const MD_SHEET As String = "@ Master Data"
 Private Const CELL_SELECTOR As String = "F1"
@@ -396,6 +404,146 @@ Private Function ParsePLJSON(json As String) As Collection
     Loop
 
     Set ParsePLJSON = col
+End Function
+
+
+' ============================================================
+' WORD MERGE — Buka / PDF dokumen PLJKK
+' ============================================================
+
+Public Sub BukaBAPlJkk()
+    RunMergePL "buka", WM_PAT_BA, WM_SHEET_BA
+End Sub
+
+Public Sub BukaReviuPlJkk()
+    RunMergePL "buka", WM_PAT_REVIU, WM_SHEET_REVIU
+End Sub
+
+Public Sub BukaDokpilPlJkk()
+    RunMergePL "buka", WM_PAT_DOKPIL, WM_SHEET_DOKPIL
+End Sub
+
+Public Sub CetakDokpilPlJkkPDF()
+    RunMergePL "pdf_dokpil", WM_PAT_DOKPIL, WM_SHEET_DOKPIL
+End Sub
+
+Public Sub CetakReviuPlJkkPDF()
+    RunMergePL "pdf_all", WM_PAT_REVIU, WM_SHEET_REVIU
+End Sub
+
+Public Sub RelinkPL()
+    ' Relink semua Word PL ke Excel ini (update path data source)
+    Dim scriptDir As String
+    scriptDir = ScriptDirPL()
+    If scriptDir = "" Then
+        MsgBox "Python tidak ditemukan.", vbCritical
+        Exit Sub
+    End If
+    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+    Dim setupScript As String: setupScript = scriptDir & "\setup_paket_baru.py"
+    Dim folderPath As String: folderPath = ThisWorkbook.Path
+
+    ' Deteksi output_base = parent folder dari folder paket
+    Dim outputBase As String
+    outputBase = Left(folderPath, InStrRev(folderPath, "\") - 1)
+
+    Dim folderName As String
+    folderName = Mid(folderPath, InStrRev(folderPath, "\") + 1)
+
+    Dim cmd As String
+    cmd = Chr(34) & pyExe & Chr(34) & " " & _
+          Chr(34) & setupScript & Chr(34) & " --mode pl" & _
+          " --output-dir " & Chr(34) & outputBase & Chr(34) & _
+          " " & Chr(34) & folderName & Chr(34)
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 1, True  ' tunggu selesai, tampilkan jendela
+    Set wsh = Nothing
+
+    MsgBox "Relink selesai! Tutup dan buka ulang file Word untuk melihat hasilnya.", vbInformation
+End Sub
+
+Private Sub RunMergePL(ByVal mode As String, ByVal wordPattern As String, ByVal sheetName As String)
+    Dim wordFile As String
+    wordFile = FindWordFilePL(wordPattern)
+    If wordFile = "" Then Exit Sub
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & wordFile
+
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim excelPath As String
+    excelPath = ThisWorkbook.FullName
+
+    Dim scriptDir As String
+    scriptDir = ScriptDirPL()
+    If scriptDir = "" Then
+        MsgBox "Python tidak ditemukan. Pastikan V19_Scheduler ada di folder POKJA.", vbCritical
+        Exit Sub
+    End If
+
+    Dim pyExe As String
+    pyExe = scriptDir & "\python\python.exe"
+
+    Dim cmd As String
+    cmd = Chr(34) & pyExe & Chr(34) & " " & _
+          Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " " & _
+          mode & " " & _
+          Chr(34) & wordPath & Chr(34) & " " & _
+          Chr(34) & excelPath & Chr(34) & " " & _
+          Chr(34) & sheetName & Chr(34)
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+
+    Application.StatusBar = "Membuka " & wordFile & "... Word akan muncul sebentar lagi."
+End Sub
+
+Private Function FindWordFilePL(ByVal pattern As String) As String
+    Dim folder As String
+    folder = ThisWorkbook.Path
+    Dim f As String
+    Dim ext As Variant
+    For Each ext In Array("*.docx", "*.docm")
+        f = Dir(folder & "\" & ext)
+        Do While f <> ""
+            If Left(f, Len(pattern)) = pattern Then
+                FindWordFilePL = f
+                Exit Function
+            End If
+            f = Dir()
+        Loop
+    Next ext
+    MsgBox "File Word tidak ditemukan." & vbCrLf & _
+           "Pastikan ada file yang diawali: """ & pattern & """", _
+           vbExclamation, "File Tidak Ditemukan"
+    FindWordFilePL = ""
+End Function
+
+Private Function ScriptDirPL() As String
+    Dim folder As String
+    folder = ThisWorkbook.Path
+    Dim i As Integer
+    For i = 1 To 10
+        If Dir(folder & "\V19_Scheduler\WPy64-313110\python\python.exe") <> "" Then
+            ScriptDirPL = folder & "\V19_Scheduler\WPy64-313110"
+            Exit Function
+        End If
+        folder = Left(folder, InStrRev(folder, "\") - 1)
+        If Len(folder) < 3 Then Exit For
+    Next i
+    ScriptDirPL = ""
 End Function
 
 
