@@ -523,6 +523,52 @@ def show_print_success(printer_name):
         pass
 
 
+def run_merge_mode_pl(folder_path: str, excel_path: str) -> list:
+    """
+    Merge semua Word template PL di folder_path menggunakan data dari excel_path.
+    Loop over WORD_SHEET_MAP_PL: (word_filename, sheet_name).
+    Return: list hasil per file — {"file": str, "sukses": bool, "pesan": str}
+    """
+    import glob as _glob
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from config import WORD_SHEET_MAP_PL
+    except ImportError:
+        WORD_SHEET_MAP_PL = [
+            ("1. Full Dokumen BA PLJKK - Template.docx",  "satu_data"),
+            ("2. Isi Reviu PLJKK - Template.docm",        "list_reviu"),
+            ("3. Dokpil Full PLJKK - Template.docx",      "list_dokpil"),
+        ]
+
+    results = []
+    for word_filename, sheet_name in WORD_SHEET_MAP_PL:
+        # Cari file — bisa Template atau sudah direname
+        base = word_filename.replace(" - Template", "").replace(" - Template", "")
+        candidates = _glob.glob(os.path.join(folder_path, word_filename))
+        if not candidates:
+            # Coba nama tanpa "- Template"
+            stem = os.path.splitext(word_filename)[0].replace(" - Template", "").strip()
+            ext  = os.path.splitext(word_filename)[1]
+            candidates = _glob.glob(os.path.join(folder_path, f"{stem}*{ext}"))
+        if not candidates:
+            results.append({"file": word_filename, "sukses": False, "pesan": "File tidak ditemukan di folder"})
+            continue
+
+        word_path = candidates[0]
+        data = read_excel_data(excel_path, sheet_name)
+        if data is None:
+            results.append({"file": os.path.basename(word_path), "sukses": False, "pesan": f"Gagal baca sheet {sheet_name}"})
+            continue
+
+        try:
+            merge_word(word_path, data, mode="buka", pdf_name="")
+            results.append({"file": os.path.basename(word_path), "sukses": True, "pesan": "OK"})
+        except Exception as e:
+            results.append({"file": os.path.basename(word_path), "sukses": False, "pesan": str(e)})
+
+    return results
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 5:
         print("Usage: python word_merge.py <mode> <word_path> <excel_path> <sheet_name>")
