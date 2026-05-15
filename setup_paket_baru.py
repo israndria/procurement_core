@@ -20,10 +20,11 @@ import re
 from config import (
     POKJA_ROOT, TEMPLATE_DIR, EXCEL_TEMPLATE, WORD_SHEET_MAP,
     TEMPLATE_DIR_PL, EXCEL_TEMPLATE_PL, WORD_SHEET_MAP_PL,
+    OUTPUT_DIR_PL_JKK, OUTPUT_DIR_PL_PK,
     excel_to_file_uri,
 )
 
-# Output base = root POKJA folder
+# Output base default = root POKJA folder (untuk mode Tender)
 OUTPUT_BASE = POKJA_ROOT
 
 
@@ -112,7 +113,7 @@ def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
         return False
 
 
-def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map):
+def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, output_base=None):
     """Inti setup: copy template + auto-link mail merge ke folder baru."""
     print("=" * 60)
     print("  SETUP PAKET BARU")
@@ -123,8 +124,9 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map):
         print("[BATAL] Nama folder kosong.")
         return
 
+    base = output_base or OUTPUT_BASE
     folder_name = re.sub(r'[<>:"/\\|?*]', '-', folder_name).strip()
-    target_dir = os.path.join(OUTPUT_BASE, folder_name)
+    target_dir = os.path.join(base, folder_name)
 
     if os.path.exists(target_dir):
         print(f"\n[WARN] Folder '{folder_name}' sudah ada!")
@@ -202,21 +204,39 @@ def setup_paket_baru(folder_name=None):
     _setup_folder(folder_name, TEMPLATE_DIR, EXCEL_TEMPLATE, WORD_SHEET_MAP)
 
 
-def setup_paket_baru_pl(folder_name=None):
-    """Setup paket baru mode Pengadaan Langsung (PL): copy template BAPLJKK + auto-link."""
+def setup_paket_baru_pl(folder_name=None, output_base=None):
+    """Setup paket baru mode Pengadaan Langsung (PL): copy template BAPLJKK + auto-link.
+    output_base: override folder tujuan (default: deteksi dari nama PLJKK/PLPK).
+    """
     if not folder_name:
         print("\nContoh: '1. PLJKK - Perencanaan Pembangunan Jalan ...'")
         folder_name = input("Nama folder paket PL: ").strip()
-    _setup_folder(folder_name, TEMPLATE_DIR_PL, EXCEL_TEMPLATE_PL, WORD_SHEET_MAP_PL)
+
+    if output_base is None:
+        # Deteksi dari nama folder: PLPK → PK dir, default → JKK dir
+        if "PLPK" in folder_name.upper():
+            output_base = OUTPUT_DIR_PL_PK
+        else:
+            output_base = OUTPUT_DIR_PL_JKK
+
+    _setup_folder(folder_name, TEMPLATE_DIR_PL, EXCEL_TEMPLATE_PL, WORD_SHEET_MAP_PL, output_base)
 
 
 if __name__ == "__main__":
     args = sys.argv[1:]
     mode_pl = "--mode" in args and args[args.index("--mode") + 1] == "pl" if "--mode" in args else False
+
+    # --output-dir <path> → override output_base
+    output_dir = None
+    if "--output-dir" in args:
+        idx = args.index("--output-dir")
+        output_dir = args[idx + 1]
+        args = args[:idx] + args[idx + 2:]
+
     name_args = [a for a in args if not a.startswith("--") and a != "pl"]
     folder_name = " ".join(name_args).strip() or None
 
     if mode_pl:
-        setup_paket_baru_pl(folder_name)
+        setup_paket_baru_pl(folder_name, output_base=output_dir)
     else:
         setup_paket_baru(folder_name)

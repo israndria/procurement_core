@@ -59,6 +59,18 @@ WORD_SHEET_MAP_PL = [
     ("3. Dokpil Full PLJKK v1.docx",        SHEET_DOKPIL_PL),
 ]
 
+# Output folder per jenis PL (folder tujuan buat folder baru)
+OUTPUT_DIR_PL_JKK = os.path.join(
+    POKJA_ROOT,
+    "@ Pejabat Pengadaan 2026",
+    "@ Pengadaan Langsung JKK",
+)
+OUTPUT_DIR_PL_PK = os.path.join(
+    POKJA_ROOT,
+    "@ Pejabat Pengadaan 2026",
+    "@ Pengadaan Langsung PK",
+)
+
 # ===== VBA PDF MODES =====
 # mode_name → (word_const, sheet_const, status_template)
 PDF_MODES = {
