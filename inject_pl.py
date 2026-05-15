@@ -17,6 +17,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 BAS_FILE = SCRIPT_DIR / "ModDraftPaketPL.bas"
 MOD_NAME = "ModDraftPaketPL"
+BAS_FILE_KODE_UNIK = SCRIPT_DIR / "ModKodeUnikPL.bas"
+MOD_NAME_KODE_UNIK = "ModKodeUnikPL"
 
 # Workbook_Open untuk BAPLJKK — hanya auto-relink Word template
 WORKBOOK_OPEN_CODE = (
@@ -92,9 +94,21 @@ def inject_pl(filepath: str):
                 print(f"  {MOD_NAME} lama dihapus")
                 break
 
-        # Import module baru
+        # Import module baru (ModDraftPaketPL)
         imported = vb.VBComponents.Import(tmp_path)
         print(f"  [OK] {imported.Name} imported ({imported.CodeModule.CountOfLines} baris)")
+
+        # Import ModKodeUnikPL
+        if BAS_FILE_KODE_UNIK.exists():
+            for comp in vb.VBComponents:
+                if comp.Name == MOD_NAME_KODE_UNIK:
+                    vb.VBComponents.Remove(comp)
+                    print(f"  {MOD_NAME_KODE_UNIK} lama dihapus")
+                    break
+            imported_ku = vb.VBComponents.Import(str(BAS_FILE_KODE_UNIK))
+            print(f"  [OK] {imported_ku.Name} imported ({imported_ku.CodeModule.CountOfLines} baris)")
+        else:
+            print(f"  [WARN] ModKodeUnikPL.bas tidak ditemukan, skip")
 
         # Inject Workbook_Open ke ThisWorkbook
         this_wb_comp = None
@@ -115,9 +129,15 @@ def inject_pl(filepath: str):
         try:
             ws = wb.Sheets("@ Master Data")
 
+            # Unprotect sheet sebelum modifikasi shape
+            try:
+                ws.Unprotect("pokja2026")
+            except Exception:
+                pass
+
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnKodeUnikPL")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
@@ -152,13 +172,21 @@ def inject_pl(filepath: str):
                 print(f"  [OK] {name} ({label}) -> {macro}")
 
             # Baris 1: Muat + Isi Data
-            add_btn("btnMuatPL",          "Muat Paket PL",  "MuatDraftPaketPL",  1, 7, BLUE)
-            add_btn("btnIsiPL",           "Isi Data PL",    "IsiDataPL",          1, 8, GREEN_C)
+            add_btn("btnMuatPL",          "Muat Paket PL",  "MuatDraftPaketPL",           1, 7, BLUE)
+            add_btn("btnIsiPL",           "Isi Data PL",    "IsiDataPL",                   1, 8, GREEN_C)
             # Baris 2: Buka Word dokumen + Relink
             add_btn("btnBukaBA_PL",       "Buka BA",        "BukaBAPlJkk",        2, 7, ORANGE)
             add_btn("btnBukaReviu_PL",    "Buka Reviu",     "BukaReviuPlJkk",     2, 8, PURPLE)
             add_btn("btnBukaDokpil_PL",   "Buka Dokpil",    "BukaDokpilPlJkk",    2, 9, TEAL)
             add_btn("btnRelinkPL",        "Relink Word",    "RelinkPL",            2, 10, (128, 0, 0))
+            # Baris 3: Kode Unik (kolom 7 — selalu ada di semua workbook)
+            add_btn("btnKodeUnikPL",      "Kode Unik PL",   "GenerateKodeUnikPaketPL",     3, 7, (128, 0, 128))
+
+            # Re-protect
+            try:
+                ws.Protect(Password="pokja2026", AllowFormattingCells=True)
+            except Exception:
+                pass
 
         except Exception as e:
             print(f"  [WARN] Tombol @ Master Data: {e}")
