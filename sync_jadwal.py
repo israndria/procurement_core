@@ -14,7 +14,7 @@ import io
 import re
 import json
 import hashlib
-import cloudscraper
+import requests
 import datetime
 import pandas as pd
 
@@ -102,12 +102,17 @@ def get_service():
 def fetch_jadwal(url: str) -> pd.DataFrame | None:
     """
     Ambil tabel jadwal dari halaman publik SPSE (/lelang/{id}/jadwal).
-    Pakai cloudscraper untuk bypass Cloudflare protection.
+    Menggunakan urllib.request murni karena data jadwal adalah halaman publik biasa.
     """
+    referer = url.replace('/jadwal', '/pengumuman')
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': referer,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    }
+    
     try:
-        scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows'})
-        referer = url.replace('/jadwal', '/pengumuman')
-        resp = scraper.get(url, headers={'Referer': referer}, timeout=30)
+        resp = requests.get(url, headers=headers, timeout=30)
         resp.raise_for_status()
         html = resp.text
     except Exception as e:
@@ -242,20 +247,26 @@ def fetch_old_events(service, url: str) -> dict:
 
 def fetch_jadwal_history(url: str) -> dict:
     """
-    Ambil history perubahan dari SPSE per tahap.
+    Ambil history perubahan dari SPSE per tahap menggunakan urllib murni.
     Returns dict: {stage_name_lower: "1x : ...\n2x : ..."}
     """
+    referer = url.replace('/jadwal', '/pengumuman')
+    
+    def _fetch_url(target_url, ref):
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': ref,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+        resp = requests.get(target_url, headers=headers, timeout=20)
+        resp.raise_for_status()
+        return resp.text
+
     try:
-        import cloudscraper
-        scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows'})
-        referer = url.replace('/jadwal', '/pengumuman')
-
         # Step 1: Fetch halaman jadwal, ekstrak tabel + link history
-        r = scraper.get(url, headers={'Referer': referer}, timeout=20)
-        if r.status_code != 200:
-            return {}
+        html_text = _fetch_url(url, referer)
 
-        rows = re.findall(r'<tr[^>]*>.*?</tr>', r.text, re.DOTALL)
+        rows = re.findall(r'<tr[^>]*>.*?</tr>', html_text, re.DOTALL)
         if not rows:
             return {}
 
@@ -278,11 +289,13 @@ def fetch_jadwal_history(url: str) -> dict:
             # Step 2: Fetch history page untuk tahap ini
             hlink = history_links[0]
             full_url = hlink if hlink.startswith('http') else f"{base_url}{hlink}"
-            r2 = scraper.get(full_url, headers={'Referer': url}, timeout=15)
-            if r2.status_code != 200:
+            
+            try:
+                html_history = _fetch_url(full_url, url)
+            except Exception:
                 continue
 
-            tables = pd.read_html(io.StringIO(r2.text), flavor='lxml')
+            tables = pd.read_html(io.StringIO(html_history), flavor='lxml')
             if not tables:
                 continue
 

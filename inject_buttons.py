@@ -172,6 +172,8 @@ def inject_buttons(filepath):
                 ("btnMuatDraft",          "Muat Draft Paket",   "MuatDraftPaket",             5, 7, PURPLE),
                 ("btnParseDraft",         "Parse Draft",        "ParseDraftTerpilih",         5, 8, GREEN),
                 ("btnKodeUnik",           "Kode Unik Surat",    "GenerateKodeUnik",           5, 9, TEAL),
+                ("btnUpdateHPS",          "Update HPS Saja",    "UpdateHPSSaja",              5, 10, (220, 53, 69)),
+
                 # Baris 6: Reviu
                 ("btnBukaReviu",          "Buka Reviu",         "BukaReviu",                  6, 6, BLUE_WORD),
                 ("btnPrintIsiReviu",      "Print Isi Reviu",    "PrintIsiReviuPDF",           6, 7, BLACK),
