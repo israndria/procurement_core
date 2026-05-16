@@ -370,12 +370,42 @@ Public Sub RelinkTemplate()
     On Error GoTo 0
 
     Dim cmd As String
-    cmd = "powershell -ExecutionPolicy Bypass -File " & Q(ScriptDir() & "\relink_dotnet.ps1") & " -ExcelPath " & Q(ThisWorkbook.FullName)
+    cmd = "cmd /c """ & "powershell -ExecutionPolicy Bypass -File " & Q(ScriptDir() & "\relink_dotnet.ps1") & " -ExcelPath " & Q(ThisWorkbook.FullName) & " > """ & ScriptDir() & "\_relink_output.txt"" 2>&1"""
 
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, True  ' hidden, blocking
-    Set wsh = Nothing
+    ' Pakai Shell() VBA built-in + tunggu manual (lebih reliable dari wsh.Run)
+    Dim taskID As Long
+    taskID = Shell(cmd, vbHide)
+    ' Tunggu sampai output file ada + stabil (max 30 detik, polling tiap 1 detik)
+    Dim outFile As String
+    outFile = ScriptDir() & "\_relink_output.txt"
+    Dim i As Integer
+    For i = 1 To 30
+        Application.Wait Now + TimeValue("00:00:01")
+        If Dir(outFile) <> "" Then
+            Dim sz1 As Long, sz2 As Long
+            sz1 = FileLen(outFile)
+            Application.Wait Now + TimeValue("00:00:01")
+            sz2 = FileLen(outFile)
+            If sz2 = sz1 And sz2 > 0 Then Exit For
+        End If
+    Next i
+
+    ' Baca output
+    Dim output As String
+    If Dir(outFile) <> "" Then
+        Dim fNum As Integer
+        fNum = FreeFile
+        Open outFile For Input As #fNum
+        Do While Not EOF(fNum)
+            Dim lineText As String
+            Line Input #fNum, lineText
+            output = output & lineText & vbCrLf
+        Loop
+        Close #fNum
+        Kill outFile
+    End If
+
+    MsgBox "Relink selesai!" & vbCrLf & vbCrLf & output, vbInformation, "Relink Template"
 End Sub
 
 ' ===== IMPORT (baca file HTML LPSE dan isi ke excel) =====

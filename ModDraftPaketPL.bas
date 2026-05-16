@@ -432,7 +432,11 @@ Public Sub CetakReviuPlJkkPDF()
 End Sub
 
 Public Sub RelinkPL()
-    ' Relink semua Word PL ke Excel ini (update path data source)
+    ' Relink semua Word PL ke Excel ini via relink_pl.py (cepat, hanya update mailMerge)
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
     Dim scriptDir As String
     scriptDir = ScriptDirPL()
     If scriptDir = "" Then
@@ -440,30 +444,49 @@ Public Sub RelinkPL()
         Exit Sub
     End If
     Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
-    Dim setupScript As String: setupScript = scriptDir & "\setup_paket_baru.py"
-    Dim folderPath As String: folderPath = ThisWorkbook.Path
+    Dim relinkScript As String: relinkScript = scriptDir & "\relink_pl.py"
 
-    ' Deteksi output_base = parent folder dari folder paket
-    Dim outputBase As String
-    outputBase = Left(folderPath, InStrRev(folderPath, "\") - 1)
+    Dim outFile As String
+    outFile = scriptDir & "\_relink_pl_output.txt"
+    If Dir(outFile) <> "" Then Kill outFile
 
-    Dim folderName As String
-    folderName = Mid(folderPath, InStrRev(folderPath, "\") + 1)
-
+    ' Shell() VBA built-in + output redirect ke file (reliable, no wsh.Run deadlock)
     Dim cmd As String
-    cmd = Chr(34) & pyExe & Chr(34) & " " & _
-          Chr(34) & setupScript & Chr(34) & " --mode pl" & _
-          " --output-dir " & Chr(34) & outputBase & Chr(34) & _
-          " " & Chr(34) & folderName & Chr(34)
+    cmd = "cmd /c """ & Chr(34) & pyExe & Chr(34) & " " & _
+          Chr(34) & relinkScript & Chr(34) & " " & _
+          Chr(34) & ThisWorkbook.FullName & Chr(34) & _
+          " > " & Chr(34) & outFile & Chr(34) & " 2>&1"""
 
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, True  ' hidden, tunggu selesai
-    Set wsh = Nothing
+    Shell cmd, vbHide
 
-    MsgBox "Relink selesai!" & vbCrLf & _
-           "Tutup dan buka ulang file Word untuk melihat hasilnya.", _
-           vbInformation, "Relink Word PL"
+    ' Tunggu output file stabil (max 30 detik, polling tiap 1 detik)
+    Dim i As Integer
+    For i = 1 To 30
+        Application.Wait Now + TimeValue("00:00:01")
+        If Dir(outFile) <> "" Then
+            Dim sz1 As Long, sz2 As Long
+            sz1 = FileLen(outFile)
+            Application.Wait Now + TimeValue("00:00:01")
+            sz2 = FileLen(outFile)
+            If sz2 = sz1 And sz2 > 0 Then Exit For
+        End If
+    Next i
+
+    Dim output As String
+    If Dir(outFile) <> "" Then
+        Dim fNum As Integer
+        fNum = FreeFile
+        Open outFile For Input As #fNum
+        Do While Not EOF(fNum)
+            Dim lineText As String
+            Line Input #fNum, lineText
+            output = output & lineText & vbCrLf
+        Loop
+        Close #fNum
+        Kill outFile
+    End If
+
+    MsgBox "Relink selesai!" & vbCrLf & vbCrLf & output, vbInformation, "Relink Word PL"
 End Sub
 
 Private Sub RunMergePL(ByVal mode As String, ByVal wordPattern As String, ByVal sheetName As String)

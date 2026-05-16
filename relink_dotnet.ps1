@@ -144,7 +144,5 @@ Get-ChildItem $folder | Where-Object {
     }
 }
 
-# Show result popup
-Add-Type -AssemblyName System.Windows.Forms
-$msg = "Relink selesai!`n`n" + ($results -join "`n")
-[System.Windows.Forms.MessageBox]::Show($msg, "Relink Template", "OK", "Information") | Out-Null
+# Output ke stdout (VBA tampilkan MsgBox setelah script selesai)
+$results | ForEach-Object { Write-Output $_ }
