@@ -121,7 +121,7 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnKodeUnikPL")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnKodeUnikPL", "btnMuatHPS_PL", "btnMuatKodeUnik_PL")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
@@ -165,12 +165,12 @@ def inject_pl(filepath: str):
             add_btn("btnRelinkPL",        "Relink Word",    "RelinkPL",            2, 10, (128, 0, 0))
             # Baris 3: Kode Unik (kolom 7 — selalu ada di semua workbook)
             add_btn("btnKodeUnikPL",      "Kode Unik PL",   "GenerateKodeUnikPaketPL",     3, 7, (128, 0, 128))
+            # Baris 4: Muat HPS + Muat Kode Unik (fetch dari Supabase)
+            add_btn("btnMuatHPS_PL",       "Muat HPS",      "MuatHPSPL",                   4, 7, (200, 100, 0))
+            add_btn("btnMuatKodeUnik_PL",  "Muat Kode Unik","MuatKodeUnikPL",              4, 8, (128, 0, 128))
 
-            # Re-protect
-            try:
-                ws.Protect(Password="pokja2026", AllowFormattingCells=True)
-            except Exception:
-                pass
+            # Sengaja TIDAK re-protect @ Master Data — user butuh edit bebas
+            # (Aturan PL: sheet @ Master Data harus selalu unprotected)
 
         except Exception as e:
             print(f"  [WARN] Tombol @ Master Data: {e}")

@@ -38,7 +38,7 @@ Private Const MD_SHEET As String = "@ Master Data"
 Private Const CELL_SELECTOR As String = "F1"
 
 ' Kolom yang di-fetch dari draft_paket_pl
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan"
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian"
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -221,12 +221,33 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         .Cells(PLR_NAMA_SKPD, 3).Value  = CStr(item(2))     ' satker
         .Cells(PLR_SUB_KEGIATAN, 3).Value = CStr(item(22))  ' sub_kegiatan
         .Cells(PLR_NAMA_PPK, 3).Value   = CStr(item(8))     ' nama_ppk
-        If CStr(item(9)) <> "" Then
+
+        ' Lookup NIP + SK dari master_kpa berdasarkan nama PPK
+        Dim kpaData As String: kpaData = LookupKPA(CStr(item(8)))
+        Dim kpaNip As String: kpaNip = ExtractJSONValPL(kpaData, "nip")
+        Dim kpaSK As String:  kpaSK  = ExtractJSONValPL(kpaData, "nomor_sk")
+        Dim kpaTglSK As String: kpaTglSK = ExtractJSONValPL(kpaData, "tanggal_sk")
+
+        ' NIP PPK: prefer master_kpa, fallback Supabase draft
+        If kpaNip <> "" Then
             .Cells(PLR_NIP_PPK, 3).NumberFormat = "@"
-            .Cells(PLR_NIP_PPK, 3).Value = CStr(item(9))   ' nip_ppk
+            .Cells(PLR_NIP_PPK, 3).Value = kpaNip
+        ElseIf CStr(item(9)) <> "" Then
+            .Cells(PLR_NIP_PPK, 3).NumberFormat = "@"
+            .Cells(PLR_NIP_PPK, 3).Value = CStr(item(9))
         End If
-        If CStr(item(10)) <> "" Then
-            .Cells(PLR_NO_SK_PPK, 3).Value = CStr(item(10)) ' no_sk_ppk
+
+        ' No SK PPK: prefer master_kpa
+        If kpaSK <> "" Then
+            Dim skFmt As String: skFmt = kpaSK
+            If kpaTglSK <> "" Then
+                ' Format tanggal "YYYY-MM-DD" -> "DD Bulan YYYY"
+                Dim tglFmt As String: tglFmt = FormatTanggalIndo(kpaTglSK)
+                skFmt = skFmt & ", Tanggal " & tglFmt
+            End If
+            .Cells(PLR_NO_SK_PPK, 3).Value = skFmt
+        ElseIf CStr(item(10)) <> "" Then
+            .Cells(PLR_NO_SK_PPK, 3).Value = CStr(item(10))
         End If
 
         ' Nama PP + NIP PP: TIDAK ditimpa jika sudah ada (hardcoded)
@@ -288,6 +309,53 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         If CStr(item(20)) <> "" Then
             .Cells(PLR_SKK_K3, 3).Value = CStr(item(20))         ' skk_k3
         End If
+
+        ' Pengalaman K3 default 0 (PL jarang minta pengalaman tahun K3)
+        .Cells(PLR_PENGALAMAN_K3, 3).Value = 0
+
+        ' ── URAIAN SINGKAT (hardcode template) ───────────────────────────
+        Dim namaUraian As String: namaUraian = Trim(CStr(item(23)))
+        If namaUraian = "" Then namaUraian = "Uraian Singkat Pekerjaan"
+        ' Buang ekstensi .pdf di display
+        If LCase(Right(namaUraian, 4)) = ".pdf" Then
+            namaUraian = Left(namaUraian, Len(namaUraian) - 4)
+        End If
+        .Cells(PLR_URAIAN_SINGKAT, 3).Value = _
+            "Mengerjakan " & CStr(item(1)) & " sesuai dengan KAK/Dokumen " & namaUraian
+
+        ' ── NOMOR DOKPIL: 000.3.3/01/PL/PP-NN/KodeUnik/SKPD/Tahun ────────
+        ' PP-NN dari digit akhir nama_paket (Paket 1 -> 01, Paket 12 -> 12)
+        Dim npaket As String: npaket = CStr(item(1))
+        Dim mNum As Object
+        Dim numStr As String: numStr = "01"
+        Dim ii As Long
+        For ii = Len(npaket) To 1 Step -1
+            Dim chr As String: chr = Mid(npaket, ii, 1)
+            If chr >= "0" And chr <= "9" Then
+                numStr = chr & numStr
+                If Len(numStr) >= 3 Then Exit For
+            ElseIf Len(numStr) > 2 Then
+                Exit For
+            End If
+        Next ii
+        ' Trim leading dari default "01"
+        If Len(numStr) > 2 Then numStr = Right(numStr, Len(numStr) - 2)
+        If Len(numStr) = 1 Then numStr = "0" & numStr
+
+        ' Singkatan SKPD dari master_dinas via lookup
+        Dim singkatan As String: singkatan = LookupSingkatanDinas(CStr(item(2)))
+        If singkatan = "" Then singkatan = "DPUPR"
+
+        ' Kode unik dari G2 (atau kosong)
+        Dim koUnik As String: koUnik = CStr(wsMD.Range("G2").Value)
+        If koUnik = "" Then koUnik = "KodeUnik"
+
+        ' Tahun: ambil dari tahun anggaran yang sudah diisi
+        Dim tahunDokpil As String: tahunDokpil = CStr(wsMD.Cells(PLR_TAHUN_ANGGARAN, 3).Value)
+        If tahunDokpil = "" Then tahunDokpil = CStr(Year(Now))
+
+        .Cells(PLR_NOMOR_DOKPIL, 3).Value = _
+            "000.3.3/01/PL/PP-" & numStr & "/" & koUnik & "/" & singkatan & "/" & tahunDokpil
     End With
 
     ' Konfirmasi
@@ -374,7 +442,7 @@ Private Function ParsePLJSON(json As String) As Collection
 
         Dim obj As String: obj = Mid(json, braceStart, braceEnd - braceStart + 1)
 
-        Dim item(22) As Variant
+        Dim item(23) As Variant
         item(0)  = ExtractJSONValPL(obj, "kode_paket")
         item(1)  = ExtractJSONValPL(obj, "nama_paket")
         item(2)  = ExtractJSONValPL(obj, "satker")
@@ -398,6 +466,7 @@ Private Function ParsePLJSON(json As String) As Collection
         item(20) = ExtractJSONValPL(obj, "skk_k3")
         item(21) = ExtractJSONValPL(obj, "dpa_nomor")
         item(22) = ExtractJSONValPL(obj, "sub_kegiatan")
+        item(23) = ExtractJSONValPL(obj, "nama_file_uraian")
 
         col.Add item
         pos = braceEnd + 1
@@ -610,3 +679,307 @@ Private Function CDblSafe(s As String) As Double
     CDblSafe = CDbl(s)
     On Error GoTo 0
 End Function
+
+
+' ============================================================
+' Lookup KPA (NIP + nomor SK + tanggal) dari master_kpa via nama
+' ============================================================
+Private Function LookupKPA(namaPPK As String) As String
+    LookupKPA = ""
+    If namaPPK = "" Then Exit Function
+    On Error Resume Next
+    Dim http As Object
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    ' Strip gelar (S.T., M.M., S.E., dll) untuk lookup ilike
+    Dim namaClean As String: namaClean = namaPPK
+    Dim p As Long: p = InStr(namaClean, ",")
+    If p > 0 Then namaClean = Trim(Left(namaClean, p - 1))
+    ' ilike *namaClean*
+    Dim q As String: q = Replace(namaClean, " ", "%20")
+    Dim url As String
+    url = SB_URL & "/rest/v1/master_kpa?nama=ilike.*" & q & "*&select=nip,nomor_sk,tanggal_sk&limit=1"
+    http.Open "GET", url, False
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+    If http.Status = 200 Then LookupKPA = http.ResponseText
+    On Error GoTo 0
+End Function
+
+
+' ============================================================
+' Format "2026-02-06" -> "06 Februari 2026"
+' ============================================================
+Private Function FormatTanggalIndo(tglISO As String) As String
+    FormatTanggalIndo = tglISO
+    If Len(tglISO) < 10 Then Exit Function
+    Dim parts() As String
+    parts = Split(Left(tglISO, 10), "-")
+    If UBound(parts) < 2 Then Exit Function
+    Dim tahun As String, bulan As String, hari As String
+    tahun = parts(0): hari = parts(2)
+    Dim bulanArr As Variant
+    bulanArr = Array("Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember")
+    Dim idx As Long
+    On Error Resume Next
+    idx = CLng(parts(1)) - 1
+    On Error GoTo 0
+    If idx >= 0 And idx <= 11 Then bulan = bulanArr(idx)
+    FormatTanggalIndo = hari & " " & bulan & " " & tahun
+End Function
+
+
+' ============================================================
+' Lookup singkatan dari master_dinas Supabase via nama_dinas (ilike)
+' ============================================================
+Private Function LookupSingkatanDinas(namaDinas As String) As String
+    LookupSingkatanDinas = ""
+    If namaDinas = "" Then Exit Function
+
+    On Error Resume Next
+    Dim http As Object
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    ' Query: ilike "*nama_dinas*"
+    Dim q As String: q = Replace(namaDinas, " ", "%20")
+    Dim url As String
+    url = SB_URL & "/rest/v1/master_dinas?nama_dinas=ilike.*" & q & "*&select=singkatan&limit=1"
+    http.Open "GET", url, False
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+    If http.Status = 200 Then
+        Dim resp As String: resp = http.ResponseText
+        LookupSingkatanDinas = ExtractJSONValPL(resp, "singkatan")
+    End If
+    On Error GoTo 0
+End Function
+
+
+' ============================================================
+' MUAT HPS PL: GET hps_items_pl dari Supabase -> sheet "5. HPS"
+' ============================================================
+Public Sub MuatHPSPL()
+    Dim wsMD As Worksheet
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+    Dim kodePaket As String
+    kodePaket = CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value)
+    If kodePaket = "" Then
+        MsgBox "Kode Paket di @ Master Data C3 kosong. Pilih paket dulu.", vbExclamation, "Muat HPS PL"
+        Exit Sub
+    End If
+
+    Dim wsHPS As Worksheet
+    On Error Resume Next
+    Set wsHPS = ThisWorkbook.Sheets("5. HPS")
+    On Error GoTo 0
+    If wsHPS Is Nothing Then
+        MsgBox "Sheet '5. HPS' tidak ditemukan.", vbCritical, "Muat HPS PL"
+        Exit Sub
+    End If
+
+    Dim url As String
+    url = SB_URL & "/rest/v1/hps_items_pl" & _
+          "?kode_paket=eq." & kodePaket & _
+          "&order=urutan.asc" & _
+          "&select=urutan,jenis_bj,satuan,vol,harga,pajak_pct,total_spse,total_hitung,is_divisi,selisih,selisih_ok,total_nilai,total_nilai_bulat"
+
+    Dim http As Object
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    On Error GoTo ErrHPS
+    http.Open "GET", url, False
+    http.SetTimeouts 5000, 5000, 10000, 10000
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+
+    If http.Status <> 200 Then
+        MsgBox "Gagal fetch HPS PL: HTTP " & http.Status, vbExclamation, "Muat HPS PL"
+        Exit Sub
+    End If
+
+    Dim json As String: json = http.ResponseText
+    If json = "[]" Or json = "" Then
+        MsgBox "HPS PL belum ada di Supabase untuk kode " & kodePaket & "." & vbCrLf & _
+               "Jalankan tombol scrape HPS di Streamlit dulu.", vbInformation, "Muat HPS PL"
+        Exit Sub
+    End If
+
+    ' Bersihkan A2:I bawah
+    Dim lastRow As Long
+    lastRow = wsHPS.Cells(wsHPS.Rows.Count, 2).End(xlUp).Row
+    If lastRow >= 2 Then wsHPS.Range("A2:I" & lastRow).ClearContents
+    ' Bersihkan baris total lama (50-52)
+    wsHPS.Range("A50:I52").ClearContents
+    ' Reset highlight
+    wsHPS.Range("A2:I" & (lastRow + 5)).Interior.ColorIndex = xlNone
+
+    Dim pos As Long: pos = 1
+    Dim baris As Long: baris = 2
+    Dim adaSelisih As Boolean: adaSelisih = False
+    Dim selisihMsg As String: selisihMsg = ""
+    Dim totalNilai As String: totalNilai = ""
+    Dim totalBulat As String: totalBulat = ""
+    Dim totalHitungAll As Double: totalHitungAll = 0
+
+    Do
+        Dim bs As Long: bs = InStr(pos, json, "{")
+        If bs = 0 Then Exit Do
+        Dim depth As Integer: depth = 1
+        Dim p As Long: p = bs + 1
+        Do While p <= Len(json) And depth > 0
+            Dim ch As String: ch = Mid(json, p, 1)
+            If ch = "{" Then depth = depth + 1
+            If ch = "}" Then depth = depth - 1
+            p = p + 1
+        Loop
+        Dim be As Long: be = p - 1
+        Dim obj As String: obj = Mid(json, bs, be - bs + 1)
+
+        Dim isDivisi As String: isDivisi = ExtractJSONValPL(obj, "is_divisi")
+        Dim jenisBJ  As String: jenisBJ  = ExtractJSONValPL(obj, "jenis_bj")
+        Dim satuan   As String: satuan   = ExtractJSONValPL(obj, "satuan")
+        Dim volS     As String: volS     = ExtractJSONValPL(obj, "vol")
+        Dim hargaS   As String: hargaS   = ExtractJSONValPL(obj, "harga")
+        Dim pajakS   As String: pajakS   = ExtractJSONValPL(obj, "pajak_pct")
+        Dim totSpseS As String: totSpseS = ExtractJSONValPL(obj, "total_spse")
+        Dim totHitS  As String: totHitS  = ExtractJSONValPL(obj, "total_hitung")
+        Dim selisihS As String: selisihS = ExtractJSONValPL(obj, "selisih")
+        Dim selOkS   As String: selOkS   = ExtractJSONValPL(obj, "selisih_ok")
+        Dim urutan   As String: urutan   = ExtractJSONValPL(obj, "urutan")
+
+        If totalNilai = "" Then
+            totalNilai = ExtractJSONValPL(obj, "total_nilai")
+            totalBulat = ExtractJSONValPL(obj, "total_nilai_bulat")
+        End If
+
+        With wsHPS
+            .Cells(baris, 1).Value = CDblSafe(urutan)
+            .Cells(baris, 2).Value = jenisBJ
+
+            If isDivisi <> "true" Then
+                .Cells(baris, 3).Value = satuan
+                If volS <> "" Then
+                    .Cells(baris, 4).Value = CDblSafe(volS)
+                    .Cells(baris, 4).NumberFormat = "#,##0.00"
+                End If
+                If hargaS <> "" Then
+                    .Cells(baris, 5).Value = CDblSafe(hargaS)
+                    .Cells(baris, 5).NumberFormat = "#,##0.00"
+                End If
+                If pajakS <> "" Then
+                    .Cells(baris, 6).Value = CDblSafe(pajakS)
+                    .Cells(baris, 6).NumberFormat = "0.00"
+                End If
+                If totSpseS <> "" Then
+                    .Cells(baris, 7).Value = CDblSafe(totSpseS)
+                    .Cells(baris, 7).NumberFormat = "#,##0.00"
+                End If
+                If totHitS <> "" Then
+                    .Cells(baris, 8).Value = CDblSafe(totHitS)
+                    .Cells(baris, 8).NumberFormat = "#,##0.00"
+                End If
+                Dim selisihVal As Double: selisihVal = CDblSafe(selisihS)
+                .Cells(baris, 9).Value = selisihVal
+                .Cells(baris, 9).NumberFormat = "#,##0.00"
+
+                totalHitungAll = totalHitungAll + CDblSafe(totHitS)
+
+                If selOkS = "false" Then
+                    .Range(.Cells(baris, 1), .Cells(baris, 9)).Interior.Color = RGB(255, 255, 0)
+                    adaSelisih = True
+                    selisihMsg = selisihMsg & "  Baris " & baris & ": " & jenisBJ & _
+                                 " (selisih Rp " & Format(selisihVal, "#,##0.00") & ")" & vbCrLf
+                End If
+            End If
+        End With
+
+        baris = baris + 1
+        pos = be + 1
+    Loop
+
+    Dim barisTotal As Long: barisTotal = baris + 1
+    With wsHPS
+        .Cells(barisTotal, 2).Value = "TOTAL NILAI (SPSE)"
+        .Cells(barisTotal, 7).Value = CDblSafe(totalNilai)
+        .Cells(barisTotal, 7).NumberFormat = "#,##0.00"
+        .Cells(barisTotal, 2).Font.Bold = True
+
+        .Cells(barisTotal + 1, 2).Value = "TOTAL NILAI (Setelah Pembulatan SPSE)"
+        .Cells(barisTotal + 1, 7).Value = CDblSafe(totalBulat)
+        .Cells(barisTotal + 1, 7).NumberFormat = "#,##0.00"
+        .Cells(barisTotal + 1, 2).Font.Bold = True
+
+        .Cells(barisTotal + 2, 2).Value = "TOTAL HITUNG MANUAL"
+        .Cells(barisTotal + 2, 8).Value = totalHitungAll
+        .Cells(barisTotal + 2, 8).NumberFormat = "#,##0.00"
+        .Cells(barisTotal + 2, 2).Font.Bold = True
+    End With
+
+    Dim itemCount As Long: itemCount = baris - 2
+    Dim msg As String
+    msg = "HPS PL berhasil dimuat: " & itemCount & " baris."
+    If adaSelisih Then
+        msg = msg & vbCrLf & vbCrLf & _
+              "Selisih SPSE vs hitung manual (highlight kuning):" & vbCrLf & selisihMsg
+        MsgBox msg, vbExclamation, "Muat HPS PL"
+    Else
+        MsgBox msg, vbInformation, "Muat HPS PL"
+    End If
+    Exit Sub
+
+ErrHPS:
+    MsgBox "Gagal muat HPS PL: " & Err.Description, vbCritical, "Muat HPS PL"
+End Sub
+
+
+' ============================================================
+' MUAT KODE UNIK PL: GET kode_unik dari Supabase -> @ Master Data G2
+' ============================================================
+Public Sub MuatKodeUnikPL()
+    Dim wsMD As Worksheet
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+    Dim kodePaket As String
+    kodePaket = CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value)
+    If kodePaket = "" Then
+        MsgBox "Kode Paket di @ Master Data C3 kosong. Pilih paket dulu.", vbExclamation, "Muat Kode Unik PL"
+        Exit Sub
+    End If
+
+    Dim url As String
+    url = SB_URL & "/rest/v1/draft_paket_pl" & _
+          "?kode_paket=eq." & kodePaket & _
+          "&select=kode_unik"
+
+    Dim http As Object
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    On Error GoTo ErrKU
+    http.Open "GET", url, False
+    http.SetTimeouts 5000, 5000, 10000, 10000
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+
+    If http.Status <> 200 Then
+        MsgBox "Gagal fetch Kode Unik: HTTP " & http.Status, vbExclamation, "Muat Kode Unik PL"
+        Exit Sub
+    End If
+
+    Dim json As String: json = http.ResponseText
+    Dim ku As String: ku = ExtractJSONValPL(json, "kode_unik")
+    If ku = "" Or ku = "null" Then
+        MsgBox "Kode Unik belum ada di Supabase untuk paket ini." & vbCrLf & _
+               "Jalankan tombol 'Kode Unik PL' atau Streamlit dulu.", vbInformation, "Muat Kode Unik PL"
+        Exit Sub
+    End If
+
+    wsMD.Range("G2").Value = ku
+    MsgBox "Kode Unik diisi ke G2: " & ku, vbInformation, "Muat Kode Unik PL"
+    Exit Sub
+
+ErrKU:
+    MsgBox "Gagal muat Kode Unik: " & Err.Description, vbCritical, "Muat Kode Unik PL"
+End Sub
