@@ -501,7 +501,8 @@ Public Sub CetakReviuPlJkkPDF()
 End Sub
 
 Public Sub RelinkPL()
-    ' Relink semua Word PL ke Excel ini via relink_pl.py (cepat, hanya update mailMerge)
+    ' Relink semua Word PL ke Excel ini via relink_pl.py.
+    ' Pakai WScript.Shell synchronous (blocking, no manual polling = no UI freeze loop).
     On Error Resume Next
     ThisWorkbook.Save
     On Error GoTo 0
@@ -517,29 +518,24 @@ Public Sub RelinkPL()
 
     Dim outFile As String
     outFile = scriptDir & "\_relink_pl_output.txt"
+    On Error Resume Next
     If Dir(outFile) <> "" Then Kill outFile
+    On Error GoTo 0
 
-    ' Shell() VBA built-in + output redirect ke file (reliable, no wsh.Run deadlock)
     Dim cmd As String
     cmd = "cmd /c """ & Chr(34) & pyExe & Chr(34) & " " & _
           Chr(34) & relinkScript & Chr(34) & " " & _
           Chr(34) & ThisWorkbook.FullName & Chr(34) & _
           " > " & Chr(34) & outFile & Chr(34) & " 2>&1"""
 
-    Shell cmd, vbHide
+    ' WScript.Shell sync mode: arg3=True -> tunggu sampai selesai, no manual loop
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    Dim rc As Long
+    rc = wsh.Run(cmd, 0, True)  ' 0=hidden, True=wait
+    Set wsh = Nothing
 
-    ' Tunggu output file stabil (max 30 detik, polling tiap 1 detik)
-    Dim i As Integer
-    For i = 1 To 30
-        Application.Wait Now + TimeValue("00:00:01")
-        If Dir(outFile) <> "" Then
-            Dim sz1 As Long, sz2 As Long
-            sz1 = FileLen(outFile)
-            Application.Wait Now + TimeValue("00:00:01")
-            sz2 = FileLen(outFile)
-            If sz2 = sz1 And sz2 > 0 Then Exit For
-        End If
-    Next i
+    DoEvents
 
     Dim output As String
     If Dir(outFile) <> "" Then
