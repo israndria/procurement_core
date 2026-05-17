@@ -10,18 +10,17 @@ Attribute VB_Name = "ModDraftPaketPL"
 '   2. PilihDraftPaketPL()  -> dipanggil tombol "Pilih" -> autofill @ Master Data col C
 '
 ' @ Master Data layout (BAPLJKK):
-'   R3  Kode Paket       R13 Pagu Anggaran     R23 Tahun Anggaran
-'   R4  Kode RUP         R14 Nilai HPS         R24 Tanggal Undangan PL
-'   R5  Nama Pekerjaan   R15 Jangka Waktu      R25 Kode Rekening (MAK)
-'   R6  Nama SKPD        R16 Sumber Dana       R27 SBU Baru
-'   R7  Sub Kegiatan     R17 Lokasi            R28 SBU Lama
-'   R8  Nama PPK         R18 Jenis Kontrak     R30 Jabatan Teknis
-'   R9  NIP PPK          R19 Uraian Singkat    R31 SKK Teknis
-'   R10 No SK PPK        R20 Nomor Dokpil      R32 Pengalaman Teknis
-'   R11 Nama PP          R21 Tanggal Dokpil    R33 Jabatan K3
-'   R12 NIP PP           R22 No Undangan PL    R34 SKK K3 / R35 Pengalaman K3
-'                                              R37 Nama Peserta
-'                                              R38 NPWP Peserta
+'   R3  Kode Paket       R14 Nilai HPS         R25 Kode Rekening (MAK)
+'   R4  Kode RUP         R15 Jangka Waktu      R26 No BA Reviu
+'   R5  Nama Pekerjaan   R16 Sumber Dana       R27 Alamat PP (lookup master_dinas)
+'   R6  Nama SKPD        R17 Lokasi            R29 SBU Baru
+'   R7  Sub Kegiatan     R18 Jenis Kontrak     R30 SBU Lama
+'   R8  Nama PPK         R19 Uraian Singkat    R32-R49 Personil 1-6 (stride=3)
+'   R9  NIP PPK          R20 Nomor Dokpil        Rn   Jabatan
+'   R10 No SK PPK        R21 Tanggal Dokpil      Rn+1 Pengalaman
+'   R11 Nama PP          R22 No Undangan PL      Rn+2 Sertifikat
+'   R12 NIP PP           R23 Tahun Anggaran    R51 Nama Peserta
+'   R13 Pagu Anggaran    R24 Tanggal Undangan  R52 NPWP Peserta
 
 ' Konfigurasi Supabase
 Private Const SB_URL As String = "%%SUPABASE_URL%%"
@@ -45,8 +44,8 @@ Private Const CELL_SELECTOR As String = "F1"
 '        10=no_sk_ppk, 11=nilai_pagu, 12=jangka_waktu, 13=sumber_anggaran,
 '        14=lokasi, 15=sbu_baru, 16=sbu_lama, 17=jabatan_teknis, 18=skk_teknis,
 '        19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
-'        24=mak, 25=nama_penyedia, 26=npwp_penyedia
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json"
+'        24=mak, 25=nama_penyedia, 26=npwp_penyedia, 27=personil_json, 28=tgl_dokpil, 29=nomor_dokpil, 30=kode_unik
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik"
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -72,12 +71,14 @@ Private Const PLR_NO_UNDANGAN     As Integer = 22
 Private Const PLR_TAHUN_ANGGARAN  As Integer = 23
 Private Const PLR_TGL_UNDANGAN    As Integer = 24
 Private Const PLR_KODE_REKENING   As Integer = 25
-Private Const PLR_NO_BA_REVIU     As Integer = 26  ' BARU
-Private Const PLR_SBU_BARU        As Integer = 29  ' geser dari 27
-Private Const PLR_SBU_LAMA        As Integer = 30  ' geser dari 28
-Private Const PLR_PERSONIL_BASE   As Integer = 32  ' R32-R43: jabatan/pengalaman P1-P6
-Private Const PLR_NAMA_PESERTA    As Integer = 45  ' geser dari 37
-Private Const PLR_NPWP_PESERTA    As Integer = 46  ' geser dari 38
+Private Const PLR_NO_BA_REVIU     As Integer = 26
+Private Const PLR_ALAMAT_PP       As Integer = 27  ' BARU: lookup master_dinas.alamat_pp_bertugas
+Private Const PLR_SBU_BARU        As Integer = 29
+Private Const PLR_SBU_LAMA        As Integer = 30
+Private Const PLR_PERSONIL_BASE   As Integer = 32  ' R32-R49: stride=3 (jabatan/pengalaman/sertifikat)
+Private Const PLR_PERSONIL_STRIDE As Integer = 3   ' 3 row per personil
+Private Const PLR_NAMA_PESERTA    As Integer = 51  ' geser dari 45 (6 personil * 3 row = 18 row, 32+18=50, +1=51)
+Private Const PLR_NPWP_PESERTA    As Integer = 52
 
 ' Cache data in-memory
 Private m_DataCache As Collection
@@ -307,6 +308,24 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         .Cells(PLR_KODE_REKENING, 3).NumberFormat = "@"
         .Cells(PLR_KODE_REKENING, 3).Value = makVal
 
+        ' Tanggal Dokpil dari Supabase tgl_dokpil (format YYYY-MM-DD) → string Indonesia
+        Dim tglDokpilStr As String: tglDokpilStr = CStr(item(28))
+        If tglDokpilStr <> "" And tglDokpilStr <> "null" Then
+            Dim tglParts() As String: tglParts = Split(Left(tglDokpilStr, 10), "-")
+            If UBound(tglParts) >= 2 Then
+                Dim tglYr As Integer: tglYr = CInt(tglParts(0))
+                Dim tglMo As Integer: tglMo = CInt(tglParts(1))
+                Dim tglDy As Integer: tglDy = CInt(tglParts(2))
+                Dim arrBulan(12) As String
+                arrBulan(1)  = "Januari":  arrBulan(2)  = "Februari": arrBulan(3)  = "Maret"
+                arrBulan(4)  = "April":    arrBulan(5)  = "Mei":      arrBulan(6)  = "Juni"
+                arrBulan(7)  = "Juli":     arrBulan(8)  = "Agustus":  arrBulan(9)  = "September"
+                arrBulan(10) = "Oktober":  arrBulan(11) = "November": arrBulan(12) = "Desember"
+                .Cells(PLR_TANGGAL_DOKPIL, 3).NumberFormat = "@"
+                .Cells(PLR_TANGGAL_DOKPIL, 3).Value = tglDy & " " & arrBulan(tglMo) & " " & tglYr
+            End If
+        End If
+
         ' Nama + NPWP Peserta — sumber: parse Draft_PL PDF
         If CStr(item(25)) <> "" Then
             .Cells(PLR_NAMA_PESERTA, 3).Value = CStr(item(25))  ' nama_penyedia
@@ -349,22 +368,34 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim singkatan As String: singkatan = LookupSingkatanDinas(CStr(item(2)))
         If singkatan = "" Then singkatan = "DPUPR"
 
-        ' Kode unik dari G2 (atau kosong)
-        Dim koUnik As String: koUnik = CStr(wsMD.Range("G2").Value)
-        If koUnik = "" Then koUnik = "KodeUnik"
+        ' Kode unik: prefer Supabase item(30), fallback G2
+        Dim koUnik As String: koUnik = CStr(item(30))
+        If koUnik = "" Or koUnik = "null" Then koUnik = CStr(wsMD.Range("G2").Value)
+        If koUnik = "" Or koUnik = "null" Then koUnik = "KodeUnik"
+        wsMD.Range("G2").Value = koUnik
 
         ' Tahun: ambil dari tahun anggaran yang sudah diisi
         Dim tahunDokpil As String: tahunDokpil = CStr(wsMD.Cells(PLR_TAHUN_ANGGARAN, 3).Value)
         If tahunDokpil = "" Then tahunDokpil = CStr(Year(Now))
 
-        .Cells(PLR_NOMOR_DOKPIL, 3).Value = _
-            "000.3.3/01/PL/PP-" & numStr & "/" & koUnik & "/" & singkatan & "/" & tahunDokpil
+        ' Nomor Dokpil: prefer Supabase (sudah di-upload via Tab 4), fallback compose
+        Dim noDokpilSupa As String: noDokpilSupa = CStr(item(29))
+        If noDokpilSupa <> "" And noDokpilSupa <> "null" Then
+            .Cells(PLR_NOMOR_DOKPIL, 3).Value = noDokpilSupa
+        Else
+            .Cells(PLR_NOMOR_DOKPIL, 3).Value = _
+                "000.3.3/01/PL/PP-" & numStr & "/" & koUnik & "/" & singkatan & "/" & tahunDokpil
+        End If
 
-        ' ── NOMOR BA REVIU: 000.3.3/PP1NN/02/SKPD/Reviu-KodeUnik/Tahun ────
-        Dim nrUrut As String: nrUrut = "0" & numStr
-        If Len(nrUrut) > 2 Then nrUrut = Right(nrUrut, 2)
+        ' ── NOMOR BA REVIU: 000.3.3/PP{NN}/02/SKPD/Reviu-KodeUnik/Tahun ────
         .Cells(PLR_NO_BA_REVIU, 3).Value = _
-            "000.3.3/PP1" & nrUrut & "/02/" & singkatan & "/Reviu-" & koUnik & "/" & tahunDokpil
+            "000.3.3/PP" & numStr & "/02/" & singkatan & "/Reviu-" & koUnik & "/" & tahunDokpil
+
+        ' ── ALAMAT PP: lookup master_dinas.alamat_pp_bertugas via satker ───
+        Dim alamatPP As String: alamatPP = LookupAlamatPP(CStr(item(2)))
+        If alamatPP <> "" And alamatPP <> "null" Then
+            .Cells(PLR_ALAMAT_PP, 3).Value = alamatPP
+        End If
 
         ' ── SBU ──────────────────────────────────────────────────────────
         If CStr(item(15)) <> "" Then
@@ -374,17 +405,19 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             .Cells(PLR_SBU_LAMA, 3).Value = CStr(item(16))  ' sbu_lama
         End If
 
-        ' ── PERSONIL (R32-R43): jabatan/pengalaman P1-P6 dari personil_json ──
+        ' ── PERSONIL (R32-R49): jabatan/pengalaman/sertifikat P1-P6, stride=3 ──
         Dim personilJsonStr As String: personilJsonStr = CStr(item(27))
         If personilJsonStr <> "" And personilJsonStr <> "null" Then
             Dim personilArr() As String
             personilArr = ParsePersonilArrayPL(personilJsonStr)
-            Dim nP As Long: nP = (UBound(personilArr) + 1) \ 2
+            Dim nP As Long: nP = (UBound(personilArr) + 1) \ PLR_PERSONIL_STRIDE
             Dim iP As Long
             For iP = 0 To nP - 1
                 If iP >= 6 Then Exit For
-                .Cells(PLR_PERSONIL_BASE + iP * 2, 3).Value = personilArr(iP * 2)
-                .Cells(PLR_PERSONIL_BASE + iP * 2 + 1, 3).Value = personilArr(iP * 2 + 1)
+                Dim baseRow As Long: baseRow = PLR_PERSONIL_BASE + iP * PLR_PERSONIL_STRIDE
+                .Cells(baseRow, 3).Value     = personilArr(iP * PLR_PERSONIL_STRIDE)       ' jabatan
+                .Cells(baseRow + 1, 3).Value = personilArr(iP * PLR_PERSONIL_STRIDE + 1)   ' pengalaman
+                .Cells(baseRow + 2, 3).Value = personilArr(iP * PLR_PERSONIL_STRIDE + 2)   ' sertifikat
             Next iP
         End If
     End With
@@ -473,7 +506,7 @@ Private Function ParsePLJSON(json As String) As Collection
 
         Dim obj As String: obj = Mid(json, braceStart, braceEnd - braceStart + 1)
 
-        Dim item(27) As Variant
+        Dim item(30) As Variant
         item(0)  = ExtractJSONValPL(obj, "kode_paket")
         item(1)  = ExtractJSONValPL(obj, "nama_paket")
         item(2)  = ExtractJSONValPL(obj, "satker")
@@ -502,6 +535,9 @@ Private Function ParsePLJSON(json As String) As Collection
         item(25) = ExtractJSONValPL(obj, "nama_penyedia")
         item(26) = ExtractJSONValPL(obj, "npwp_penyedia")
         item(27) = ExtractJSONValPL(obj, "personil_json")
+        item(28) = ExtractJSONValPL(obj, "tgl_dokpil")
+        item(29) = ExtractJSONValPL(obj, "nomor_dokpil")
+        item(30) = ExtractJSONValPL(obj, "kode_unik")
 
         col.Add item
         pos = braceEnd + 1
@@ -805,10 +841,10 @@ End Function
 
 
 Private Function ParsePersonilArrayPL(jsonArr As String) As String()
-    ' Parse JSON array of {jabatan, pengalaman} objects.
-    ' Returns flat string array: [jabatan0, pengalaman0, jabatan1, pengalaman1, ...]
-    ' Maximum 6 personil = 12 elemen.
-    Dim result(11) As String  ' max 6 personil * 2
+    ' Parse JSON array of {jabatan, pengalaman, sertifikat} objects.
+    ' Returns flat string array stride=3: [jabatan0, pengalaman0, sertifikat0, jabatan1, ...]
+    ' Maximum 6 personil = 18 elemen. sertifikat boleh "" (backward compatible).
+    Dim result(17) As String  ' max 6 personil * 3
     Dim count As Long: count = 0
     Dim pos As Long: pos = 1
     Dim arrLen As Long: arrLen = Len(jsonArr)
@@ -822,23 +858,25 @@ Private Function ParsePersonilArrayPL(jsonArr As String) As String()
         Dim obj As String: obj = Mid(jsonArr, bStart, bEnd - bStart + 1)
         Dim jabatan As String: jabatan = ExtractJSONValPL(obj, "jabatan")
         Dim pengalaman As String: pengalaman = ExtractJSONValPL(obj, "pengalaman")
+        Dim sertifikat As String: sertifikat = ExtractJSONValPL(obj, "sertifikat")
 
-        result(count * 2) = jabatan
-        result(count * 2 + 1) = pengalaman
+        result(count * 3) = jabatan
+        result(count * 3 + 1) = pengalaman
+        result(count * 3 + 2) = sertifikat
         count = count + 1
         pos = bEnd + 1
     Loop
 
     ' Resize to actual count
     If count = 0 Then
-        Dim emptyArr(1) As String
+        Dim emptyArr(2) As String
         ParsePersonilArrayPL = emptyArr
         Exit Function
     End If
 
-    ReDim resized(count * 2 - 1) As String
+    ReDim resized(count * 3 - 1) As String
     Dim ii As Long
-    For ii = 0 To count * 2 - 1
+    For ii = 0 To count * 3 - 1
         resized(ii) = result(ii)
     Next ii
     ParsePersonilArrayPL = resized
@@ -916,6 +954,32 @@ Private Function LookupSingkatanDinas(namaDinas As String) As String
     If http.Status = 200 Then
         Dim resp As String: resp = http.ResponseText
         LookupSingkatanDinas = ExtractJSONValPL(resp, "singkatan")
+    End If
+    On Error GoTo 0
+End Function
+
+
+' ============================================================
+' Lookup alamat_pp_bertugas dari master_dinas Supabase via nama_dinas (ilike)
+' ============================================================
+Private Function LookupAlamatPP(namaDinas As String) As String
+    LookupAlamatPP = ""
+    If namaDinas = "" Then Exit Function
+
+    On Error Resume Next
+    Dim http As Object
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    Dim q As String: q = Replace(namaDinas, " ", "%20")
+    Dim url As String
+    url = SB_URL & "/rest/v1/master_dinas?nama_dinas=ilike.*" & q & "*&select=alamat_pp_bertugas&limit=1"
+    http.Open "GET", url, False
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+    If http.Status = 200 Then
+        Dim resp As String: resp = http.ResponseText
+        LookupAlamatPP = ExtractJSONValPL(resp, "alamat_pp_bertugas")
     End If
     On Error GoTo 0
 End Function
