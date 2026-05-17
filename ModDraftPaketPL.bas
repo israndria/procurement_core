@@ -12,7 +12,7 @@ Attribute VB_Name = "ModDraftPaketPL"
 ' @ Master Data layout (BAPLJKK):
 '   R3  Kode Paket       R13 Pagu Anggaran     R23 Tahun Anggaran
 '   R4  Kode RUP         R14 Nilai HPS         R24 Tanggal Undangan PL
-'   R5  Nama Pekerjaan   R15 Jangka Waktu      R25 Nomor DPA
+'   R5  Nama Pekerjaan   R15 Jangka Waktu      R25 Kode Rekening (MAK)
 '   R6  Nama SKPD        R16 Sumber Dana       R27 SBU Baru
 '   R7  Sub Kegiatan     R17 Lokasi            R28 SBU Lama
 '   R8  Nama PPK         R18 Jenis Kontrak     R30 Jabatan Teknis
@@ -20,6 +20,8 @@ Attribute VB_Name = "ModDraftPaketPL"
 '   R10 No SK PPK        R20 Nomor Dokpil      R32 Pengalaman Teknis
 '   R11 Nama PP          R21 Tanggal Dokpil    R33 Jabatan K3
 '   R12 NIP PP           R22 No Undangan PL    R34 SKK K3 / R35 Pengalaman K3
+'                                              R37 Nama Peserta
+'                                              R38 NPWP Peserta
 
 ' Konfigurasi Supabase
 Private Const SB_URL As String = "%%SUPABASE_URL%%"
@@ -38,7 +40,13 @@ Private Const MD_SHEET As String = "@ Master Data"
 Private Const CELL_SELECTOR As String = "F1"
 
 ' Kolom yang di-fetch dari draft_paket_pl
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian"
+' index: 0=kode_paket, 1=nama_paket, 2=satker, 3=kode_rup, 4=nilai_hps,
+'        5=jenis_pl, 6=jenis_kontrak, 7=status, 8=nama_ppk, 9=nip_ppk,
+'        10=no_sk_ppk, 11=nilai_pagu, 12=jangka_waktu, 13=sumber_anggaran,
+'        14=lokasi, 15=sbu_baru, 16=sbu_lama, 17=jabatan_teknis, 18=skk_teknis,
+'        19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
+'        24=mak, 25=nama_penyedia, 26=npwp_penyedia
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia"
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -63,7 +71,7 @@ Private Const PLR_TANGGAL_DOKPIL  As Integer = 21
 Private Const PLR_NO_UNDANGAN     As Integer = 22
 Private Const PLR_TAHUN_ANGGARAN  As Integer = 23
 Private Const PLR_TGL_UNDANGAN    As Integer = 24
-Private Const PLR_NOMOR_DPA       As Integer = 25
+Private Const PLR_KODE_REKENING   As Integer = 25
 Private Const PLR_SBU_BARU        As Integer = 27
 Private Const PLR_SBU_LAMA        As Integer = 28
 Private Const PLR_JABATAN_TEKNIS  As Integer = 30
@@ -72,6 +80,8 @@ Private Const PLR_PENGALAMAN_TKN  As Integer = 32
 Private Const PLR_JABATAN_K3      As Integer = 33
 Private Const PLR_SKK_K3          As Integer = 34
 Private Const PLR_PENGALAMAN_K3   As Integer = 35
+Private Const PLR_NAMA_PESERTA    As Integer = 37
+Private Const PLR_NPWP_PESERTA    As Integer = 38
 
 ' Cache data in-memory
 Private m_DataCache As Collection
@@ -210,7 +220,8 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
     ' 5=jenis_pl, 6=jenis_kontrak, 7=status, 8=nama_ppk, 9=nip_ppk,
     ' 10=no_sk_ppk, 11=pagu_anggaran, 12=jangka_waktu, 13=sumber_dana,
     ' 14=lokasi, 15=sbu_baru, 16=sbu_lama, 17=jabatan_teknis, 18=skk_teknis,
-    ' 19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan
+    ' 19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
+    ' 24=mak, 25=nama_penyedia, 26=npwp_penyedia
 
     With wsMD
         ' ── INPUT DATA dari Supabase ──────────────────────────────────────
@@ -285,8 +296,21 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         If tahun = "" Then tahun = CStr(Year(Now))
         .Cells(PLR_TAHUN_ANGGARAN, 3).Value = tahun
 
-        ' DPA nomor
-        .Cells(PLR_NOMOR_DPA, 3).Value = CStr(item(21))     ' dpa_nomor
+        ' Kode Rekening (MAK) — sumber: inbox PL field MAK
+        ' Fallback: dpa_nomor (legacy) jika mak kosong
+        Dim makVal As String: makVal = CStr(item(24))       ' mak
+        If makVal = "" Then makVal = CStr(item(21))         ' fallback dpa_nomor
+        .Cells(PLR_KODE_REKENING, 3).NumberFormat = "@"
+        .Cells(PLR_KODE_REKENING, 3).Value = makVal
+
+        ' Nama + NPWP Peserta — sumber: parse Draft_PL PDF
+        If CStr(item(25)) <> "" Then
+            .Cells(PLR_NAMA_PESERTA, 3).Value = CStr(item(25))  ' nama_penyedia
+        End If
+        If CStr(item(26)) <> "" Then
+            .Cells(PLR_NPWP_PESERTA, 3).NumberFormat = "@"
+            .Cells(PLR_NPWP_PESERTA, 3).Value = CStr(item(26))  ' npwp_penyedia
+        End If
 
         ' ── SBU ──────────────────────────────────────────────────────────
         If CStr(item(15)) <> "" Then
@@ -442,7 +466,7 @@ Private Function ParsePLJSON(json As String) As Collection
 
         Dim obj As String: obj = Mid(json, braceStart, braceEnd - braceStart + 1)
 
-        Dim item(23) As Variant
+        Dim item(26) As Variant
         item(0)  = ExtractJSONValPL(obj, "kode_paket")
         item(1)  = ExtractJSONValPL(obj, "nama_paket")
         item(2)  = ExtractJSONValPL(obj, "satker")
@@ -467,6 +491,9 @@ Private Function ParsePLJSON(json As String) As Collection
         item(21) = ExtractJSONValPL(obj, "dpa_nomor")
         item(22) = ExtractJSONValPL(obj, "sub_kegiatan")
         item(23) = ExtractJSONValPL(obj, "nama_file_uraian")
+        item(24) = ExtractJSONValPL(obj, "mak")
+        item(25) = ExtractJSONValPL(obj, "nama_penyedia")
+        item(26) = ExtractJSONValPL(obj, "npwp_penyedia")
 
         col.Add item
         pos = braceEnd + 1
