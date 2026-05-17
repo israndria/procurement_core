@@ -46,7 +46,7 @@ Private Const CELL_SELECTOR As String = "F1"
 '        14=lokasi, 15=sbu_baru, 16=sbu_lama, 17=jabatan_teknis, 18=skk_teknis,
 '        19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
 '        24=mak, 25=nama_penyedia, 26=npwp_penyedia
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia"
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json"
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -72,16 +72,12 @@ Private Const PLR_NO_UNDANGAN     As Integer = 22
 Private Const PLR_TAHUN_ANGGARAN  As Integer = 23
 Private Const PLR_TGL_UNDANGAN    As Integer = 24
 Private Const PLR_KODE_REKENING   As Integer = 25
-Private Const PLR_SBU_BARU        As Integer = 27
-Private Const PLR_SBU_LAMA        As Integer = 28
-Private Const PLR_JABATAN_TEKNIS  As Integer = 30
-Private Const PLR_SKK_TEKNIS      As Integer = 31
-Private Const PLR_PENGALAMAN_TKN  As Integer = 32
-Private Const PLR_JABATAN_K3      As Integer = 33
-Private Const PLR_SKK_K3          As Integer = 34
-Private Const PLR_PENGALAMAN_K3   As Integer = 35
-Private Const PLR_NAMA_PESERTA    As Integer = 37
-Private Const PLR_NPWP_PESERTA    As Integer = 38
+Private Const PLR_NO_BA_REVIU     As Integer = 26  ' BARU
+Private Const PLR_SBU_BARU        As Integer = 29  ' geser dari 27
+Private Const PLR_SBU_LAMA        As Integer = 30  ' geser dari 28
+Private Const PLR_PERSONIL_BASE   As Integer = 32  ' R32-R43: jabatan/pengalaman P1-P6
+Private Const PLR_NAMA_PESERTA    As Integer = 45  ' geser dari 37
+Private Const PLR_NPWP_PESERTA    As Integer = 46  ' geser dari 38
 
 ' Cache data in-memory
 Private m_DataCache As Collection
@@ -270,14 +266,22 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         .Cells(PLR_SUMBER_DANA, 3).Value = CStr(item(13))   ' sumber_dana
         .Cells(PLR_LOKASI, 3).Value      = CStr(item(14))   ' lokasi
 
-        ' Jangka waktu: ambil angka saja
+        ' Jangka waktu: extract angka pertama saja (handles "30 (Tiga Puluh) Hari Kalender")
         Dim jw As String: jw = Trim(CStr(item(12)))
-        Dim sp As Long: sp = InStr(jw, " ")
-        If sp > 0 Then jw = Left(jw, sp - 1)
-        If IsNumeric(jw) Then
-            .Cells(PLR_JANGKA_WAKTU, 3).Value = CLng(jw)
-        Else
-            .Cells(PLR_JANGKA_WAKTU, 3).Value = CStr(item(12))
+        Dim jwAngka As String: jwAngka = ""
+        Dim jwk As Long
+        For jwk = 1 To Len(jw)
+            Dim jwc As String: jwc = Mid(jw, jwk, 1)
+            If jwc >= "0" And jwc <= "9" Then
+                jwAngka = jwAngka & jwc
+            ElseIf jwAngka <> "" Then
+                Exit For
+            End If
+        Next jwk
+        If jwAngka <> "" Then
+            .Cells(PLR_JANGKA_WAKTU, 3).Value = CLng(jwAngka)
+        ElseIf jw <> "" Then
+            .Cells(PLR_JANGKA_WAKTU, 3).Value = jw
         End If
 
         ' Kontrak & dokpil
@@ -311,31 +315,6 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             .Cells(PLR_NPWP_PESERTA, 3).NumberFormat = "@"
             .Cells(PLR_NPWP_PESERTA, 3).Value = CStr(item(26))  ' npwp_penyedia
         End If
-
-        ' ── SBU ──────────────────────────────────────────────────────────
-        If CStr(item(15)) <> "" Then
-            .Cells(PLR_SBU_BARU, 3).Value = CStr(item(15))  ' sbu_baru
-        End If
-        If CStr(item(16)) <> "" Then
-            .Cells(PLR_SBU_LAMA, 3).Value = CStr(item(16))  ' sbu_lama
-        End If
-
-        ' ── PERSONIL TEKNIS ──────────────────────────────────────────────
-        If CStr(item(17)) <> "" Then
-            .Cells(PLR_JABATAN_TEKNIS, 3).Value = CStr(item(17)) ' jabatan_teknis
-        End If
-        If CStr(item(18)) <> "" Then
-            .Cells(PLR_SKK_TEKNIS, 3).Value = CStr(item(18))     ' skk_teknis
-        End If
-        If CStr(item(19)) <> "" Then
-            .Cells(PLR_JABATAN_K3, 3).Value = CStr(item(19))     ' jabatan_k3
-        End If
-        If CStr(item(20)) <> "" Then
-            .Cells(PLR_SKK_K3, 3).Value = CStr(item(20))         ' skk_k3
-        End If
-
-        ' Pengalaman K3 default 0 (PL jarang minta pengalaman tahun K3)
-        .Cells(PLR_PENGALAMAN_K3, 3).Value = 0
 
         ' ── URAIAN SINGKAT (hardcode template) ───────────────────────────
         Dim namaUraian As String: namaUraian = Trim(CStr(item(23)))
@@ -380,6 +359,34 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
 
         .Cells(PLR_NOMOR_DOKPIL, 3).Value = _
             "000.3.3/01/PL/PP-" & numStr & "/" & koUnik & "/" & singkatan & "/" & tahunDokpil
+
+        ' ── NOMOR BA REVIU: 000.3.3/PP1NN/02/SKPD/Reviu-KodeUnik/Tahun ────
+        Dim nrUrut As String: nrUrut = "0" & numStr
+        If Len(nrUrut) > 2 Then nrUrut = Right(nrUrut, 2)
+        .Cells(PLR_NO_BA_REVIU, 3).Value = _
+            "000.3.3/PP1" & nrUrut & "/02/" & singkatan & "/Reviu-" & koUnik & "/" & tahunDokpil
+
+        ' ── SBU ──────────────────────────────────────────────────────────
+        If CStr(item(15)) <> "" Then
+            .Cells(PLR_SBU_BARU, 3).Value = CStr(item(15))  ' sbu_baru
+        End If
+        If CStr(item(16)) <> "" Then
+            .Cells(PLR_SBU_LAMA, 3).Value = CStr(item(16))  ' sbu_lama
+        End If
+
+        ' ── PERSONIL (R32-R43): jabatan/pengalaman P1-P6 dari personil_json ──
+        Dim personilJsonStr As String: personilJsonStr = CStr(item(27))
+        If personilJsonStr <> "" And personilJsonStr <> "null" Then
+            Dim personilArr() As String
+            personilArr = ParsePersonilArrayPL(personilJsonStr)
+            Dim nP As Long: nP = (UBound(personilArr) + 1) \ 2
+            Dim iP As Long
+            For iP = 0 To nP - 1
+                If iP >= 6 Then Exit For
+                .Cells(PLR_PERSONIL_BASE + iP * 2, 3).Value = personilArr(iP * 2)
+                .Cells(PLR_PERSONIL_BASE + iP * 2 + 1, 3).Value = personilArr(iP * 2 + 1)
+            Next iP
+        End If
     End With
 
     ' Konfirmasi
@@ -466,7 +473,7 @@ Private Function ParsePLJSON(json As String) As Collection
 
         Dim obj As String: obj = Mid(json, braceStart, braceEnd - braceStart + 1)
 
-        Dim item(26) As Variant
+        Dim item(27) As Variant
         item(0)  = ExtractJSONValPL(obj, "kode_paket")
         item(1)  = ExtractJSONValPL(obj, "nama_paket")
         item(2)  = ExtractJSONValPL(obj, "satker")
@@ -494,6 +501,7 @@ Private Function ParsePLJSON(json As String) As Collection
         item(24) = ExtractJSONValPL(obj, "mak")
         item(25) = ExtractJSONValPL(obj, "nama_penyedia")
         item(26) = ExtractJSONValPL(obj, "npwp_penyedia")
+        item(27) = ExtractJSONValPL(obj, "personil_json")
 
         col.Add item
         pos = braceEnd + 1
@@ -526,6 +534,84 @@ End Sub
 Public Sub CetakReviuPlJkkPDF()
     RunMergePL "pdf_all", WM_PAT_REVIU, WM_SHEET_REVIU
 End Sub
+
+Public Sub CetakBAReviuPLPDF()
+    ' Cetak BA Reviu PL halaman 1-3 ke PDF
+    Dim wordFile As String
+    wordFile = FindWordFilePL(WM_PAT_BA)
+    If wordFile = "" Then Exit Sub
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & wordFile
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim scriptDir As String
+    scriptDir = ScriptDirPL()
+    If scriptDir = "" Then
+        MsgBox "Python tidak ditemukan.", vbCritical
+        Exit Sub
+    End If
+    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+
+    Dim outMode As String, printerName As String
+    outMode = ChooseOutputModePL(printerName)
+    If outMode = "" Then Exit Sub
+
+    Dim kodePkt As String
+    kodePkt = CStr(ThisWorkbook.Sheets("@ Master Data").Cells(3, 3).Value)
+    If kodePkt = "" Then kodePkt = "000"
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    Dim cmd As String
+
+    If outMode = "printer" Then
+        cmd = Chr(34) & pyExe & Chr(34) & " " & _
+              Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " printer " & _
+              Chr(34) & wordPath & Chr(34) & " " & _
+              Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
+              Chr(34) & WM_SHEET_BA & Chr(34) & " " & _
+              Chr(34) & printerName & Chr(34) & " 1 3"
+        wsh.Run cmd, 0, False
+        Application.StatusBar = "Printing BA Reviu PL ke " & printerName & " ..."
+    Else
+        cmd = Chr(34) & pyExe & Chr(34) & " " & _
+              Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " pdf_bareviu_pl " & _
+              Chr(34) & wordPath & Chr(34) & " " & _
+              Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
+              Chr(34) & WM_SHEET_BA & Chr(34) & " " & _
+              Chr(34) & kodePkt & Chr(34)
+        wsh.Run cmd, 0, False
+        Application.StatusBar = "Membuat PDF BA_REVIU_PL_" & kodePkt & " ..."
+    End If
+
+    Set wsh = Nothing
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+End Sub
+
+Private Function ChooseOutputModePL(ByRef outPrinter As String) As String
+    Dim choice As VbMsgBoxResult
+    choice = MsgBox("Pilih output:" & vbCrLf & vbCrLf & _
+                   "YES = Export PDF" & vbCrLf & _
+                   "NO = Print ke Printer", _
+                   vbYesNoCancel + vbQuestion, "Pilih Output BA Reviu PL")
+    If choice = vbCancel Then ChooseOutputModePL = "": Exit Function
+    If choice = vbYes Then ChooseOutputModePL = "pdf": Exit Function
+
+    outPrinter = ModWordLink.PickPhysicalPrinter()
+    If outPrinter = "" Then
+        ChooseOutputModePL = ""
+    Else
+        ChooseOutputModePL = "printer"
+    End If
+End Function
 
 Public Sub RelinkPL()
     ' Relink semua Word PL ke Excel ini via relink_pl.py.
@@ -685,6 +771,20 @@ Private Function ExtractJSONValPL(json As String, key As String) As String
         ExtractJSONValPL = Mid(json, p, q - p)
     ElseIf Mid(json, p, 4) = "null" Then
         ExtractJSONValPL = ""
+    ElseIf Mid(json, p, 1) = "[" Then
+        ' JSON array value — cari bracket matching
+        Dim depth As Long: depth = 0
+        Dim aEnd As Long: aEnd = p
+        Do While aEnd <= Len(json)
+            Dim ac As String: ac = Mid(json, aEnd, 1)
+            If ac = "[" Then depth = depth + 1
+            If ac = "]" Then
+                depth = depth - 1
+                If depth = 0 Then Exit Do
+            End If
+            aEnd = aEnd + 1
+        Loop
+        ExtractJSONValPL = Mid(json, p, aEnd - p + 1)
     Else
         Dim endPos As Long: endPos = p
         Do While endPos <= Len(json)
@@ -701,6 +801,47 @@ Private Function CDblSafe(s As String) As Double
     On Error Resume Next
     CDblSafe = CDbl(s)
     On Error GoTo 0
+End Function
+
+
+Private Function ParsePersonilArrayPL(jsonArr As String) As String()
+    ' Parse JSON array of {jabatan, pengalaman} objects.
+    ' Returns flat string array: [jabatan0, pengalaman0, jabatan1, pengalaman1, ...]
+    ' Maximum 6 personil = 12 elemen.
+    Dim result(11) As String  ' max 6 personil * 2
+    Dim count As Long: count = 0
+    Dim pos As Long: pos = 1
+    Dim arrLen As Long: arrLen = Len(jsonArr)
+
+    Do While pos <= arrLen And count < 6
+        Dim bStart As Long: bStart = InStr(pos, jsonArr, "{")
+        If bStart = 0 Then Exit Do
+        Dim bEnd As Long: bEnd = InStr(bStart, jsonArr, "}")
+        If bEnd = 0 Then Exit Do
+
+        Dim obj As String: obj = Mid(jsonArr, bStart, bEnd - bStart + 1)
+        Dim jabatan As String: jabatan = ExtractJSONValPL(obj, "jabatan")
+        Dim pengalaman As String: pengalaman = ExtractJSONValPL(obj, "pengalaman")
+
+        result(count * 2) = jabatan
+        result(count * 2 + 1) = pengalaman
+        count = count + 1
+        pos = bEnd + 1
+    Loop
+
+    ' Resize to actual count
+    If count = 0 Then
+        Dim emptyArr(1) As String
+        ParsePersonilArrayPL = emptyArr
+        Exit Function
+    End If
+
+    ReDim resized(count * 2 - 1) As String
+    Dim ii As Long
+    For ii = 0 To count * 2 - 1
+        resized(ii) = result(ii)
+    Next ii
+    ParsePersonilArrayPL = resized
 End Function
 
 

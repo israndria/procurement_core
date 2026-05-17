@@ -164,7 +164,7 @@ End Function
 
 ' ===== PRINTER ENUMERATION: Scan & filter printer fisik =====
 
-Private Function PickPhysicalPrinter() As String
+Public Function PickPhysicalPrinter() As String
     On Error GoTo ErrHandler
 
     Dim blacklist As Variant

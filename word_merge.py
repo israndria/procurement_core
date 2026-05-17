@@ -257,6 +257,16 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     To=6,
                 )
                 show_success(pdf_path)
+            elif mode == "pdf_bareviu_pl":
+                pdf_path = os.path.join(folder, f"BA_REVIU_PL_{safe_name}.pdf")
+                wdDoc.ExportAsFixedFormat(
+                    OutputFileName=pdf_path,
+                    ExportFormat=17,
+                    Range=3,  # wdExportFromTo
+                    From=1,
+                    To=3,
+                )
+                show_success(pdf_path)
             elif mode == "pdf_revaluasi":
                 pdf_path = os.path.join(folder, f"REvaluasi_{safe_name}.pdf")
                 wdDoc.ExportAsFixedFormat(
@@ -572,7 +582,7 @@ def run_merge_mode_pl(folder_path: str, excel_path: str) -> list:
 if __name__ == "__main__":
     if len(sys.argv) < 5:
         print("Usage: python word_merge.py <mode> <word_path> <excel_path> <sheet_name>")
-        print("  mode: buka | print | pdf | pdf_bareviu")
+        print("  mode: buka | print | pdf | pdf_bareviu | pdf_bareviu_pl")
         sys.exit(1)
 
     mode = sys.argv[1]

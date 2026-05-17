@@ -121,7 +121,7 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnKodeUnikPL", "btnMuatHPS_PL", "btnMuatKodeUnik_PL")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnKodeUnikPL", "btnMuatHPS_PL", "btnMuatKodeUnik_PL", "btnCetakBAReviu_PL")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
@@ -168,6 +168,9 @@ def inject_pl(filepath: str):
             # Baris 4: Muat HPS + Muat Kode Unik (fetch dari Supabase)
             add_btn("btnMuatHPS_PL",       "Muat HPS",      "MuatHPSPL",                   4, 7, (200, 100, 0))
             add_btn("btnMuatKodeUnik_PL",  "Muat Kode Unik","MuatKodeUnikPL",              4, 8, (128, 0, 128))
+            # Baris 5: Cetak BA Reviu PL (halaman 1-3)
+            RED_DARK = (180, 0, 0)
+            add_btn("btnCetakBAReviu_PL",  "Cetak BA Reviu PL", "CetakBAReviuPLPDF",      5, 7, RED_DARK)
 
             # Sengaja TIDAK re-protect @ Master Data — user butuh edit bebas
             # (Aturan PL: sheet @ Master Data harus selalu unprotected)
