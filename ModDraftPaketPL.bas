@@ -94,6 +94,11 @@ Public Sub MuatDraftPaketPL()
     On Error GoTo ErrHandler
     Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
 
+    ' Unprotect sheet sebelum modifikasi validation + cells
+    On Error Resume Next
+    wsMD.Unprotect "pokja2026"
+    On Error GoTo ErrHandler
+
     ' Fetch JSON dari Supabase
     Dim json As String
     json = FetchSupabasePL()
@@ -222,6 +227,11 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
     ' 14=lokasi, 15=sbu_baru, 16=sbu_lama, 17=jabatan_teknis, 18=skk_teknis,
     ' 19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
     ' 24=mak, 25=nama_penyedia, 26=npwp_penyedia
+
+    ' Unprotect sheet sebelum tulis (password pokja2026)
+    On Error Resume Next
+    wsMD.Unprotect "pokja2026"
+    On Error GoTo 0
 
     With wsMD
         ' ── INPUT DATA dari Supabase ──────────────────────────────────────
