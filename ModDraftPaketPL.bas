@@ -659,11 +659,55 @@ Private Function ChooseOutputModePL(ByRef outPrinter As String) As String
     If choice = vbCancel Then ChooseOutputModePL = "": Exit Function
     If choice = vbYes Then ChooseOutputModePL = "pdf": Exit Function
 
-    outPrinter = ModWordLink.PickPhysicalPrinter()
+    outPrinter = PickPrinterPL()
     If outPrinter = "" Then
         ChooseOutputModePL = ""
     Else
         ChooseOutputModePL = "printer"
+    End If
+End Function
+
+Private Function PickPrinterPL() As String
+    Dim printers() As String
+    Dim i As Integer
+    Dim count As Integer
+    count = 0
+    ReDim printers(0)
+
+    On Error Resume Next
+    Dim pName As String
+    pName = Application.Printers(0).Name
+    If Err.Number <> 0 Then
+        ' Fallback: pakai printer aktif
+        PickPrinterPL = Application.ActivePrinter
+        On Error GoTo 0
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    For i = 0 To Application.Printers.Count - 1
+        ReDim Preserve printers(count)
+        printers(count) = Application.Printers(i).Name
+        count = count + 1
+    Next i
+
+    If count = 0 Then PickPrinterPL = "": Exit Function
+
+    Dim listStr As String: listStr = ""
+    For i = 0 To count - 1
+        listStr = listStr & i + 1 & ". " & printers(i) & vbCrLf
+    Next i
+
+    Dim inp As String
+    inp = InputBox("Pilih nomor printer:" & vbCrLf & vbCrLf & listStr, "Pilih Printer")
+    If inp = "" Then PickPrinterPL = "": Exit Function
+
+    Dim idx As Integer
+    idx = CInt(inp) - 1
+    If idx >= 0 And idx < count Then
+        PickPrinterPL = printers(idx)
+    Else
+        PickPrinterPL = ""
     End If
 End Function
 
