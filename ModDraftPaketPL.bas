@@ -785,6 +785,10 @@ Public Sub SyncDataDraftPL()
 
     On Error Resume Next: Kill outputFile: On Error GoTo ErrSync
 
+    ' Pastikan input file tidak terkunci proses sebelumnya
+    On Error Resume Next: Kill inputFile: On Error GoTo ErrSync
+    Application.Wait Now + TimeSerial(0, 0, 0) + 0.0001  ' yield ~100ms
+
     Dim snapshot As String: snapshot = BuildSnapshotPL(wsMD)
     Dim payload As String
     payload = "{""kode_paket"":""" & kodePaket & """,""snapshot"":" & snapshot & "}"
@@ -985,11 +989,19 @@ End Function
 ' ============================================================
 Private Sub WriteUTF8PL(path As String, content As String)
     Dim ado As Object
-    Set ado = CreateObject("ADODB.Stream")
-    ado.Type = 2: ado.Charset = "UTF-8": ado.Open
-    ado.WriteText content
-    ado.SaveToFile path, 2
-    ado.Close
+    Dim tries As Integer
+    For tries = 1 To 5
+        On Error Resume Next
+        Set ado = CreateObject("ADODB.Stream")
+        ado.Type = 2: ado.Charset = "UTF-8": ado.Open
+        ado.WriteText content
+        ado.SaveToFile path, 2
+        ado.Close
+        If Err.Number = 0 Then Exit For
+        Err.Clear
+        Application.Wait Now + TimeSerial(0, 0, 1)  ' tunggu 1 detik, retry
+    Next tries
+    On Error GoTo 0
 End Sub
 
 Private Function ReadUTF8PL(path As String) As String
