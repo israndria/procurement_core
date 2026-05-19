@@ -286,7 +286,22 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 show_success(pdf_path)
             elif mode == "pdf_dokpil":
-                pdf_path = os.path.join(folder, f"DOKPIL_{safe_name}.pdf")
+                # Ambil kode_unik dari Excel @ Master Data!G2 (cari xlsm di folder yang sama)
+                kode_unik_pdf = ""
+                try:
+                    import glob as _glob2
+                    _xlsm_list = _glob2.glob(os.path.join(folder, "*.xlsm"))
+                    if _xlsm_list:
+                        _xl2 = win32com.client.DispatchEx("Excel.Application")
+                        _xl2.Visible = False
+                        _wb2 = _xl2.Workbooks.Open(_xlsm_list[0], ReadOnly=True)
+                        kode_unik_pdf = str(_wb2.Sheets("@ Master Data").Range("G2").Value).strip()
+                        _wb2.Close(False)
+                        _xl2.Quit()
+                except Exception:
+                    pass
+                _pdf_suffix = kode_unik_pdf if kode_unik_pdf and kode_unik_pdf not in ("", "None", "null") else safe_name
+                pdf_path = os.path.join(folder, f"dokpil_{_pdf_suffix}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,

@@ -72,7 +72,8 @@ Private Const PLR_TAHUN_ANGGARAN  As Integer = 23
 Private Const PLR_TGL_UNDANGAN    As Integer = 24
 Private Const PLR_KODE_REKENING   As Integer = 25
 Private Const PLR_NO_BA_REVIU     As Integer = 26
-Private Const PLR_ALAMAT_PP       As Integer = 27  ' BARU: lookup master_dinas.alamat_pp_bertugas
+Private Const PLR_ALAMAT_PP       As Integer = 27  ' lookup master_dinas.alamat_pp_bertugas
+Private Const PLR_TELEPON_PP      As Integer = 28  ' lookup master_dinas.telepon_pp
 Private Const PLR_SBU_BARU        As Integer = 29
 Private Const PLR_SBU_LAMA        As Integer = 30
 Private Const PLR_PERSONIL_BASE   As Integer = 32  ' R32-R49: stride=3 (jabatan/pengalaman/sertifikat)
@@ -202,6 +203,8 @@ Public Sub IsiDataPL()
         label = CStr(item(5)) & " - " & Left(Trim(CStr(item(1))), 55)
         If label = selVal Then
             IsiMasterDataPL wsMD, item
+            ' Auto diff highlight setelah isi data
+            DiffHighlightPL CStr(item(0))
             Exit For
         End If
     Next i
@@ -262,8 +265,12 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         ' Biarkan nilai default di R11/R12 tetap
 
         ' Nilai finansial
-        .Cells(PLR_PAGU, 3).Value        = CStr(item(11))   ' pagu_anggaran
-        .Cells(PLR_HPS, 3).Value         = CStr(item(4))    ' nilai_hps
+        Dim paguVal As String: paguVal = CStr(item(11))
+        If Left(paguVal, 3) <> "Rp." Then paguVal = "Rp. " & paguVal
+        .Cells(PLR_PAGU, 3).Value = paguVal
+        Dim hpsVal As String: hpsVal = CStr(item(4))
+        If Left(hpsVal, 3) <> "Rp." Then hpsVal = "Rp. " & hpsVal
+        .Cells(PLR_HPS, 3).Value = hpsVal
         .Cells(PLR_SUMBER_DANA, 3).Value = CStr(item(13))   ' sumber_dana
         .Cells(PLR_LOKASI, 3).Value      = CStr(item(14))   ' lokasi
 
@@ -387,6 +394,11 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
                 "000.3.3/01/PL/PP-" & numStr & "/" & koUnik & "/" & singkatan & "/" & tahunDokpil
         End If
 
+        ' Auto-generate No Undangan dari Nomor Dokpil (ganti /01/PL/ -> /02/PL/)
+        Dim noUndangan As String
+        noUndangan = Replace(.Cells(PLR_NOMOR_DOKPIL, 3).Value, "/01/PL/", "/02/PL/")
+        .Cells(PLR_NO_UNDANGAN, 3).Value = noUndangan
+
         ' ── NOMOR BA REVIU: 000.3.3/PP{NN}/02/SKPD/Reviu-KodeUnik/Tahun ────
         .Cells(PLR_NO_BA_REVIU, 3).Value = _
             "000.3.3/PP" & numStr & "/02/" & singkatan & "/Reviu-" & koUnik & "/" & tahunDokpil
@@ -395,6 +407,12 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim alamatPP As String: alamatPP = LookupAlamatPP(CStr(item(2)))
         If alamatPP <> "" And alamatPP <> "null" Then
             .Cells(PLR_ALAMAT_PP, 3).Value = alamatPP
+        End If
+
+        ' ── TELEPON PP: lookup master_dinas.telepon_pp via satker ───────
+        Dim telPP As String: telPP = LookupTeleponPP(CStr(item(2)))
+        If telPP <> "" And telPP <> "null" Then
+            .Cells(PLR_TELEPON_PP, 3).Value = telPP
         End If
 
         ' ── SBU ──────────────────────────────────────────────────────────
@@ -703,6 +721,282 @@ Public Sub RelinkPL()
     MsgBox "Relink selesai!" & vbCrLf & vbCrLf & output, vbInformation, "Relink Word PL"
 End Sub
 
+' ============================================================
+' SYNC DATA DRAFT PL: Baca @ Master Data kolom C → upsert data_snapshot
+' ============================================================
+Public Sub SyncDataDraftPL()
+    Dim wsMD As Worksheet
+    On Error GoTo ErrSync
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+
+    Dim kodePaket As String
+    kodePaket = Trim(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))
+    If kodePaket = "" Then
+        MsgBox "Kode Paket (C3) kosong. Pilih dan isi data PL terlebih dahulu.", vbExclamation
+        Exit Sub
+    End If
+
+    Dim sd As String: sd = ScriptDirPL()
+    If sd = "" Then MsgBox "Python tidak ditemukan.", vbExclamation: Exit Sub
+
+    Dim inputFile As String:  inputFile  = sd & "\_sync_draft_pl_input.json"
+    Dim outputFile As String: outputFile = sd & "\_sync_draft_pl_output.json"
+
+    On Error Resume Next: Kill outputFile: On Error GoTo ErrSync
+
+    Dim snapshot As String: snapshot = BuildSnapshotPL(wsMD)
+    Dim payload As String
+    payload = "{""kode_paket"":""" & kodePaket & """,""snapshot"":" & snapshot & "}"
+    WriteUTF8PL inputFile, payload
+
+    Dim pyExe As String: pyExe = sd & "\python\python.exe"
+    Dim cmd As String
+    cmd = """" & pyExe & """ """ & sd & "\sync_draft_pl.py"" save"
+
+    Application.StatusBar = "Sync Data Draft PL: menyimpan..."
+    Dim wsh As Object: Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, True
+    Application.StatusBar = False
+
+    If Dir(outputFile) = "" Then
+        MsgBox "sync_draft_pl.py tidak menghasilkan output.", vbExclamation
+        Exit Sub
+    End If
+
+    Dim result As String: result = ReadUTF8PL(outputFile)
+    Dim okVal As String:  okVal  = ExtractValPL2(result, "ok")
+    If okVal = "true" Then
+        MsgBox "Snapshot berhasil disimpan." & vbCrLf & "Kode Paket: " & kodePaket, _
+               vbInformation, "Sync Data Draft PL"
+        ClearHighlightPL wsMD
+    Else
+        MsgBox "Gagal sync: " & ExtractValPL2(result, "error"), vbExclamation, "Sync Data Draft PL"
+    End If
+    Exit Sub
+ErrSync:
+    Application.StatusBar = False
+    MsgBox "Error SyncDataDraftPL: " & Err.Description, vbCritical
+End Sub
+
+
+' ============================================================
+' DIFF HIGHLIGHT PL: Load snapshot → highlight sel yang berbeda
+' Dipanggil otomatis setelah IsiMasterDataPL selesai
+' ============================================================
+Public Sub DiffHighlightPL(Optional kodePaketOverride As String = "")
+    Dim wsMD As Worksheet
+    On Error GoTo ErrDiff
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+
+    Dim kodePaket As String
+    kodePaket = kodePaketOverride
+    If kodePaket = "" Then
+        kodePaket = Trim(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))
+    End If
+    If kodePaket = "" Then Exit Sub
+
+    Dim sd As String: sd = ScriptDirPL()
+    If sd = "" Then Exit Sub
+
+    Dim inputFile As String:  inputFile  = sd & "\_sync_draft_pl_input.json"
+    Dim outputFile As String: outputFile = sd & "\_sync_draft_pl_output.json"
+
+    On Error Resume Next: Kill outputFile: On Error GoTo ErrDiff
+
+    WriteUTF8PL inputFile, "{""kode_paket"":""" & kodePaket & """}"
+
+    Dim pyExe As String: pyExe = sd & "\python\python.exe"
+    Dim cmd As String
+    cmd = """" & pyExe & """ """ & sd & "\sync_draft_pl.py"" load"
+
+    Application.StatusBar = "Diff Highlight PL: memuat snapshot..."
+    Dim wsh As Object: Set wsh = CreateObject("WScript.Shell")
+    wsh.Run cmd, 0, True
+    Application.StatusBar = False
+
+    If Dir(outputFile) = "" Then Exit Sub
+
+    Dim result As String: result = ReadUTF8PL(outputFile)
+    If ExtractValPL2(result, "ok") <> "true" Then Exit Sub
+
+    ' snapshot kosong = belum pernah sync
+    Dim snapStart As Long: snapStart = InStr(result, """snapshot""")
+    If snapStart = 0 Then Exit Sub
+    Dim bracePos As Long: bracePos = InStr(snapStart, result, "{")
+    If bracePos = 0 Then
+        ClearHighlightPL wsMD
+        Exit Sub
+    End If
+
+    ' Bandingkan semua baris PLR kolom C
+    Dim rowList As Variant
+    rowList = Array(PLR_KODE_PAKET, PLR_KODE_RUP, PLR_NAMA_PEKERJAAN, PLR_NAMA_SKPD, _
+                    PLR_SUB_KEGIATAN, PLR_NAMA_PPK, PLR_NIP_PPK, PLR_NO_SK_PPK, _
+                    PLR_NAMA_PP, PLR_NIP_PP, PLR_PAGU, PLR_HPS, PLR_JANGKA_WAKTU, _
+                    PLR_SUMBER_DANA, PLR_LOKASI, PLR_JENIS_KONTRAK, PLR_URAIAN_SINGKAT, _
+                    PLR_NOMOR_DOKPIL, PLR_TANGGAL_DOKPIL, PLR_NO_UNDANGAN, _
+                    PLR_TAHUN_ANGGARAN, PLR_TGL_UNDANGAN, PLR_KODE_REKENING, _
+                    PLR_NO_BA_REVIU, PLR_ALAMAT_PP, PLR_SBU_BARU, PLR_SBU_LAMA, _
+                    PLR_NAMA_PESERTA, PLR_NPWP_PESERTA)
+
+    Dim ri As Long
+    For ri = 0 To UBound(rowList)
+        Dim r As Long: r = rowList(ri)
+        Dim cellVal As String: cellVal = Trim(CStr(wsMD.Cells(r, 3).Value))
+        Dim snapVal As String: snapVal = ExtractValPL2(result, "r" & r)
+        If snapVal <> cellVal Then
+            wsMD.Cells(r, 3).Interior.Color = 16776960  ' Kuning
+        Else
+            wsMD.Cells(r, 3).Interior.ColorIndex = -4142  ' xlNone
+        End If
+    Next ri
+
+    ' Personil baris R32-R49
+    Dim rp As Long
+    For rp = PLR_PERSONIL_BASE To PLR_PERSONIL_BASE + 17
+        Dim cpVal As String: cpVal = Trim(CStr(wsMD.Cells(rp, 3).Value))
+        Dim spVal As String: spVal = ExtractValPL2(result, "r" & rp)
+        If spVal <> cpVal Then
+            wsMD.Cells(rp, 3).Interior.Color = 16776960
+        Else
+            wsMD.Cells(rp, 3).Interior.ColorIndex = -4142
+        End If
+    Next rp
+    Exit Sub
+ErrDiff:
+    Application.StatusBar = False
+End Sub
+
+
+' ============================================================
+' CLEAR HIGHLIGHT PL
+' ============================================================
+Public Sub ClearHighlightPL(Optional wsMDArg As Worksheet = Nothing)
+    Dim wsMD As Worksheet
+    If wsMDArg Is Nothing Then
+        On Error Resume Next
+        Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+        On Error GoTo 0
+    Else
+        Set wsMD = wsMDArg
+    End If
+    If wsMD Is Nothing Then Exit Sub
+
+    Dim r As Long
+    ' PLR rows
+    Dim rowList As Variant
+    rowList = Array(PLR_KODE_PAKET, PLR_KODE_RUP, PLR_NAMA_PEKERJAAN, PLR_NAMA_SKPD, _
+                    PLR_SUB_KEGIATAN, PLR_NAMA_PPK, PLR_NIP_PPK, PLR_NO_SK_PPK, _
+                    PLR_NAMA_PP, PLR_NIP_PP, PLR_PAGU, PLR_HPS, PLR_JANGKA_WAKTU, _
+                    PLR_SUMBER_DANA, PLR_LOKASI, PLR_JENIS_KONTRAK, PLR_URAIAN_SINGKAT, _
+                    PLR_NOMOR_DOKPIL, PLR_TANGGAL_DOKPIL, PLR_NO_UNDANGAN, _
+                    PLR_TAHUN_ANGGARAN, PLR_TGL_UNDANGAN, PLR_KODE_REKENING, _
+                    PLR_NO_BA_REVIU, PLR_ALAMAT_PP, PLR_SBU_BARU, PLR_SBU_LAMA, _
+                    PLR_NAMA_PESERTA, PLR_NPWP_PESERTA)
+    Dim ri As Long
+    For ri = 0 To UBound(rowList)
+        wsMD.Cells(rowList(ri), 3).Interior.ColorIndex = -4142
+    Next ri
+    For r = PLR_PERSONIL_BASE To PLR_PERSONIL_BASE + 17
+        wsMD.Cells(r, 3).Interior.ColorIndex = -4142
+    Next r
+End Sub
+
+
+' ============================================================
+' BUILD SNAPSHOT JSON PL: semua nilai kolom C → {"r3":"val",...}
+' ============================================================
+Private Function BuildSnapshotPL(wsMD As Worksheet) As String
+    Dim sb As String: sb = "{"
+    Dim first As Boolean: first = True
+
+    Dim rowList As Variant
+    rowList = Array(PLR_KODE_PAKET, PLR_KODE_RUP, PLR_NAMA_PEKERJAAN, PLR_NAMA_SKPD, _
+                    PLR_SUB_KEGIATAN, PLR_NAMA_PPK, PLR_NIP_PPK, PLR_NO_SK_PPK, _
+                    PLR_NAMA_PP, PLR_NIP_PP, PLR_PAGU, PLR_HPS, PLR_JANGKA_WAKTU, _
+                    PLR_SUMBER_DANA, PLR_LOKASI, PLR_JENIS_KONTRAK, PLR_URAIAN_SINGKAT, _
+                    PLR_NOMOR_DOKPIL, PLR_TANGGAL_DOKPIL, PLR_NO_UNDANGAN, _
+                    PLR_TAHUN_ANGGARAN, PLR_TGL_UNDANGAN, PLR_KODE_REKENING, _
+                    PLR_NO_BA_REVIU, PLR_ALAMAT_PP, PLR_SBU_BARU, PLR_SBU_LAMA, _
+                    PLR_NAMA_PESERTA, PLR_NPWP_PESERTA)
+
+    Dim ri As Long
+    For ri = 0 To UBound(rowList)
+        Dim r As Long: r = rowList(ri)
+        If Not first Then sb = sb & ","
+        sb = sb & """r" & r & """:""" & EscapeJSONPL(CStr(wsMD.Cells(r, 3).Value)) & """"
+        first = False
+    Next ri
+
+    ' Personil R32-R49
+    Dim rp As Long
+    For rp = PLR_PERSONIL_BASE To PLR_PERSONIL_BASE + 17
+        sb = sb & ",""r" & rp & """:""" & EscapeJSONPL(CStr(wsMD.Cells(rp, 3).Value)) & """"
+    Next rp
+
+    sb = sb & "}"
+    BuildSnapshotPL = sb
+End Function
+
+
+' ============================================================
+' HELPERS I/O untuk Sync PL
+' ============================================================
+Private Sub WriteUTF8PL(path As String, content As String)
+    Dim ado As Object
+    Set ado = CreateObject("ADODB.Stream")
+    ado.Type = 2: ado.Charset = "UTF-8": ado.Open
+    ado.WriteText content
+    ado.SaveToFile path, 2
+    ado.Close
+End Sub
+
+Private Function ReadUTF8PL(path As String) As String
+    Dim ado As Object
+    Set ado = CreateObject("ADODB.Stream")
+    ado.Type = 2: ado.Charset = "UTF-8": ado.Open
+    ado.LoadFromFile path
+    ReadUTF8PL = ado.ReadText
+    ado.Close
+End Function
+
+Private Function EscapeJSONPL(s As String) As String
+    s = Replace(s, "\", "\\")
+    s = Replace(s, """", "\""")
+    s = Replace(s, Chr(10), "\n")
+    s = Replace(s, Chr(13), "")
+    EscapeJSONPL = s
+End Function
+
+Private Function ExtractValPL2(json As String, key As String) As String
+    Dim searchKey As String: searchKey = """" & key & """:"
+    Dim pos As Long: pos = InStr(1, json, searchKey)
+    If pos = 0 Then ExtractValPL2 = "": Exit Function
+    pos = pos + Len(searchKey)
+    Do While Mid(json, pos, 1) = " ": pos = pos + 1: Loop
+    If Mid(json, pos, 1) = """" Then
+        pos = pos + 1
+        Dim endPos As Long: endPos = pos
+        Do While endPos <= Len(json)
+            If Mid(json, endPos, 1) = """" And Mid(json, endPos - 1, 1) <> "\" Then Exit Do
+            endPos = endPos + 1
+        Loop
+        ExtractValPL2 = Mid(json, pos, endPos - pos)
+    ElseIf Mid(json, pos, 4) = "null" Then
+        ExtractValPL2 = ""
+    Else
+        Dim endN As Long: endN = pos
+        Do While endN <= Len(json) And InStr(",}]", Mid(json, endN, 1)) = 0
+            endN = endN + 1
+        Loop
+        ExtractValPL2 = Trim(Mid(json, pos, endN - pos))
+    End If
+End Function
+
+
+' ============================================================
+' RUN MERGE PL
+' ============================================================
 Private Sub RunMergePL(ByVal mode As String, ByVal wordPattern As String, ByVal sheetName As String)
     Dim wordFile As String
     wordFile = FindWordFilePL(wordPattern)
@@ -980,6 +1274,28 @@ Private Function LookupAlamatPP(namaDinas As String) As String
     If http.Status = 200 Then
         Dim resp As String: resp = http.ResponseText
         LookupAlamatPP = ExtractJSONValPL(resp, "alamat_pp_bertugas")
+    End If
+    On Error GoTo 0
+End Function
+
+Private Function LookupTeleponPP(namaDinas As String) As String
+    LookupTeleponPP = ""
+    If namaDinas = "" Then Exit Function
+
+    On Error Resume Next
+    Dim http2 As Object
+    Set http2 = CreateObject("WinHttp.WinHttpRequest.5.1")
+    Dim q2 As String: q2 = Replace(namaDinas, " ", "%20")
+    Dim url2 As String
+    url2 = SB_URL & "/rest/v1/master_dinas?nama_dinas=ilike.*" & q2 & "*&select=telepon_pp&limit=1"
+    http2.Open "GET", url2, False
+    http2.SetRequestHeader "apikey", SB_KEY
+    http2.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http2.SetRequestHeader "Accept", "application/json"
+    http2.Send
+    If http2.Status = 200 Then
+        Dim resp2 As String: resp2 = http2.ResponseText
+        LookupTeleponPP = ExtractJSONValPL(resp2, "telepon_pp")
     End If
     On Error GoTo 0
 End Function

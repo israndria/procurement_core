@@ -121,7 +121,7 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnKodeUnikPL", "btnMuatHPS_PL", "btnMuatKodeUnik_PL", "btnCetakBAReviu_PL")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnKodeUnikPL", "btnMuatHPS_PL", "btnMuatKodeUnik_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
@@ -138,9 +138,19 @@ def inject_pl(filepath: str):
             PURPLE  = (102, 51, 153)
             TEAL    = (0, 128, 128)
 
-            def add_btn(name, label, macro, row, col, rgb, width=120):
-                cell = ws.Cells(row, col)
-                shp = ws.Shapes.AddShape(5, cell.Left, cell.Top, width, 28)
+            # Posisi absolut (Left, Top) diukur dari layout manual user
+            # Baris 1 (Top≈270): MuatPL | IsiPL | BukaDokpil | RelinkWord
+            # Baris 2 (Top≈301): BukaBA  | BukaReviu | SyncDraft | ClearHighlight
+            # Baris 3 (Top≈332): KodeUnik | MuatKodeUnik | CetakBAReviu | CetakDokpil
+            # Baris 4 (Top≈364): MuatHPS (col 2 saja)
+            _BTN_W = 130
+            _BTN_H = 28
+            _X = [758.5, 893.5, 1028.0, 1163.0]   # 4 kolom X
+            _Y = [269.5, 301.0, 332.0, 364.0]      # 4 baris Y
+
+            def add_btn(name, label, macro, yi, xi, rgb):
+                """yi=indeks baris (0-3), xi=indeks kolom (0-3)"""
+                shp = ws.Shapes.AddShape(5, _X[xi], _Y[yi], _BTN_W, _BTN_H)
                 shp.Name = name
                 r, g, b = rgb
                 shp.Fill.ForeColor.RGB = r + (g * 256) + (b * 65536)
@@ -155,22 +165,27 @@ def inject_pl(filepath: str):
                 shp.OnAction = macro
                 print(f"  [OK] {name} ({label}) -> {macro}")
 
-            # Baris 1: Muat + Isi Data
-            add_btn("btnMuatPL",          "Muat Paket PL",  "MuatDraftPaketPL",           1, 7, BLUE)
-            add_btn("btnIsiPL",           "Isi Data PL",    "IsiDataPL",                   1, 8, GREEN_C)
-            # Baris 2: Buka Word dokumen + Relink
-            add_btn("btnBukaBA_PL",       "Buka BA",        "BukaBAPlJkk",        2, 7, ORANGE)
-            add_btn("btnBukaReviu_PL",    "Buka Reviu",     "BukaReviuPlJkk",     2, 8, PURPLE)
-            add_btn("btnBukaDokpil_PL",   "Buka Dokpil",    "BukaDokpilPlJkk",    2, 9, TEAL)
-            add_btn("btnRelinkPL",        "Relink Word",    "RelinkPL",            2, 10, (128, 0, 0))
-            # Baris 3: Kode Unik (kolom 7 — selalu ada di semua workbook)
-            add_btn("btnKodeUnikPL",      "Kode Unik PL",   "GenerateKodeUnikPaketPL",     3, 7, (128, 0, 128))
-            # Baris 4: Muat HPS + Muat Kode Unik (fetch dari Supabase)
-            add_btn("btnMuatHPS_PL",       "Muat HPS",      "MuatHPSPL",                   4, 7, (200, 100, 0))
-            add_btn("btnMuatKodeUnik_PL",  "Muat Kode Unik","MuatKodeUnikPL",              4, 8, (128, 0, 128))
-            # Baris 5: Cetak BA Reviu PL (halaman 1-3)
-            RED_DARK = (180, 0, 0)
-            add_btn("btnCetakBAReviu_PL",  "Cetak BA Reviu PL", "CetakBAReviuPLPDF",      5, 7, RED_DARK)
+            RED_DARK   = (180, 0, 0)
+            GREY       = (100, 100, 100)
+            GREEN_SYNC = (20, 140, 60)
+
+            # Baris 0: Muat PL | Isi Data PL | Buka Dokpil | Relink Word
+            add_btn("btnMuatPL",          "Muat Paket PL",    "MuatDraftPaketPL",        0, 0, BLUE)
+            add_btn("btnIsiPL",           "Isi Data PL",       "IsiDataPL",               0, 1, GREEN_C)
+            add_btn("btnBukaDokpil_PL",   "Buka Dokpil",       "BukaDokpilPlJkk",         0, 2, TEAL)
+            add_btn("btnRelinkPL",        "Relink Word",       "RelinkPL",                 0, 3, (128, 0, 0))
+            # Baris 1: Buka BA | Buka Reviu | Sync Data Draft | Clear Highlight
+            add_btn("btnBukaBA_PL",       "Buka BA",           "BukaBAPlJkk",             1, 0, ORANGE)
+            add_btn("btnBukaReviu_PL",    "Buka Reviu",        "BukaReviuPlJkk",          1, 1, PURPLE)
+            add_btn("btnSyncDraftPL",     "Sync Data Draft",   "SyncDataDraftPL",          1, 2, GREEN_SYNC)
+            add_btn("btnClearHighlightPL","Clear Highlight",    "ClearHighlightPL",         1, 3, GREY)
+            # Baris 2: Kode Unik PL | Muat Kode Unik | Cetak BA Reviu PL | Cetak Dokpil PDF
+            add_btn("btnKodeUnikPL",      "Kode Unik PL",      "GenerateKodeUnikPaketPL", 2, 0, (128, 0, 128))
+            add_btn("btnMuatKodeUnik_PL", "Muat Kode Unik",    "MuatKodeUnikPL",          2, 1, (100, 0, 150))
+            add_btn("btnCetakBAReviu_PL", "Cetak BA Reviu PL", "CetakBAReviuPLPDF",       2, 2, RED_DARK)
+            add_btn("btnCetakDokpil_PL",  "Cetak Dokpil PDF",  "CetakDokpilPlJkkPDF",     2, 3, (0, 100, 180))
+            # Baris 3: Muat HPS (kolom 2)
+            add_btn("btnMuatHPS_PL",      "Muat HPS",          "MuatHPSPL",               3, 2, (200, 100, 0))
 
             # Sengaja TIDAK re-protect @ Master Data — user butuh edit bebas
             # (Aturan PL: sheet @ Master Data harus selalu unprotected)
