@@ -353,22 +353,19 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             "Mengerjakan " & CStr(item(1)) & " sesuai dengan KAK/Dokumen " & namaUraian
 
         ' ── NOMOR DOKPIL: 000.3.3/01/PL/PP-NN/KodeUnik/SKPD/Tahun ────────
-        ' PP-NN dari digit akhir nama_paket (Paket 1 -> 01, Paket 12 -> 12)
+        ' PP-NN dari angka terakhir di nama_paket (Paket 2 -> 02, Paket 12 -> 12)
         Dim npaket As String: npaket = CStr(item(1))
-        Dim mNum As Object
-        Dim numStr As String: numStr = "01"
+        Dim numStr As String: numStr = ""
         Dim ii As Long
         For ii = Len(npaket) To 1 Step -1
             Dim chr As String: chr = Mid(npaket, ii, 1)
             If chr >= "0" And chr <= "9" Then
                 numStr = chr & numStr
-                If Len(numStr) >= 3 Then Exit For
-            ElseIf Len(numStr) > 2 Then
-                Exit For
+            ElseIf numStr <> "" Then
+                Exit For  ' sudah kumpul digit, ketemu non-digit -> stop
             End If
         Next ii
-        ' Trim leading dari default "01"
-        If Len(numStr) > 2 Then numStr = Right(numStr, Len(numStr) - 2)
+        If numStr = "" Then numStr = "1"
         If Len(numStr) = 1 Then numStr = "0" & numStr
 
         ' Singkatan SKPD dari master_dinas via lookup
