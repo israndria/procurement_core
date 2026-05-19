@@ -72,8 +72,8 @@ Private Const PLR_TAHUN_ANGGARAN  As Integer = 23
 Private Const PLR_TGL_UNDANGAN    As Integer = 24
 Private Const PLR_KODE_REKENING   As Integer = 25
 Private Const PLR_NO_BA_REVIU     As Integer = 26
-Private Const PLR_ALAMAT_PP       As Integer = 27  ' lookup master_dinas.alamat_pp_bertugas
-Private Const PLR_TELEPON_PP      As Integer = 28  ' lookup master_dinas.telepon_pp
+Private Const PLR_ALAMAT_PP       As Integer = 59  ' lookup master_dinas.alamat_pp_bertugas
+Private Const PLR_TELEPON_PP      As Integer = 58  ' lookup master_dinas.telepon_pp
 Private Const PLR_SBU_BARU        As Integer = 29
 Private Const PLR_SBU_LAMA        As Integer = 30
 Private Const PLR_PERSONIL_BASE   As Integer = 32  ' R32-R49: stride=3 (jabatan/pengalaman/sertifikat)
