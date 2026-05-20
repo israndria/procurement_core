@@ -718,6 +718,79 @@ Private Function PickPrinterPL() As String
     End If
 End Function
 
+Public Sub GabungReviuPL()
+    ' Gabung BA Reviu scan + Isi Reviu → Gabung_Reviu_{kode_unik}.pdf
+    ' BA scan dicari di D:\Download\REVIU KONSULTAN PERENCANAAN {N}.pdf
+    ' N diambil dari angka di awal nama folder paket
+
+    Dim scriptDir As String
+    scriptDir = ScriptDirPL()
+    If scriptDir = "" Then
+        MsgBox "Python tidak ditemukan.", vbCritical
+        Exit Sub
+    End If
+    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+    Dim folderPaket As String: folderPaket = ThisWorkbook.Path
+
+    ' Deteksi nomor paket dari nama folder — ambil angka pertama di awal nama
+    Dim folderName As String
+    folderName = Dir(folderPaket, vbDirectory)  ' nama folder terakhir saja
+    ' Ambil dari basename path
+    Dim parts() As String
+    parts = Split(folderPaket, "\")
+    folderName = parts(UBound(parts))
+
+    Dim noPaket As String
+    Dim i As Integer
+    noPaket = ""
+    For i = 1 To Len(folderName)
+        Dim c As String: c = Mid(folderName, i, 1)
+        If c >= "0" And c <= "9" Then
+            noPaket = noPaket & c
+        ElseIf noPaket <> "" Then
+            Exit For  ' berhenti setelah blok angka pertama
+        End If
+    Next i
+
+    If noPaket = "" Then
+        MsgBox "Tidak bisa deteksi nomor paket dari nama folder:" & vbCrLf & folderName, vbExclamation
+        Exit Sub
+    End If
+
+    ' Hapus leading zero jika ada (misal "09" → "9")
+    noPaket = CStr(CLng(noPaket))
+
+    Dim baScanPath As String
+    baScanPath = "D:\Download\REVIU KONSULTAN PERENCANAAN " & noPaket & ".pdf"
+
+    If Dir(baScanPath) = "" Then
+        MsgBox "File BA scan tidak ditemukan:" & vbCrLf & baScanPath & vbCrLf & vbCrLf & _
+               "Pastikan file ada di D:\Download\ dengan nama:" & vbCrLf & _
+               "REVIU KONSULTAN PERENCANAAN " & noPaket & ".pdf", vbExclamation
+        Exit Sub
+    End If
+
+    Dim cmd As String
+    cmd = Chr(34) & pyExe & Chr(34) & " " & _
+          Chr(34) & scriptDir & "\gabung_reviu_pl.py" & Chr(34) & " " & _
+          Chr(34) & folderPaket & Chr(34) & " --ba " & _
+          Chr(34) & baScanPath & Chr(34)
+
+    Application.StatusBar = "Menggabung Reviu paket " & noPaket & " ..."
+    Dim wsh As Object: Set wsh = CreateObject("WScript.Shell")
+    Dim rc As Long
+    rc = wsh.Run(cmd, 0, True)  ' wait=True supaya tahu selesai
+    Set wsh = Nothing
+    Application.StatusBar = False
+
+    If rc = 0 Then
+        MsgBox "Berhasil! Gabung_Reviu tersimpan di:" & vbCrLf & folderPaket, vbInformation
+    Else
+        MsgBox "Gagal gabung reviu (exit code " & rc & ")." & vbCrLf & _
+               "Pastikan Isi_Reviu_DPP_*.pdf sudah ada di folder paket.", vbExclamation
+    End If
+End Sub
+
 Public Sub RelinkPL()
     ' Relink semua Word PL ke Excel ini via relink_pl.py.
     ' Pakai WScript.Shell synchronous (blocking, no manual polling = no UI freeze loop).
