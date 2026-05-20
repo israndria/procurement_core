@@ -761,12 +761,31 @@ Public Sub GabungReviuPL()
     noPaket = CStr(CLng(noPaket))
 
     Dim baScanPath As String
+    ' Cari dulu di D:\Download\
     baScanPath = "D:\Download\REVIU KONSULTAN PERENCANAAN " & noPaket & ".pdf"
 
+    ' Fallback: cari *REVIU*.pdf di folder paket (exclude output file)
     If Dir(baScanPath) = "" Then
-        MsgBox "File BA scan tidak ditemukan:" & vbCrLf & baScanPath & vbCrLf & vbCrLf & _
-               "Pastikan file ada di D:\Download\ dengan nama:" & vbCrLf & _
-               "REVIU KONSULTAN PERENCANAAN " & noPaket & ".pdf", vbExclamation
+        Dim f As String
+        f = Dir(folderPaket & "\*.pdf")
+        Do While f <> ""
+            Dim fu As String: fu = UCase(f)
+            If InStr(fu, "REVIU") > 0 And _
+               Left(fu, 10) <> "BA_REVIU_P" And _
+               Left(fu, 10) <> "ISI_REVIU_" And _
+               Left(fu, 12) <> "GABUNG_REVIU" Then
+                baScanPath = folderPaket & "\" & f
+                Exit Do
+            End If
+            f = Dir()
+        Loop
+    End If
+
+    If baScanPath = "" Or Dir(baScanPath) = "" Then
+        MsgBox "File BA scan tidak ditemukan." & vbCrLf & vbCrLf & _
+               "Cari di:" & vbCrLf & _
+               "1. D:\Download\REVIU KONSULTAN PERENCANAAN " & noPaket & ".pdf" & vbCrLf & _
+               "2. File *REVIU*.pdf di folder paket", vbExclamation
         Exit Sub
     End If
 
