@@ -278,7 +278,23 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 show_success(pdf_path)
             elif mode == "pdf_all":
-                pdf_path = os.path.join(folder, f"Isi_Reviu_DPP_{safe_name}.pdf")
+                # Ambil kode_unik dari @ Master Data!G2
+                _ku_all = safe_name
+                try:
+                    import glob as _glob_all
+                    _xlsm_all = _glob_all.glob(os.path.join(folder, "*.xlsm"))
+                    if _xlsm_all:
+                        _xl_all = win32com.client.DispatchEx("Excel.Application")
+                        _xl_all.Visible = False
+                        _wb_all = _xl_all.Workbooks.Open(_xlsm_all[0], ReadOnly=True)
+                        _ku_val = str(_wb_all.Sheets("@ Master Data").Range("G2").Value).strip()
+                        _wb_all.Close(False)
+                        _xl_all.Quit()
+                        if _ku_val and _ku_val not in ("", "None", "null"):
+                            _ku_all = _ku_val
+                except Exception:
+                    pass
+                pdf_path = os.path.join(folder, f"Isi_Reviu_DPP_{_ku_all}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
