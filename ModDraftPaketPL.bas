@@ -552,8 +552,15 @@ Public Sub MuatPenawaranPL()
     Kill outJson
     On Error GoTo 0
 
+    ' JSON kosong [] = penawaran belum masuk, skip diam-diam
+    If Trim(rawJson) = "[]" Or Trim(rawJson) = "" Then
+        Application.StatusBar = "Penawaran PL belum masuk — sheet '6. Penawaran' belum diisi."
+        Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+        Exit Sub
+    End If
+
     ' Cek error dari Python
-    If InStr(rawJson, """error""") > 0 And InStr(rawJson, """peserta""") < 1 Then
+    If InStr(rawJson, """error""") > 0 And InStr(rawJson, """peserta_id""") < 1 Then
         MsgBox "Error scrape: " & rawJson, vbExclamation, "Muat Penawaran PL"
         Exit Sub
     End If
