@@ -588,14 +588,7 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
     ' R9 Jenis Kontrak dari @ Master Data R18
     wsEval.Cells(9, 3).Value = wsMD.Cells(PLR_JENIS_KONTRAK, 3).Value
     ' R10, R11, R12 (Harga Penawaran/Negosiasi/Pembulatan) = manual, skip
-    ' R13 Team Leader: gabung R32 + " — " + R33 + " — " + R34
-    wsEval.Cells(13, 3).Value = CStr(wsMD.Cells(32, 3).Value) & " — " & _
-                                 CStr(wsMD.Cells(33, 3).Value) & " — " & _
-                                 CStr(wsMD.Cells(34, 3).Value)
-    ' R14 Petugas K3: gabung R35 + " — " + R36 + " — " + R37
-    wsEval.Cells(14, 3).Value = CStr(wsMD.Cells(35, 3).Value) & " — " & _
-                                 CStr(wsMD.Cells(36, 3).Value) & " — " & _
-                                 CStr(wsMD.Cells(37, 3).Value)
+    ' R13 Team Leader + R14 Petugas K3 = formula referensi @ Master Data (tidak diisi VBA)
     ' R15 Nama Direktur = manual, skip
     ' R16 No BA Hasil Pengadaan Langsung
     wsEval.Cells(16, 3).Value = no08
