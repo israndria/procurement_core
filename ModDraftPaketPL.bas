@@ -822,6 +822,7 @@ Public Sub IsiEvaluasiPLStandalone()
     End If
 
     IsiEvaluasiPL wsMD, wsEval, item
+    MsgBox "Sheet '@ Evaluasi' berhasil diisi dari Supabase.", vbInformation, "Isi Evaluasi PL"
 
     ' Auto muat harga penawaran dari SPSE → sheet "6. Penawaran"
     MuatPenawaranPL
