@@ -45,7 +45,8 @@ Private Const CELL_SELECTOR As String = "F1"
 '        14=lokasi, 15=sbu_baru, 16=sbu_lama, 17=jabatan_teknis, 18=skk_teknis,
 '        19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
 '        24=mak, 25=nama_penyedia, 26=npwp_penyedia, 27=personil_json, 28=tgl_dokpil, 29=nomor_dokpil, 30=kode_unik
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik"
+'        31=tgl_evaluasi, 32=tgl_negosiasi, 33=tgl_penetapan, 34=nomor_nota_dinas, 35=nomor_rekomendasi, 36=tgl_rekomendasi
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi"
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -447,6 +448,15 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         End If
     End With
 
+    ' Isi sheet @ Evaluasi
+    Dim wsEval As Worksheet
+    On Error Resume Next
+    Set wsEval = ThisWorkbook.Sheets("@ Evaluasi")
+    On Error GoTo 0
+    If Not wsEval Is Nothing Then
+        IsiEvaluasiPL wsMD, wsEval, item
+    End If
+
     ' Konfirmasi
     Dim namaP As String: namaP = Left(Trim(CStr(item(1))), 50)
     MsgBox "Data PL berhasil diisi:" & vbCrLf & vbCrLf & _
@@ -457,6 +467,70 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
            "Cek sheet @ Master Data, lalu isi field yang masih kosong " & vbCrLf & _
            "(Nomor Dokpil, Tanggal, No Undangan, Uraian Singkat).", _
            vbInformation, "Data PL Terisi"
+End Sub
+
+
+' ============================================================
+' ISI SHEET @ Evaluasi: field otomatis dari @ Master Data + Supabase
+' ============================================================
+Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Variant)
+    ' Ambil nomor dokpil dari @ Master Data R20 (sudah diisi IsiMasterDataPL)
+    Dim noDokpil As String: noDokpil = Trim(CStr(wsMD.Cells(PLR_NOMOR_DOKPIL, 3).Value))
+
+    ' Helper: ganti /01/PL/ -> /NN/PL/
+    ' noDokpil contoh: 000.3.3/01/PL/PP-02/BAPLJKK/DPUPR/2026
+
+    Dim no03 As String: no03 = ""
+    Dim no04 As String: no04 = ""
+    Dim no05 As String: no05 = ""
+    Dim no08 As String: no08 = ""
+    If InStr(noDokpil, "/01/PL/") > 0 Then
+        no03 = Replace(noDokpil, "/01/PL/", "/03/PL/")
+        no04 = Replace(noDokpil, "/01/PL/", "/04/PL/")
+        no05 = Replace(noDokpil, "/01/PL/", "/05/PL/")
+        no08 = Replace(noDokpil, "/01/PL/", "/08/PL/")
+    End If
+
+    ' R3 No BA Pembukaan Penawaran
+    wsEval.Cells(3, 3).Value = no03
+    ' R4 Usulan Penyedia = Nama Peserta dari @ Master Data R51
+    wsEval.Cells(4, 3).Value = wsMD.Cells(PLR_NAMA_PESERTA, 3).Value
+    ' R5 No BA Pembuktian Kualifikasi
+    wsEval.Cells(5, 3).Value = no04
+    ' R6 Tanggal Pembuktian Kualifikasi = tgl_negosiasi (item 32)
+    Dim tglNego As String: tglNego = FormatTanggalIndo(CStr(item(32)))
+    wsEval.Cells(6, 3).Value = tglNego
+    ' R7 No BA Klarifikasi & Negosiasi
+    wsEval.Cells(7, 3).Value = no05
+    ' R8 Tanggal Klarifikasi & Negosiasi = sama dg R6
+    wsEval.Cells(8, 3).Value = tglNego
+    ' R9 Jenis Kontrak dari @ Master Data R18
+    wsEval.Cells(9, 3).Value = wsMD.Cells(PLR_JENIS_KONTRAK, 3).Value
+    ' R10, R11, R12 (Harga Penawaran/Negosiasi/Pembulatan) = manual, skip
+    ' R13 Team Leader: gabung R32 + " — " + R33 + " — " + R34
+    wsEval.Cells(13, 3).Value = CStr(wsMD.Cells(32, 3).Value) & " — " & _
+                                 CStr(wsMD.Cells(33, 3).Value) & " — " & _
+                                 CStr(wsMD.Cells(34, 3).Value)
+    ' R14 Petugas K3: gabung R35 + " — " + R36 + " — " + R37
+    wsEval.Cells(14, 3).Value = CStr(wsMD.Cells(35, 3).Value) & " — " & _
+                                 CStr(wsMD.Cells(36, 3).Value) & " — " & _
+                                 CStr(wsMD.Cells(37, 3).Value)
+    ' R15 Nama Direktur = manual, skip
+    ' R16 No BA Hasil Pengadaan Langsung
+    wsEval.Cells(16, 3).Value = no08
+    ' R17 Tanggal BA Hasil = tgl_penetapan (item 33)
+    wsEval.Cells(17, 3).Value = FormatTanggalIndo(CStr(item(33)))
+    ' R18 Nomor Nota Dinas (item 34)
+    wsEval.Cells(18, 3).Value = CStr(item(34))
+    ' R19 Tanggal Nota Dinas = tgl_rekomendasi (item 36) — nota dinas diterbitkan bersamaan rekom
+    wsEval.Cells(19, 3).Value = FormatTanggalIndo(CStr(item(36)))
+    ' R20 Nomor Surat Rekomendasi (item 35)
+    wsEval.Cells(20, 3).Value = CStr(item(35))
+    ' R21 Alamat UKPBJ: lookup master_dinas WHERE nama_dinas ilike '%UKPBJ%'
+    Dim alamatUKPBJ As String: alamatUKPBJ = LookupAlamatPP("UKPBJ")
+    If alamatUKPBJ <> "" And alamatUKPBJ <> "null" Then
+        wsEval.Cells(21, 3).Value = alamatUKPBJ
+    End If
 End Sub
 
 
@@ -531,7 +605,7 @@ Private Function ParsePLJSON(json As String) As Collection
 
         Dim obj As String: obj = Mid(json, braceStart, braceEnd - braceStart + 1)
 
-        Dim item(30) As Variant
+        Dim item(36) As Variant
         item(0)  = ExtractJSONValPL(obj, "kode_paket")
         item(1)  = ExtractJSONValPL(obj, "nama_paket")
         item(2)  = ExtractJSONValPL(obj, "satker")
@@ -563,6 +637,12 @@ Private Function ParsePLJSON(json As String) As Collection
         item(28) = ExtractJSONValPL(obj, "tgl_dokpil")
         item(29) = ExtractJSONValPL(obj, "nomor_dokpil")
         item(30) = ExtractJSONValPL(obj, "kode_unik")
+        item(31) = ExtractJSONValPL(obj, "tgl_evaluasi")
+        item(32) = ExtractJSONValPL(obj, "tgl_negosiasi")
+        item(33) = ExtractJSONValPL(obj, "tgl_penetapan")
+        item(34) = ExtractJSONValPL(obj, "nomor_nota_dinas")
+        item(35) = ExtractJSONValPL(obj, "nomor_rekomendasi")
+        item(36) = ExtractJSONValPL(obj, "tgl_rekomendasi")
 
         col.Add item
         pos = braceEnd + 1
