@@ -46,7 +46,7 @@ Private Const CELL_SELECTOR As String = "F1"
 '        19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
 '        24=mak, 25=nama_penyedia, 26=npwp_penyedia, 27=personil_json, 28=tgl_dokpil, 29=nomor_dokpil, 30=kode_unik
 '        31=tgl_evaluasi, 32=tgl_negosiasi, 33=tgl_penetapan, 34=nomor_nota_dinas, 35=nomor_rekomendasi, 36=tgl_rekomendasi
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi"
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan"
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -967,7 +967,7 @@ Private Function ParsePLJSON(json As String) As Collection
 
         Dim obj As String: obj = Mid(json, braceStart, braceEnd - braceStart + 1)
 
-        Dim item(36) As Variant
+        Dim item(37) As Variant
         item(0)  = ExtractJSONValPL(obj, "kode_paket")
         item(1)  = ExtractJSONValPL(obj, "nama_paket")
         item(2)  = ExtractJSONValPL(obj, "satker")
@@ -1005,6 +1005,7 @@ Private Function ParsePLJSON(json As String) As Collection
         item(34) = ExtractJSONValPL(obj, "nomor_nota_dinas")
         item(35) = ExtractJSONValPL(obj, "nomor_rekomendasi")
         item(36) = ExtractJSONValPL(obj, "tgl_rekomendasi")
+        item(37) = ExtractJSONValPL(obj, "tgl_pembukaan")
 
         col.Add item
         pos = braceEnd + 1
