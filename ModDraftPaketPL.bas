@@ -889,6 +889,14 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
         wsEval.Cells(40, 3).Value = alamatUKPBJ
     End If
     ' R41 Alamat Perusahaan → manual, skip
+    ' R42 Nomor BA Pengantar = no09 (turunan noDokpil)
+    Dim no09 As String: no09 = ""
+    If InStr(noDokpil, "/01/PL/") > 0 Then
+        no09 = Replace(noDokpil, "/01/PL/", "/09/PL/")
+    End If
+    wsEval.Cells(42, 3).Value = no09
+    ' R43 Tanggal Lengkap BA Pengantar = tgl_penetapan (item 33), format "Rabu, 03 Juni 2026"
+    wsEval.Cells(43, 3).Value = FormatTanggalLengkap(CStr(item(33)))
 End Sub
 
 
@@ -1817,6 +1825,35 @@ Private Function FormatTanggalIndo(tglISO As String) As String
     On Error GoTo 0
     If idx >= 0 And idx <= 11 Then bulan = bulanArr(idx)
     FormatTanggalIndo = hari & " " & bulan & " " & tahun
+End Function
+
+
+Private Function FormatTanggalLengkap(tglISO As String) As String
+    ' "2026-06-03" → "Rabu, 03 Juni 2026"
+    FormatTanggalLengkap = tglISO
+    If Len(tglISO) < 10 Then Exit Function
+    Dim parts() As String
+    parts = Split(Left(tglISO, 10), "-")
+    If UBound(parts) < 2 Then Exit Function
+    Dim tahun As String, bulan As String, hari As String
+    tahun = parts(0): hari = parts(2)
+    Dim bulanArr As Variant
+    bulanArr = Array("Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember")
+    Dim idxBulan As Long
+    On Error Resume Next
+    idxBulan = CLng(parts(1)) - 1
+    On Error GoTo 0
+    If idxBulan >= 0 And idxBulan <= 11 Then bulan = bulanArr(idxBulan)
+    ' Hitung nama hari menggunakan DateSerial
+    Dim dt As Date
+    On Error Resume Next
+    dt = DateSerial(CLng(tahun), CLng(parts(1)), CLng(hari))
+    On Error GoTo 0
+    Dim hariArr As Variant
+    hariArr = Array("Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu")
+    Dim namaHari As String
+    namaHari = hariArr(Weekday(dt) - 1)
+    FormatTanggalLengkap = namaHari & ", " & hari & " " & bulan & " " & tahun
 End Function
 
 
