@@ -504,9 +504,10 @@ Public Sub MuatPenawaranPL()
         Exit Sub
     End If
 
-    ' Tentukan path script: ada di Asisten_Pokja di atas V19_Scheduler
+    ' Tentukan path script: Asisten_Pokja sejajar V19_Scheduler
+    ' scriptDir = {root}\V19_Scheduler\WPy64-313110 → naik 2 level → {root}
     Dim asDir As String
-    asDir = ParentDir(scriptDir) & "\Asisten_Pokja"
+    asDir = ParentDir(ParentDir(scriptDir)) & "\Asisten_Pokja"
     If Dir(asDir, vbDirectory) = "" Then
         MsgBox "Folder Asisten_Pokja tidak ditemukan:" & vbCrLf & asDir, vbCritical, "Muat Penawaran PL"
         Exit Sub
