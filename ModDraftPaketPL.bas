@@ -857,43 +857,38 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
     ' R4  Tanggal Pembukaan Penawaran = tgl_pembukaan (item 37) dari GCal T2
     Dim tglPembukaan As String: tglPembukaan = FormatTanggalIndo(CStr(item(37)))
     If tglPembukaan <> "" Then wsEval.Cells(4, 3).Value = tglPembukaan
-    ' R5  Hari        = formula =LEFT(C4,2)          → tidak diisi VBA
-    ' R6  Terbilang   = formula =terbilang(C5)        → tidak diisi VBA
-    ' R7  Bulan       = formula =TRIM(MID(...))        → tidak diisi VBA
-    ' R8  Tahun       = formula =RIGHT(C4,4)           → tidak diisi VBA
-    ' R9  No BA Pembuktian Kualifikasi
-    wsEval.Cells(9, 3).Value = no04
-    ' R10 Tanggal Pembuktian Kualifikasi = tgl_negosiasi (item 32)
+    ' R5 =LEFT(C4,2) / R6 CHOOSE(WEEKDAY) / R7 =terbilang(C5) / R8 =TRIM(MID) / R9 =RIGHT(C4,4) → formula, skip
+    ' R10 No BA Pembuktian Kualifikasi
+    wsEval.Cells(10, 3).Value = no04
+    ' R11 Tanggal Pembuktian Kualifikasi = tgl_negosiasi (item 32)
     Dim tglNego As String: tglNego = FormatTanggalIndo(CStr(item(32)))
-    wsEval.Cells(10, 3).Value = tglNego
-    ' R11 Hari / R12 Terbilang / R13 Bulan / R14 Tahun = formula → skip
-    ' R15 No BA Klarifikasi & Negosiasi
-    wsEval.Cells(15, 3).Value = no05
-    ' R16 Tanggal Klarifikasi & Negosiasi = sama dg tglNego
-    wsEval.Cells(16, 3).Value = tglNego
-    ' R17 Hari / R18 Terbilang / R19 Bulan / R20 Tahun = formula → skip
-    ' R21 Jenis Kontrak = formula @ Master Data → skip
-    ' R22 Harga Penawaran = manual → skip
-    ' R23 Harga Negosiasi = manual → skip
-    ' R24 Harga Pembulatan = manual → skip
-    ' R25 Team Leader / R26 Petugas K3 = formula → skip
-    ' R27 Nama Direktur = manual → skip
-    ' R28 No BA Hasil Pengadaan Langsung
-    wsEval.Cells(28, 3).Value = no08
-    ' R29 Tanggal BA Hasil = tgl_penetapan (item 33)
-    wsEval.Cells(29, 3).Value = FormatTanggalIndo(CStr(item(33)))
-    ' R30 Hari / R31 Terbilang / R32 Bulan = formula → skip
-    ' R33 Nomor Nota Dinas (item 34)
-    wsEval.Cells(33, 3).Value = CStr(item(34))
-    ' R34 Tanggal Nota Dinas = tgl_rekomendasi (item 36)
-    wsEval.Cells(34, 3).Value = FormatTanggalIndo(CStr(item(36)))
-    ' R35 Nomor Surat Rekomendasi (item 35)
-    wsEval.Cells(35, 3).Value = CStr(item(35))
-    ' R36 Alamat UKPBJ
+    wsEval.Cells(11, 3).Value = tglNego
+    ' R12-R16 formula turunan → skip
+    ' R17 No BA Klarifikasi & Negosiasi
+    wsEval.Cells(17, 3).Value = no05
+    ' R18 Tanggal Klarifikasi & Negosiasi = tglNego
+    wsEval.Cells(18, 3).Value = tglNego
+    ' R19-R23 formula turunan / R24 Jenis Kontrak (formula MD) → skip
+    ' R25 Harga Penawaran / R26 Harga Negosiasi / R27 Harga Pembulatan → manual, skip
+    ' R28 Team Leader / R29 Petugas K3 → formula → skip
+    ' R30 Nama Direktur → manual, skip
+    ' R31 No BA Hasil Pengadaan Langsung
+    wsEval.Cells(31, 3).Value = no08
+    ' R32 Tanggal BA Hasil = tgl_penetapan (item 33)
+    wsEval.Cells(32, 3).Value = FormatTanggalIndo(CStr(item(33)))
+    ' R33 =LEFT(C32,2) / R34 CHOOSE(WEEKDAY) / R35 =terbilang(C33) / R36 =TRIM(MID(C32)) → formula, skip
+    ' R37 Nomor Nota Dinas (item 34)
+    wsEval.Cells(37, 3).Value = CStr(item(34))
+    ' R38 Tanggal Nota Dinas = tgl_rekomendasi (item 36)
+    wsEval.Cells(38, 3).Value = FormatTanggalIndo(CStr(item(36)))
+    ' R39 Nomor Surat Rekomendasi (item 35)
+    wsEval.Cells(39, 3).Value = CStr(item(35))
+    ' R40 Alamat UKPBJ
     Dim alamatUKPBJ As String: alamatUKPBJ = LookupAlamatPP("UKPBJ")
     If alamatUKPBJ <> "" And alamatUKPBJ <> "null" Then
-        wsEval.Cells(36, 3).Value = alamatUKPBJ
+        wsEval.Cells(40, 3).Value = alamatUKPBJ
     End If
+    ' R41 Alamat Perusahaan → manual, skip
 End Sub
 
 
