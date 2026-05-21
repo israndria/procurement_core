@@ -771,7 +771,7 @@ Public Sub IsiEvaluasiPLStandalone()
     Dim url As String
     url = SB_URL & "/rest/v1/draft_paket_pl" & _
           "?kode_paket=eq." & kodePaket & _
-          "&select=tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,nomor_dokpil,jenis_kontrak,nama_penyedia,personil_json"
+          "&select=tgl_pembukaan,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,nomor_dokpil,jenis_kontrak,nama_penyedia,personil_json"
 
     Dim http As Object
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
@@ -798,7 +798,8 @@ Public Sub IsiEvaluasiPLStandalone()
     ' item(6)=jenis_kontrak, item(25)=nama_penyedia, item(27)=personil_json
     ' item(29)=nomor_dokpil, item(32)=tgl_negosiasi, item(33)=tgl_penetapan
     ' item(34)=nomor_nota_dinas, item(35)=nomor_rekomendasi, item(36)=tgl_rekomendasi
-    Dim item(36) As Variant
+    ' item(37)=tgl_pembukaan
+    Dim item(37) As Variant
     item(6)  = ExtractJSONValPL(json, "jenis_kontrak")
     item(25) = ExtractJSONValPL(json, "nama_penyedia")
     item(27) = ExtractJSONValPL(json, "personil_json")
@@ -808,6 +809,7 @@ Public Sub IsiEvaluasiPLStandalone()
     item(34) = ExtractJSONValPL(json, "nomor_nota_dinas")
     item(35) = ExtractJSONValPL(json, "nomor_rekomendasi")
     item(36) = ExtractJSONValPL(json, "tgl_rekomendasi")
+    item(37) = ExtractJSONValPL(json, "tgl_pembukaan")
 
     ' Cek sheet @ Evaluasi
     Dim wsEval As Worksheet
@@ -849,36 +851,47 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
         no08 = Replace(noDokpil, "/01/PL/", "/08/PL/")
     End If
 
-    ' R3 No BA Pembukaan Penawaran
+    ' R3  No BA Pembukaan Penawaran
     wsEval.Cells(3, 3).Value = no03
-    ' R4 Usulan Penyedia = formula @ Master Data
-    ' R5 No BA Pembuktian Kualifikasi
-    wsEval.Cells(5, 3).Value = no04
-    ' R6 Tanggal Pembuktian Kualifikasi = tgl_negosiasi (item 32)
+    ' R4  Tanggal Pembukaan Penawaran = tgl_pembukaan (item 37) dari GCal T2
+    Dim tglPembukaan As String: tglPembukaan = FormatTanggalIndo(CStr(item(37)))
+    If tglPembukaan <> "" Then wsEval.Cells(4, 3).Value = tglPembukaan
+    ' R5  Hari        = formula =LEFT(C4,2)          → tidak diisi VBA
+    ' R6  Terbilang   = formula =terbilang(C5)        → tidak diisi VBA
+    ' R7  Bulan       = formula =TRIM(MID(...))        → tidak diisi VBA
+    ' R8  Tahun       = formula =RIGHT(C4,4)           → tidak diisi VBA
+    ' R9  No BA Pembuktian Kualifikasi
+    wsEval.Cells(9, 3).Value = no04
+    ' R10 Tanggal Pembuktian Kualifikasi = tgl_negosiasi (item 32)
     Dim tglNego As String: tglNego = FormatTanggalIndo(CStr(item(32)))
-    wsEval.Cells(6, 3).Value = tglNego
-    ' R7 No BA Klarifikasi & Negosiasi
-    wsEval.Cells(7, 3).Value = no05
-    ' R8 Tanggal Klarifikasi & Negosiasi = sama dg R6
-    wsEval.Cells(8, 3).Value = tglNego
-    ' R9 Jenis Kontrak = formula @ Master Data
-    ' R10, R11, R12 (Harga Penawaran/Negosiasi/Pembulatan) = manual, skip
-    ' R13 Team Leader + R14 Petugas K3 = formula referensi @ Master Data (tidak diisi VBA)
-    ' R15 Nama Direktur = manual, skip
-    ' R16 No BA Hasil Pengadaan Langsung
-    wsEval.Cells(16, 3).Value = no08
-    ' R17 Tanggal BA Hasil = tgl_penetapan (item 33)
-    wsEval.Cells(17, 3).Value = FormatTanggalIndo(CStr(item(33)))
-    ' R18 Nomor Nota Dinas (item 34)
-    wsEval.Cells(18, 3).Value = CStr(item(34))
-    ' R19 Tanggal Nota Dinas = tgl_rekomendasi (item 36) — nota dinas diterbitkan bersamaan rekom
-    wsEval.Cells(19, 3).Value = FormatTanggalIndo(CStr(item(36)))
-    ' R20 Nomor Surat Rekomendasi (item 35)
-    wsEval.Cells(20, 3).Value = CStr(item(35))
-    ' R21 Alamat UKPBJ: lookup master_dinas WHERE nama_dinas ilike '%UKPBJ%'
+    wsEval.Cells(10, 3).Value = tglNego
+    ' R11 Hari / R12 Terbilang / R13 Bulan / R14 Tahun = formula → skip
+    ' R15 No BA Klarifikasi & Negosiasi
+    wsEval.Cells(15, 3).Value = no05
+    ' R16 Tanggal Klarifikasi & Negosiasi = sama dg tglNego
+    wsEval.Cells(16, 3).Value = tglNego
+    ' R17 Hari / R18 Terbilang / R19 Bulan / R20 Tahun = formula → skip
+    ' R21 Jenis Kontrak = formula @ Master Data → skip
+    ' R22 Harga Penawaran = manual → skip
+    ' R23 Harga Negosiasi = manual → skip
+    ' R24 Harga Pembulatan = manual → skip
+    ' R25 Team Leader / R26 Petugas K3 = formula → skip
+    ' R27 Nama Direktur = manual → skip
+    ' R28 No BA Hasil Pengadaan Langsung
+    wsEval.Cells(28, 3).Value = no08
+    ' R29 Tanggal BA Hasil = tgl_penetapan (item 33)
+    wsEval.Cells(29, 3).Value = FormatTanggalIndo(CStr(item(33)))
+    ' R30 Hari / R31 Terbilang / R32 Bulan = formula → skip
+    ' R33 Nomor Nota Dinas (item 34)
+    wsEval.Cells(33, 3).Value = CStr(item(34))
+    ' R34 Tanggal Nota Dinas = tgl_rekomendasi (item 36)
+    wsEval.Cells(34, 3).Value = FormatTanggalIndo(CStr(item(36)))
+    ' R35 Nomor Surat Rekomendasi (item 35)
+    wsEval.Cells(35, 3).Value = CStr(item(35))
+    ' R36 Alamat UKPBJ
     Dim alamatUKPBJ As String: alamatUKPBJ = LookupAlamatPP("UKPBJ")
     If alamatUKPBJ <> "" And alamatUKPBJ <> "null" Then
-        wsEval.Cells(21, 3).Value = alamatUKPBJ
+        wsEval.Cells(36, 3).Value = alamatUKPBJ
     End If
 End Sub
 
