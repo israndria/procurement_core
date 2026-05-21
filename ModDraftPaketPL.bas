@@ -475,6 +475,276 @@ End Sub
 ' ============================================================
 
 ' ============================================================
+' MUAT PENAWARAN PL: scrape harga penawaran dari SPSE → isi sheet "6. Penawaran"
+' Dipanggil dari IsiEvaluasiPLStandalone (dan bisa standalone juga)
+' ============================================================
+Public Sub MuatPenawaranPL()
+    Dim wsMD As Worksheet
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+    Dim kodePaket As String
+    kodePaket = Trim(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))
+    If kodePaket = "" Then
+        MsgBox "Kode Paket (C3) kosong. Klik 'Isi Data PL' terlebih dahulu.", vbExclamation, "Muat Penawaran PL"
+        Exit Sub
+    End If
+
+    ' Cek sheet "6. Penawaran"
+    Dim wsPen As Worksheet
+    On Error Resume Next
+    Set wsPen = ThisWorkbook.Sheets("6. Penawaran")
+    On Error GoTo 0
+    If wsPen Is Nothing Then
+        MsgBox "Sheet '6. Penawaran' tidak ditemukan di workbook ini.", vbCritical, "Muat Penawaran PL"
+        Exit Sub
+    End If
+
+    Dim scriptDir As String: scriptDir = ScriptDirPL()
+    If scriptDir = "" Then
+        MsgBox "Python tidak ditemukan.", vbCritical, "Muat Penawaran PL"
+        Exit Sub
+    End If
+
+    ' Tentukan path script: ada di Asisten_Pokja di atas V19_Scheduler
+    Dim asDir As String
+    asDir = ParentDir(scriptDir) & "\Asisten_Pokja"
+    If Dir(asDir, vbDirectory) = "" Then
+        MsgBox "Folder Asisten_Pokja tidak ditemukan:" & vbCrLf & asDir, vbCritical, "Muat Penawaran PL"
+        Exit Sub
+    End If
+
+    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+    Dim pyScript As String: pyScript = asDir & "\muat_penawaran_pl.py"
+    Dim outJson As String: outJson = scriptDir & "\_penawaran_pl_" & kodePaket & ".json"
+
+    ' Jalankan Python scraper (sync/blocking)
+    Dim cmd As String
+    cmd = Chr(34) & pyExe & Chr(34) & " " & _
+          Chr(34) & pyScript & Chr(34) & " " & _
+          Chr(34) & kodePaket & Chr(34) & " " & _
+          Chr(34) & outJson & Chr(34)
+
+    Application.StatusBar = "Mengambil harga penawaran PL " & kodePaket & " dari SPSE ..."
+    Dim wsh As Object: Set wsh = CreateObject("WScript.Shell")
+    Dim rc As Long
+    rc = wsh.Run(cmd, 0, True)
+    Set wsh = Nothing
+    Application.StatusBar = False
+
+    If rc <> 0 Or Dir(outJson) = "" Then
+        MsgBox "Gagal scrape harga penawaran PL. Pastikan SPSE terbuka di browser.", vbExclamation, "Muat Penawaran PL"
+        Exit Sub
+    End If
+
+    ' Baca JSON
+    Dim fNum As Integer: fNum = FreeFile
+    Dim rawJson As String: rawJson = ""
+    Open outJson For Input As #fNum
+    Dim line As String
+    Do While Not EOF(fNum)
+        Line Input #fNum, line
+        rawJson = rawJson & line
+    Loop
+    Close #fNum
+
+    ' Hapus file temp
+    On Error Resume Next
+    Kill outJson
+    On Error GoTo 0
+
+    ' Cek error dari Python
+    If InStr(rawJson, """error""") > 0 And InStr(rawJson, """peserta""") < 1 Then
+        MsgBox "Error scrape: " & rawJson, vbExclamation, "Muat Penawaran PL"
+        Exit Sub
+    End If
+
+    ' --- Isi sheet "6. Penawaran" ---
+    ' Unprotect dulu
+    On Error Resume Next
+    wsPen.Unprotect "pokja2026"
+    On Error GoTo 0
+
+    ' Cari jumlah peserta dalam JSON array
+    ' Format: [{"peserta_id":...},{"peserta_id":...}]
+    ' Tulis baris header + data per peserta
+
+    ' Hapus konten lama (baris 2 ke bawah, biarkan baris 1 header)
+    Dim lastRow As Long
+    lastRow = wsPen.Cells(wsPen.Rows.Count, 1).End(xlUp).Row
+    If lastRow > 1 Then
+        wsPen.Rows("2:" & lastRow).Delete
+    End If
+
+    ' Parse peserta array manual — ekstrak tiap blok peserta
+    ' Setiap peserta: {..."nama_peserta":"...",...,"items":[...],"total_penawaran":...}
+    Dim pesertaArr() As String
+    Dim nPeserta As Integer
+
+    ' Cari semua blok peserta dengan split pada "peserta_id"
+    Dim currRow As Long: currRow = 2
+    Dim iP As Integer
+
+    ' Iterasi peserta via ExtractJSONValPL per blok
+    ' Gunakan simple approach: split by "},{" pada level teratas
+    ' Karena nested (items array), pakai BracketDepthSplit
+    Dim pesertaBlocks() As String
+    pesertaBlocks = SplitTopLevelJSON(rawJson)
+
+    For iP = 0 To UBound(pesertaBlocks)
+        Dim blok As String: blok = Trim(pesertaBlocks(iP))
+        If blok = "" Or blok = "[]" Then GoTo NextPeserta
+
+        Dim namaPeserta As String: namaPeserta = ExtractJSONValPL("[" & blok & "]", "nama_peserta")
+        Dim totalPen As String: totalPen = ExtractJSONValPL("[" & blok & "]", "total_penawaran")
+
+        ' Header baris nama peserta (merge visual via bold)
+        wsPen.Cells(currRow, 1).Value = namaPeserta
+        wsPen.Cells(currRow, 1).Font.Bold = True
+        wsPen.Cells(currRow, 9).Value = CDbl(totalPen)
+        currRow = currRow + 1
+
+        ' Parse items array
+        Dim itemsStart As Long: itemsStart = InStr(blok, """items""")
+        If itemsStart = 0 Then GoTo NextPeserta
+
+        Dim itemsJson As String
+        itemsJson = Mid(blok, itemsStart + 8)  ' lewati "items":
+        ' Temukan [ ... ] di sini
+        Dim bracketS As Long: bracketS = InStr(itemsJson, "[")
+        If bracketS = 0 Then GoTo NextPeserta
+        Dim bracketE As Long
+        bracketE = FindMatchingBracketPL(itemsJson, bracketS, "[", "]")
+        itemsJson = Mid(itemsJson, bracketS, bracketE - bracketS + 1)
+
+        ' Split item array
+        Dim itemBlocks() As String
+        itemBlocks = SplitTopLevelJSON(itemsJson)
+
+        Dim iItem As Integer
+        For iItem = 0 To UBound(itemBlocks)
+            Dim ib As String: ib = Trim(itemBlocks(iItem))
+            If ib = "" Or ib = "{}" Then GoTo NextItem
+            Dim iWrap As String: iWrap = "[" & ib & "]"
+
+            Dim jenisBJ  As String: jenisBJ  = ExtractJSONValPL(iWrap, "jenis_bj")
+            Dim satuan   As String: satuan   = ExtractJSONValPL(iWrap, "satuan")
+            Dim volS     As String: volS     = ExtractJSONValPL(iWrap, "vol")
+            Dim hargaS   As String: hargaS   = ExtractJSONValPL(iWrap, "harga_satuan")
+            Dim sblPajS  As String: sblPajS  = ExtractJSONValPL(iWrap, "total_sbl_pajak")
+            Dim pajPctS  As String: pajPctS  = ExtractJSONValPL(iWrap, "pajak_pct")
+            Dim stlhPajS As String: stlhPajS = ExtractJSONValPL(iWrap, "total_stlh_pajak")
+
+            Dim vol As Double:      vol     = Val(volS)
+            Dim harga As Double:    harga   = Val(hargaS)
+            Dim sblPaj As Double:   sblPaj  = Val(sblPajS)
+            Dim pajPct As Double:   pajPct  = Val(pajPctS)
+            Dim stlhPaj As Double:  stlhPaj = Val(stlhPajS)
+
+            ' 9 kolom: No | Jenis BJ | Satuan | Vol | Harga Satuan | Total sbl Pajak | Pajak% | Total stlh Pajak | Selisih HPS
+            wsPen.Cells(currRow, 1).Value = iItem + 1
+            wsPen.Cells(currRow, 2).Value = jenisBJ
+            wsPen.Cells(currRow, 3).Value = satuan
+            wsPen.Cells(currRow, 4).Value = vol
+            wsPen.Cells(currRow, 5).Value = harga
+            wsPen.Cells(currRow, 6).Value = sblPaj
+            wsPen.Cells(currRow, 7).Value = pajPct
+            wsPen.Cells(currRow, 8).Value = stlhPaj
+            ' Kolom 9 (Selisih HPS) dikosongkan — user bisa buat formula manual
+            currRow = currRow + 1
+NextItem:
+        Next iItem
+
+        ' Baris total peserta
+        wsPen.Cells(currRow, 7).Value = "Total:"
+        wsPen.Cells(currRow, 7).Font.Bold = True
+        wsPen.Cells(currRow, 8).Value = CDbl(totalPen)
+        wsPen.Cells(currRow, 8).Font.Bold = True
+        currRow = currRow + 1
+
+NextPeserta:
+    Next iP
+
+    MsgBox "Sheet '6. Penawaran' berhasil diisi.", vbInformation, "Muat Penawaran PL"
+End Sub
+
+
+Private Function ParentDir(path As String) As String
+    Dim parts() As String: parts = Split(path, "\")
+    ReDim Preserve parts(UBound(parts) - 1)
+    ParentDir = Join(parts, "\")
+End Function
+
+
+Private Function FindMatchingBracketPL(s As String, startPos As Long, openChar As String, closeChar As String) As Long
+    Dim depth As Integer: depth = 0
+    Dim i As Long
+    For i = startPos To Len(s)
+        Dim c As String: c = Mid(s, i, 1)
+        If c = openChar Then
+            depth = depth + 1
+        ElseIf c = closeChar Then
+            depth = depth - 1
+            If depth = 0 Then
+                FindMatchingBracketPL = i
+                Exit Function
+            End If
+        End If
+    Next i
+    FindMatchingBracketPL = Len(s)
+End Function
+
+
+Private Function SplitTopLevelJSON(s As String) As String()
+    ' Split "[{...},{...}]" menjadi array of "{...}"
+    ' Sadar akan nested brackets/braces
+    Dim result() As String
+    Dim count As Integer: count = 0
+    ReDim result(0)
+
+    ' Trim outer [ ]
+    Dim inner As String: inner = Trim(s)
+    If Left(inner, 1) = "[" Then inner = Mid(inner, 2)
+    If Right(inner, 1) = "]" Then inner = Left(inner, Len(inner) - 1)
+    inner = Trim(inner)
+    If inner = "" Then
+        result(0) = ""
+        SplitTopLevelJSON = result
+        Exit Function
+    End If
+
+    Dim depth As Integer: depth = 0
+    Dim startIdx As Long: startIdx = 1
+    Dim i As Long
+
+    For i = 1 To Len(inner)
+        Dim c As String: c = Mid(inner, i, 1)
+        If c = "{" Or c = "[" Then
+            depth = depth + 1
+        ElseIf c = "}" Or c = "]" Then
+            depth = depth - 1
+            If depth = 0 Then
+                ReDim Preserve result(count)
+                result(count) = Mid(inner, startIdx, i - startIdx + 1)
+                count = count + 1
+                ' Skip comma
+                If i < Len(inner) And Mid(inner, i + 1, 1) = "," Then
+                    startIdx = i + 2
+                Else
+                    startIdx = i + 1
+                End If
+            End If
+        End If
+    Next i
+
+    If count = 0 Then
+        ReDim result(0)
+        result(0) = ""
+    End If
+
+    SplitTopLevelJSON = result
+End Function
+
+
+' ============================================================
 ' ISI EVALUASI PL (PUBLIC): dipanggil tombol @ Master Data
 ' Fetch ulang 6 kolom evaluasi dari Supabase berdasar C3 (kode_paket)
 ' ============================================================
@@ -543,10 +813,9 @@ Public Sub IsiEvaluasiPLStandalone()
 
     IsiEvaluasiPL wsMD, wsEval, item
 
-    MsgBox "Sheet @ Evaluasi berhasil diisi!" & vbCrLf & vbCrLf & _
-           "Lengkapi manual: Harga Penawaran (R10), Harga Negosiasi (R11), " & _
-           "Harga Pembulatan (R12), Nama Direktur (R15).", _
-           vbInformation, "Isi Evaluasi PL"
+    ' Auto muat harga penawaran dari SPSE → sheet "6. Penawaran"
+    MuatPenawaranPL
+
     Exit Sub
 
 ErrFetch:
@@ -574,8 +843,7 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
 
     ' R3 No BA Pembukaan Penawaran
     wsEval.Cells(3, 3).Value = no03
-    ' R4 Usulan Penyedia = Nama Peserta dari @ Master Data R51
-    wsEval.Cells(4, 3).Value = wsMD.Cells(PLR_NAMA_PESERTA, 3).Value
+    ' R4 Usulan Penyedia = formula @ Master Data
     ' R5 No BA Pembuktian Kualifikasi
     wsEval.Cells(5, 3).Value = no04
     ' R6 Tanggal Pembuktian Kualifikasi = tgl_negosiasi (item 32)
@@ -585,8 +853,7 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
     wsEval.Cells(7, 3).Value = no05
     ' R8 Tanggal Klarifikasi & Negosiasi = sama dg R6
     wsEval.Cells(8, 3).Value = tglNego
-    ' R9 Jenis Kontrak dari @ Master Data R18
-    wsEval.Cells(9, 3).Value = wsMD.Cells(PLR_JENIS_KONTRAK, 3).Value
+    ' R9 Jenis Kontrak = formula @ Master Data
     ' R10, R11, R12 (Harga Penawaran/Negosiasi/Pembulatan) = manual, skip
     ' R13 Team Leader + R14 Petugas K3 = formula referensi @ Master Data (tidak diisi VBA)
     ' R15 Nama Direktur = manual, skip
