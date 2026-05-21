@@ -473,6 +473,87 @@ End Sub
 ' ============================================================
 ' ISI SHEET @ Evaluasi: field otomatis dari @ Master Data + Supabase
 ' ============================================================
+
+' ============================================================
+' ISI EVALUASI PL (PUBLIC): dipanggil tombol @ Master Data
+' Fetch ulang 6 kolom evaluasi dari Supabase berdasar C3 (kode_paket)
+' ============================================================
+Public Sub IsiEvaluasiPLStandalone()
+    Dim wsMD As Worksheet
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+
+    Dim kodePaket As String
+    kodePaket = Trim(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))
+    If kodePaket = "" Then
+        MsgBox "Kode Paket (C3) kosong. Klik 'Isi Data PL' terlebih dahulu.", vbExclamation, "Isi Evaluasi PL"
+        Exit Sub
+    End If
+
+    ' Fetch 6 kolom evaluasi + nomor dokpil + kode_unik + personil_json
+    Dim url As String
+    url = SB_URL & "/rest/v1/draft_paket_pl" & _
+          "?kode_paket=eq." & kodePaket & _
+          "&select=tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,nomor_dokpil,jenis_kontrak,nama_penyedia,personil_json"
+
+    Dim http As Object
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    On Error GoTo ErrFetch
+    http.Open "GET", url, False
+    http.SetTimeouts 5000, 5000, 15000, 15000
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+
+    If http.Status <> 200 Then
+        MsgBox "Fetch Supabase gagal: HTTP " & http.Status, vbExclamation, "Isi Evaluasi PL"
+        Exit Sub
+    End If
+
+    Dim json As String: json = http.ResponseText
+    If json = "[]" Or json = "" Then
+        MsgBox "Data paket tidak ditemukan di Supabase: " & kodePaket, vbExclamation, "Isi Evaluasi PL"
+        Exit Sub
+    End If
+
+    ' Buat item dummy hanya untuk field yang dibutuhkan IsiEvaluasiPL
+    ' item(6)=jenis_kontrak, item(25)=nama_penyedia, item(27)=personil_json
+    ' item(29)=nomor_dokpil, item(32)=tgl_negosiasi, item(33)=tgl_penetapan
+    ' item(34)=nomor_nota_dinas, item(35)=nomor_rekomendasi, item(36)=tgl_rekomendasi
+    Dim item(36) As Variant
+    item(6)  = ExtractJSONValPL(json, "jenis_kontrak")
+    item(25) = ExtractJSONValPL(json, "nama_penyedia")
+    item(27) = ExtractJSONValPL(json, "personil_json")
+    item(29) = ExtractJSONValPL(json, "nomor_dokpil")
+    item(32) = ExtractJSONValPL(json, "tgl_negosiasi")
+    item(33) = ExtractJSONValPL(json, "tgl_penetapan")
+    item(34) = ExtractJSONValPL(json, "nomor_nota_dinas")
+    item(35) = ExtractJSONValPL(json, "nomor_rekomendasi")
+    item(36) = ExtractJSONValPL(json, "tgl_rekomendasi")
+
+    ' Cek sheet @ Evaluasi
+    Dim wsEval As Worksheet
+    On Error Resume Next
+    Set wsEval = ThisWorkbook.Sheets("@ Evaluasi")
+    On Error GoTo ErrFetch
+    If wsEval Is Nothing Then
+        MsgBox "Sheet '@ Evaluasi' tidak ditemukan di workbook ini.", vbCritical, "Isi Evaluasi PL"
+        Exit Sub
+    End If
+
+    IsiEvaluasiPL wsMD, wsEval, item
+
+    MsgBox "Sheet @ Evaluasi berhasil diisi!" & vbCrLf & vbCrLf & _
+           "Lengkapi manual: Harga Penawaran (R10), Harga Negosiasi (R11), " & _
+           "Harga Pembulatan (R12), Nama Direktur (R15).", _
+           vbInformation, "Isi Evaluasi PL"
+    Exit Sub
+
+ErrFetch:
+    MsgBox "Error IsiEvaluasiPLStandalone: " & Err.Description, vbCritical, "Isi Evaluasi PL"
+End Sub
+
+
 Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Variant)
     ' Ambil nomor dokpil dari @ Master Data R20 (sudah diisi IsiMasterDataPL)
     Dim noDokpil As String: noDokpil = Trim(CStr(wsMD.Cells(PLR_NOMOR_DOKPIL, 3).Value))
