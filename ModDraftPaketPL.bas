@@ -1165,6 +1165,68 @@ Private Function PickPrinterPL() As String
     End If
 End Function
 
+Public Sub CetakBAPLJKKPDF()
+    ' Cetak BA PLJKK (BA Pembukaan Penawaran s/d Tanda Terima) ke PDF atau Printer
+    ' Skip Section 1+2 (Reviu DPP) — langsung dari Section 3
+    Dim wordFile As String
+    wordFile = FindWordFilePL(WM_PAT_BA)
+    If wordFile = "" Then Exit Sub
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & wordFile
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim scriptDir As String
+    scriptDir = ScriptDirPL()
+    If scriptDir = "" Then
+        MsgBox "Python tidak ditemukan.", vbCritical
+        Exit Sub
+    End If
+    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+
+    Dim outMode As String, printerName As String
+    outMode = ChooseOutputModePL(printerName)
+    If outMode = "" Then Exit Sub
+
+    Dim kodePkt As String
+    kodePkt = CStr(ThisWorkbook.Sheets("@ Master Data").Range("G2").Value)
+    If kodePkt = "" Or kodePkt = "Null" Or kodePkt = "None" Then kodePkt = "PL"
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    Dim cmd As String
+
+    If outMode = "printer" Then
+        cmd = Chr(34) & pyExe & Chr(34) & " " & _
+              Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " printer_bapljkk " & _
+              Chr(34) & wordPath & Chr(34) & " " & _
+              Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
+              Chr(34) & WM_SHEET_BA & Chr(34) & " " & _
+              Chr(34) & printerName & Chr(34)
+        wsh.Run cmd, 0, False
+        Application.StatusBar = "Printing BA PLJKK ke " & printerName & " ..."
+    Else
+        cmd = Chr(34) & pyExe & Chr(34) & " " & _
+              Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " pdf_bapljkk " & _
+              Chr(34) & wordPath & Chr(34) & " " & _
+              Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
+              Chr(34) & WM_SHEET_BA & Chr(34) & " " & _
+              Chr(34) & kodePkt & Chr(34)
+        wsh.Run cmd, 0, False
+        Application.StatusBar = "Membuat PDF BA_PLJKK_" & kodePkt & " ..."
+    End If
+
+    Set wsh = Nothing
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+End Sub
+
 Public Sub GabungReviuPL()
     ' Gabung BA Reviu scan + Isi Reviu → Gabung_Reviu_{kode_unik}.pdf
     ' BA scan dicari di D:\Download\REVIU KONSULTAN PERENCANAAN {N}.pdf

@@ -113,6 +113,62 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
     import pythoncom
     import win32com.client
 
+    # Mode bapljkk: buka file asli ReadOnly, skip copy+merge
+    if mode in ("pdf_bapljkk", "printer_bapljkk"):
+        _word_path_win = os.path.normpath(word_path)
+        _folder = os.path.dirname(_word_path_win)
+        pythoncom.CoInitialize()
+        wdApp = win32com.client.DispatchEx("Word.Application")
+        wdApp.DisplayAlerts = 0
+        wdApp.Visible = False
+        try:
+            wdDoc = wdApp.Documents.Open(
+                FileName=_word_path_win,
+                ConfirmConversions=False,
+                ReadOnly=True,
+                AddToRecentFiles=False,
+                Visible=False,
+            )
+            if mode == "pdf_bapljkk":
+                _kode_pljkk = pdf_name if pdf_name else "PL"
+                try:
+                    import glob as _glob_pl
+                    _xlsm_pl = _glob_pl.glob(os.path.join(_folder, "*.xlsm"))
+                    if _xlsm_pl:
+                        _xl_pl = win32com.client.DispatchEx("Excel.Application")
+                        _xl_pl.Visible = False
+                        _wb_pl = _xl_pl.Workbooks.Open(os.path.normpath(_xlsm_pl[0]), ReadOnly=True)
+                        _ku_pl = str(_wb_pl.Sheets("@ Master Data").Range("G2").Value).strip()
+                        _wb_pl.Close(False)
+                        _xl_pl.Quit()
+                        if _ku_pl and _ku_pl not in ("", "None", "null"):
+                            _kode_pljkk = _ku_pl
+                except Exception:
+                    pass
+                _pdf_path = os.path.join(_folder, f"BA_PLJKK_{_kode_pljkk}.pdf")
+                _sec3_start = wdDoc.Sections(3).Range.Start
+                _doc_end = wdDoc.Content.End
+                _rng = wdDoc.Range(_sec3_start, _doc_end)
+                _rng.ExportAsFixedFormat(OutputFileName=_pdf_path, ExportFormat=17)
+                show_success(_pdf_path)
+            elif mode == "printer_bapljkk":
+                _printer_name = pdf_name
+                wdApp.ActivePrinter = _printer_name
+                _sec3_start = wdDoc.Sections(3).Range.Start
+                _doc_end = wdDoc.Content.End
+                _rng = wdDoc.Range(_sec3_start, _doc_end)
+                _rng.Select()
+                wdDoc.PrintOut(Background=False, Range=1)  # wdPrintSelection=1
+                import time; time.sleep(3)
+                show_print_success(_printer_name)
+            wdDoc.Close(False)
+        except Exception as e:
+            show_error(f"Error cetak BA PLJKK:\n{e}")
+        finally:
+            wdApp.Quit()
+            pythoncom.CoUninitialize()
+        return
+
     folder = os.path.dirname(word_path)
     base, ext = os.path.splitext(os.path.basename(word_path))
     if ext.lower() not in (".docx", ".docm"):
@@ -244,6 +300,31 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 wdApp.Quit()
             return  # skip cleanup di bawah
 
+        elif mode == "printer_bapljkk":
+            # Print Section 3 s/d akhir ke printer fisik (skip Reviu)
+            printer_name = pdf_name  # arg ke-5 = nama printer
+
+            wdDoc.Save()
+            wdApp.ScreenUpdating = True
+            wdApp.Visible = False
+
+            try:
+                wdApp.ActivePrinter = printer_name
+                _sec3_start = wdDoc.Sections(3).Range.Start
+                _doc_end = wdDoc.Content.End
+                _rng = wdDoc.Range(_sec3_start, _doc_end)
+                _rng.Select()
+                wdDoc.PrintOut(Background=False, Range=1)  # wdPrintSelection=1
+                time.sleep(3)
+                show_print_success(printer_name)
+            except Exception as print_err:
+                show_error(f"Gagal print ke {printer_name}:\n{print_err}")
+
+            wdDoc.Close(False)
+            if new_instance:
+                wdApp.Quit()
+            return
+
         elif mode.startswith("pdf"):
             safe_name = pdf_name if pdf_name else "000"
 
@@ -266,6 +347,31 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     From=1,
                     To=3,
                 )
+                show_success(pdf_path)
+            elif mode == "pdf_bapljkk":
+                # Export Section 3 s/d akhir (skip Section 1+2 = Reviu DPP)
+                # Pakai Range agar tidak perlu tahu nomor halaman (robust terhadap perubahan isi Reviu)
+                _kode_pljkk = safe_name
+                try:
+                    import glob as _glob_pl
+                    _xlsm_pl = _glob_pl.glob(os.path.join(folder, "*.xlsm"))
+                    if _xlsm_pl:
+                        _xl_pl = win32com.client.DispatchEx("Excel.Application")
+                        _xl_pl.Visible = False
+                        _wb_pl = _xl_pl.Workbooks.Open(_xlsm_pl[0], ReadOnly=True)
+                        _ku_pl = str(_wb_pl.Sheets("@ Master Data").Range("G2").Value).strip()
+                        _wb_pl.Close(False)
+                        _xl_pl.Quit()
+                        if _ku_pl and _ku_pl not in ("", "None", "null"):
+                            _kode_pljkk = _ku_pl
+                except Exception:
+                    pass
+                pdf_path = os.path.join(folder, f"BA_PLJKK_{_kode_pljkk}.pdf")
+                # Section 3 = index 3 (1-based), export dari start section 3 s/d akhir dokumen
+                _sec3_start = wdDoc.Sections(3).Range.Start
+                _doc_end = wdDoc.Content.End
+                _rng = wdDoc.Range(_sec3_start, _doc_end)
+                _rng.ExportAsFixedFormat(OutputFileName=pdf_path, ExportFormat=17)
                 show_success(pdf_path)
             elif mode == "pdf_revaluasi":
                 pdf_path = os.path.join(folder, f"REvaluasi_{safe_name}.pdf")

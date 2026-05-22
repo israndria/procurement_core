@@ -121,7 +121,7 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnKodeUnikPL", "btnMuatHPS_PL", "btnMuatKodeUnik_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnKodeUnikPL", "btnMuatHPS_PL", "btnMuatKodeUnik_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
@@ -138,19 +138,20 @@ def inject_pl(filepath: str):
             PURPLE  = (102, 51, 153)
             TEAL    = (0, 128, 128)
 
-            # Posisi absolut (Left, Top) diukur dari layout manual user
-            # Baris 1 (Top≈270): MuatPL | IsiPL | BukaDokpil | RelinkWord
-            # Baris 2 (Top≈301): BukaBA  | BukaReviu | SyncDraft | ClearHighlight
-            # Baris 3 (Top≈332): KodeUnik | MuatKodeUnik | CetakBAReviu | CetakDokpil
-            # Baris 4 (Top≈364): MuatHPS (col 2 saja)
-            _BTN_W = 130
-            _BTN_H = 28
-            _X = [758.5, 893.5, 1028.0, 1163.0]   # 4 kolom X
-            _Y = [269.5, 301.0, 332.0, 364.0]      # 4 baris Y
+            # Posisi absolut — diukur dari layout paket 1 (@ Master Data) setelah user rapikan
+            # Baris 0 (Top=181.4): MuatPL | IsiPL | BukaDokpil | RelinkWord
+            # Baris 1 (Top=212.4): BukaBA | BukaReviu | SyncDraft | ClearHighlight
+            # Baris 2 (Top=243.0): KodeUnik | MuatKodeUnik | CetakBAReviu | CetakDokpil
+            # Baris 3 (Top=274.9): CetakIsiReviu | GabungReviu | MuatHPS | IsiEvaluasiPL
+            # Baris 4 (Top=305.4): CetakBAPLJKK (col 0)
+            _X = [641.8, 776.9, 911.3, 1046.4]           # Left per kolom 0-3
+            _W = [130.1, 129.9, 130.1, 130.4]             # Width per kolom 0-3
+            _Y = [181.4, 212.4, 243.0, 274.9, 305.4]      # Top per baris 0-4
+            _BTN_H = 27.4
 
             def add_btn(name, label, macro, yi, xi, rgb):
-                """yi=indeks baris (0-3), xi=indeks kolom (0-3)"""
-                shp = ws.Shapes.AddShape(5, _X[xi], _Y[yi], _BTN_W, _BTN_H)
+                """yi=indeks baris (0-4), xi=indeks kolom (0-3)"""
+                shp = ws.Shapes.AddShape(5, _X[xi], _Y[yi], _W[xi], _BTN_H)
                 shp.Name = name
                 r, g, b = rgb
                 shp.Fill.ForeColor.RGB = r + (g * 256) + (b * 65536)
@@ -189,6 +190,8 @@ def inject_pl(filepath: str):
             add_btn("btnGabungReviu_PL",  "Gabung Reviu",      "GabungReviuPL",               3, 1, (0, 80, 140))
             add_btn("btnMuatHPS_PL",      "Muat HPS",          "MuatHPSPL",                  3, 2, (200, 100, 0))
             add_btn("btnIsiEvaluasiPL",   "Isi Evaluasi PL",   "IsiEvaluasiPLStandalone",     3, 3, (160, 60, 0))
+            # Baris 4: Cetak BA PLJKK (col 0)
+            add_btn("btnCetakBAPLJKK",    "Cetak BA PLJKK",    "CetakBAPLJKKPDF",             4, 0, (140, 20, 20))
 
             # Sengaja TIDAK re-protect @ Master Data — user butuh edit bebas
             # (Aturan PL: sheet @ Master Data harus selalu unprotected)

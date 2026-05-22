@@ -78,7 +78,7 @@ Public Sub SyncDataDraft()
     ' Tulis input JSON
     Dim payload As String
     payload = "{""kode_tender"":""" & kodeTender & """,""snapshot"":" & snapshot & "}"
-    WriteUTF8(inputFile, payload)
+    WriteUTF8 inputFile, payload
 
     ' Panggil Python
     Dim pyExe As String, pyScript As String
