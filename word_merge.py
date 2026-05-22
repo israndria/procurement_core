@@ -159,7 +159,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 _rng = wdDoc.Range(_sec3_start, _doc_end)
                 _rng.Select()
                 wdDoc.PrintOut(Background=False, Range=1)  # wdPrintSelection=1
-                import time; time.sleep(3)
+                time.sleep(3)
                 show_print_success(_printer_name)
             wdDoc.Close(False)
         except Exception as e:
