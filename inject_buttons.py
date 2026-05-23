@@ -158,19 +158,24 @@ def inject_buttons(filepath):
         PURPLE    = (102, 51, 153)
         TEAL      = (0, 128, 128)
 
-        # --- @ Master Data: grid absolut, anchor dari posisi btnBukaBA (diukur dari paket asli) ---
+        # --- @ Master Data: tombol di KANAN data, di bawah border "Dokumen Pemilihan" ---
+        # "Dokumen Pemilihan" selalu di row 20, border selesai row 23.
+        # Tombol mulai row 26 (2 baris gap setelah border) — konsisten semua paket.
+        # Kolom J (col 10) ke kanan — area kosong di semua paket.
         # Baris 1 (yi=0): BukaBA PK | Print BA Reviu | — | —
         # Baris 2 (yi=1): Undangan PDF | PrintPembuktian | REvaluasi | —
         # Baris 3 (yi=2): PrintTimpang | MuatDraft | ParseDraft | KodeUnik
         # Baris 4 (yi=3): UpdateHPS | BukaReviu | PrintIsiReviu | PrintBAReviu2
         # Baris 5 (yi=4): BukaDokpil | PrintDokpil | Relink | —
         # Baris 6 (yi=5): SyncDraft | DiffHighlight | — | —
-        _AX = 424.2    # Left anchor (btnBukaBA)
-        _AY = 370.2    # Top anchor (btnBukaBA)
+        _ws_md_anchor = wb.Sheets("@ Master Data")
+        _AX = _ws_md_anchor.Cells(28, 6).Left + 14  # col F row 28 + 5mm kanan
+        _AY = _ws_md_anchor.Rows(28).Top + 7        # row 28 + 2.5mm bawah
         _BW = 120.0    # button width
         _BH = 27.1     # button height
         _GX = 5.0      # gap horizontal antar tombol
         _GY = 31.0     # gap vertikal antar baris
+        print(f"  Anchor: F28 Left={_AX:.1f}, row 28 Top={_AY:.1f}")
 
         master_data_btns = [
             # (name, label, macro, yi, xi, color)
