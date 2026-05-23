@@ -150,73 +150,119 @@ def inject_buttons(filepath):
         
         # 4. Add buttons
         print("\n  Adding buttons...")
-        
+
         BLUE_WORD = (43, 87, 154)
-        BLACK = (40, 40, 40)
-        GREEN = (40, 167, 69)
-        RED_PDF = (200, 35, 51)
-        PURPLE = (102, 51, 153)
-        TEAL = (0, 128, 128)
+        BLACK     = (40, 40, 40)
+        GREEN     = (40, 167, 69)
+        RED_PDF   = (200, 35, 51)
+        PURPLE    = (102, 51, 153)
+        TEAL      = (0, 128, 128)
 
-        sheet_buttons = [
-            ("@ Master Data", [
-                # Baris 3: BA PK
-                ("btnBukaBA",             "Buka BA PK",         "BukaBA",                    3, 6, BLUE_WORD),
-                ("btnPrintBAReviu",       "Print BA Reviu",     "PrintBAReviuPDF",            3, 7, BLACK),
-                # Baris 4: Undangan & Pembuktian
-                ("btnUndanganPDF",        "Print Undangan PDF", "PrintUndanganPDF",           4, 6, RED_PDF),
-                ("btnPrintPembuktian",    "Print BA Pembuktian","PrintPembuktianPDF",         4, 7, BLACK),
-                ("btnREvaluasi",          "Print REvaluasi",    "PrintREvaluasiPDF",          4, 8, BLACK),
-                # Baris 5: Timpang, Draft, Parse Draft, Kode Unik
-                ("btnPembuktianTimpang",  "Print Timpang",      "PrintPembuktianTimpangPDF",  5, 6, BLACK),
-                ("btnMuatDraft",          "Muat Draft Paket",   "MuatDraftPaket",             5, 7, PURPLE),
-                ("btnParseDraft",         "Parse Draft",        "ParseDraftTerpilih",         5, 8, GREEN),
-                ("btnKodeUnik",           "Kode Unik Surat",    "GenerateKodeUnik",           5, 9, TEAL),
-                ("btnUpdateHPS",          "Update HPS Saja",    "UpdateHPSSaja",              5, 10, (220, 53, 69)),
+        # --- @ Master Data: grid absolut, anchor dari posisi btnBukaBA (diukur dari paket asli) ---
+        # Baris 1 (yi=0): BukaBA PK | Print BA Reviu | — | —
+        # Baris 2 (yi=1): Undangan PDF | PrintPembuktian | REvaluasi | —
+        # Baris 3 (yi=2): PrintTimpang | MuatDraft | ParseDraft | KodeUnik
+        # Baris 4 (yi=3): UpdateHPS | BukaReviu | PrintIsiReviu | PrintBAReviu2
+        # Baris 5 (yi=4): BukaDokpil | PrintDokpil | Relink | —
+        # Baris 6 (yi=5): SyncDraft | DiffHighlight | — | —
+        _AX = 424.2    # Left anchor (btnBukaBA)
+        _AY = 370.2    # Top anchor (btnBukaBA)
+        _BW = 120.0    # button width
+        _BH = 27.1     # button height
+        _GX = 5.0      # gap horizontal antar tombol
+        _GY = 31.0     # gap vertikal antar baris
 
-                # Baris 6: Reviu
-                ("btnBukaReviu",          "Buka Reviu",         "BukaReviu",                  6, 6, BLUE_WORD),
-                ("btnPrintIsiReviu",      "Print Isi Reviu",    "PrintIsiReviuPDF",           6, 7, BLACK),
-                ("btnPrintBAReviu2",      "Print BA Reviu",     "PrintBAReviuPDF",            6, 8, BLACK),
-                # Baris 7: Dokpil & Relink
-                ("btnBukaDokpil",         "Buka Dokpil",        "BukaDokpil",                 7, 6, BLUE_WORD),
-                ("btnPrintDokpil",        "Print Dokpil",       "PrintDokpilPDF",             7, 7, BLACK),
-                ("btnRelink",             "Relink Template",    "RelinkTemplate",             7, 8, (255, 140, 0)),
-                # Baris 8: Sync Data Draft
-                ("btnSyncDraft",          "Sync Data Draft",    "SyncDataDraft",              8, 6, (0, 112, 192)),
-                ("btnDiffHighlight",      "Diff Highlight",     "DiffHighlight",              8, 7, (255, 165, 0)),
-            ]),
+        master_data_btns = [
+            # (name, label, macro, yi, xi, color)
+            # Baris 1
+            ("btnBukaBA",          "Buka BA PK",          "BukaBA",                   0, 0, BLUE_WORD),
+            ("btnPrintBAReviu",    "Print BA Reviu",       "PrintBAReviuPDF",          0, 1, BLACK),
+            # Baris 2
+            ("btnUndanganPDF",     "Print Undangan PDF",  "PrintUndanganPDF",          1, 0, RED_PDF),
+            ("btnPrintPembuktian", "Print BA Pembuktian", "PrintPembuktianPDF",        1, 1, BLACK),
+            ("btnREvaluasi",       "Print REvaluasi",     "PrintREvaluasiPDF",         1, 2, BLACK),
+            # Baris 3
+            ("btnPembuktianTimpang","Print Timpang",       "PrintPembuktianTimpangPDF",2, 0, BLACK),
+            ("btnMuatDraft",       "Muat Draft Paket",    "MuatDraftPaket",            2, 1, PURPLE),
+            ("btnParseDraft",      "Parse Draft",         "ParseDraftTerpilih",        2, 2, GREEN),
+            ("btnKodeUnik",        "Kode Unik Surat",     "GenerateKodeUnik",          2, 3, TEAL),
+            # Baris 4: UpdateHPS masuk kolom 0
+            ("btnUpdateHPS",       "Update HPS Saja",     "UpdateHPSSaja",             3, 0, (220, 53, 69)),
+            ("btnBukaReviu",       "Buka Reviu",          "BukaReviu",                 3, 1, BLUE_WORD),
+            ("btnPrintIsiReviu",   "Print Isi Reviu",     "PrintIsiReviuPDF",          3, 2, BLACK),
+            ("btnPrintBAReviu2",   "Print BA Reviu",      "PrintBAReviuPDF",           3, 3, BLACK),
+            # Baris 5
+            ("btnBukaDokpil",      "Buka Dokpil",         "BukaDokpil",                4, 0, BLUE_WORD),
+            ("btnPrintDokpil",     "Print Dokpil",        "PrintDokpilPDF",            4, 1, BLACK),
+            ("btnRelink",          "Relink Template",     "RelinkTemplate",            4, 2, (255, 140, 0)),
+            # Baris 6
+            ("btnSyncDraft",       "Sync Data Draft",     "SyncDataDraft",             5, 0, (0, 112, 192)),
+            ("btnDiffHighlight",   "Diff Highlight",      "DiffHighlight",             5, 1, (255, 165, 0)),
+        ]
+
+        def _add_master_btn(ws_md, name, label, macro, yi, xi, color):
+            left = _AX + xi * (_BW + _GX)
+            top  = _AY + yi * _GY
+            shp  = ws_md.Shapes.AddShape(5, left, top, _BW, _BH)
+            shp.Name = name
+            r, g, b = color
+            shp.Fill.ForeColor.RGB = r + (g * 256) + (b * 65536)
+            shp.Line.Visible = False
+            tf = shp.TextFrame2
+            tf.TextRange.Text = label
+            tf.TextRange.Font.Fill.ForeColor.RGB = 16777215
+            tf.TextRange.Font.Size = 10
+            tf.TextRange.Font.Bold = True
+            tf.TextRange.ParagraphFormat.Alignment = 2
+            tf.VerticalAnchor = 3
+            shp.OnAction = macro
+            print(f"    [OK] {label} -> {macro}")
+
+        try:
+            ws_md = wb.Sheets("@ Master Data")
+            try:
+                ws_md.Unprotect(Password="pokja2026")
+            except Exception:
+                pass
+            # Hapus tombol lama
+            btn_names_md = {b[0] for b in master_data_btns}
+            for shp in list(ws_md.Shapes):
+                if shp.Name in btn_names_md:
+                    shp.Delete()
+                    print(f"    Deleted {shp.Name}")
+            for name, label, macro, yi, xi, color in master_data_btns:
+                try:
+                    _add_master_btn(ws_md, name, label, macro, yi, xi, color)
+                except Exception as e:
+                    print(f"    [WARN] {label}: {e}")
+        except Exception as e:
+            print(f"    [WARN] Sheet '@ Master Data': {e}")
+
+        # Sheet lain: pakai cell reference seperti biasa
+        other_sheet_buttons = [
             ("3. KK Evaluasi Kualifikasi", [
                 ("btnMuatKKEvaluasi", "Muat KK Evaluasi", "MuatKKEvaluasi", 1, 7, PURPLE),
             ]),
-
             ("0. Input BA", [
                 ("btnMuatDanSync", "Muat & Sync", "MuatDanSync", 1, 3, PURPLE),
             ]),
         ]
-        
-        for sheet_name, btns in sheet_buttons:
+
+        for sheet_name, btns in other_sheet_buttons:
             try:
                 ws = wb.Sheets(sheet_name)
-                
                 try:
                     ws.Unprotect(Password="pokja2026")
-                except:
+                except Exception:
                     pass
-                
                 for btn_name, label, macro, row, col, color in btns:
                     try:
                         cell = ws.Cells(row, col)
-                        top = cell.Top
-                        left = cell.Left
-                        
-                        shp = ws.Shapes.AddShape(5, left, top, 120, 28)
+                        shp = ws.Shapes.AddShape(5, cell.Left, cell.Top, 120, 28)
                         shp.Name = btn_name
-                        
                         r, g, b = color
                         shp.Fill.ForeColor.RGB = r + (g * 256) + (b * 65536)
                         shp.Line.Visible = False
-                        
                         tf = shp.TextFrame2
                         tf.TextRange.Text = label
                         tf.TextRange.Font.Fill.ForeColor.RGB = 16777215
@@ -224,14 +270,10 @@ def inject_buttons(filepath):
                         tf.TextRange.Font.Bold = True
                         tf.TextRange.ParagraphFormat.Alignment = 2
                         tf.VerticalAnchor = 3
-                        
                         shp.OnAction = macro
-                        
                         print(f"    [OK] {label} -> {macro} @ {sheet_name}!{cell.Address}")
                     except Exception as e:
                         print(f"    [WARN] {label}: {e}")
-                # (Sengaja tidak Protect kembali - sheet dibiarkan bebas edit)
-                    
             except Exception as e:
                 print(f"    [WARN] Sheet '{sheet_name}': {e}")
         
