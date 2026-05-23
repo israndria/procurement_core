@@ -117,16 +117,12 @@ Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, stat
         End Select
 
         cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " printer " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(sheetName) & " " & Q(printerName) & " " & fromPage & " " & toPage
-        wsh.Run cmd, 0, False
-        Application.StatusBar = "Printing " & statusLabel & " ke " & printerName & " ..."
     Else
         cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " " & mode & " " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(sheetName) & " " & Q(kodePokja)
-        wsh.Run cmd, 0, False
-        Application.StatusBar = "Membuat PDF " & statusLabel & "_" & kodePokja & " ..."
     End If
 
+    wsh.Run cmd, 0, False
     Set wsh = Nothing
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
 
 ' ===== OUTPUT MODE: Popup pilih PDF atau Printer =====

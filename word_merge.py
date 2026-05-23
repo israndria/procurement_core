@@ -234,10 +234,12 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
 
         # Cleanup blank pages HANYA untuk "1. Full Dokumen BA PK"
         # File "2. Isi Reviu" dan "3. Dokpil" dikecualikan karena strukturnya berbeda dan bisa berantakan
+        # Untuk mode PDF: Word tetap hidden (ScreenUpdating cukup untuk layout calculation)
         if "1. Full Dokumen BA PK" in os.path.basename(word_path):
             wdApp.ScreenUpdating = True
-            wdApp.Visible = True 
-            wdApp.WindowState = 2 # 2=wdWindowStateMinimize (Tampil ke layar tetapi diforced Minimize)
+            if mode in ("buka", "print"):
+                wdApp.Visible = True
+                wdApp.WindowState = 2
             cleanup_blank_pages(wdDoc)
 
         # Simpan dan Tampilkan hanya jika bukan mode PDF
