@@ -45,8 +45,13 @@ WORD_KEYWORD_MAP = {
 # ===== PL (Pengadaan Langsung) TEMPLATE =====
 TEMPLATE_DIR_PL = os.path.join(
     POKJA_ROOT,
-    "Paket Experiment - Pengadaan Langsung - Konsultan Konstuksi",
-    "Development",
+    "Paket Experiment - Pengadaan Langsung",
+    "Development - PL - JKK",
+)
+TEMPLATE_DIR_PL_PK = os.path.join(
+    POKJA_ROOT,
+    "Paket Experiment - Pengadaan Langsung",
+    "Development - PL - PK",
 )
 EXCEL_TEMPLATE_PL = "0. BAPLJKK - Template.xlsm"
 SHEET_BA_PL    = "satu_data"
