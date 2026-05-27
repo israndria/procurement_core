@@ -152,14 +152,50 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 _rng.ExportAsFixedFormat(OutputFileName=_pdf_path, ExportFormat=17)
                 show_success(_pdf_path)
             elif mode == "printer_bapljkk":
+                # argv: printer_bapljkk <word_path> <excel_path> <sheet_name> <printer_name> [copies] [xlsm_path]
                 _printer_name = pdf_name
+                _copies_str = sys.argv[6] if len(sys.argv) > 6 else "1"
+                _xlsm_path  = sys.argv[7] if len(sys.argv) > 7 else excel_path
+                try:
+                    _copies = max(1, int(_copies_str))
+                except Exception:
+                    _copies = 1
+
                 wdApp.ActivePrinter = _printer_name
                 _sec3_start = wdDoc.Sections(3).Range.Start
                 _doc_end = wdDoc.Content.End
                 _rng = wdDoc.Range(_sec3_start, _doc_end)
                 _rng.Select()
-                wdDoc.PrintOut(Background=False, Range=1)  # wdPrintSelection=1
-                time.sleep(3)
+                wdDoc.PrintOut(Background=False, Range=1, Copies=_copies)  # wdPrintSelection=1
+                time.sleep(2)
+
+                # Cetak sheet "7.2 Dengan Nego" dari xlsm (selipkan setelah Word)
+                try:
+                    _xlsm = os.path.normpath(_xlsm_path)
+                    if os.path.isfile(_xlsm):
+                        _xl2 = win32com.client.DispatchEx("Excel.Application")
+                        _xl2.Visible = False
+                        _xl2.DisplayAlerts = False
+                        try:
+                            _wb2 = _xl2.Workbooks.Open(_xlsm, ReadOnly=True)
+                            _ws72 = None
+                            for _i2 in range(1, _wb2.Sheets.Count + 1):
+                                if _wb2.Sheets(_i2).Name == "7.2 Dengan Nego":
+                                    _ws72 = _wb2.Sheets(_i2)
+                                    break
+                            if _ws72 is not None:
+                                _xl2.ActivePrinter = _printer_name
+                                _ws72.PrintOut(Copies=_copies, ActivePrinter=_printer_name)
+                                time.sleep(2)
+                        finally:
+                            try:
+                                _wb2.Close(False)
+                            except Exception:
+                                pass
+                            _xl2.Quit()
+                except Exception as _xe72:
+                    pass  # sheet tidak ada / Excel error → lanjut
+
                 show_print_success(_printer_name)
             wdDoc.Close(False)
         except Exception as e:
@@ -303,8 +339,15 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             return  # skip cleanup di bawah
 
         elif mode == "printer_bapljkk":
-            # Print Section 3 s/d akhir ke printer fisik (skip Reviu)
+            # Print Section 3 s/d akhir ke printer fisik (skip Reviu), lalu sheet 7.2 Dengan Nego
+            # argv: printer_bapljkk <word_path> <excel_path> <sheet_name> <printer_name> [copies] [xlsm_path]
             printer_name = pdf_name  # arg ke-5 = nama printer
+            _copies_str = sys.argv[6] if len(sys.argv) > 6 else "1"
+            _xlsm_path_bk = sys.argv[7] if len(sys.argv) > 7 else excel_path
+            try:
+                _copies_bk = max(1, int(_copies_str))
+            except Exception:
+                _copies_bk = 1
 
             wdDoc.Save()
             wdApp.ScreenUpdating = True
@@ -316,8 +359,36 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 _doc_end = wdDoc.Content.End
                 _rng = wdDoc.Range(_sec3_start, _doc_end)
                 _rng.Select()
-                wdDoc.PrintOut(Background=False, Range=1)  # wdPrintSelection=1
-                time.sleep(3)
+                wdDoc.PrintOut(Background=False, Range=1, Copies=_copies_bk)  # wdPrintSelection=1
+                time.sleep(2)
+
+                # Cetak sheet "7.2 Dengan Nego" dari xlsm
+                try:
+                    _xlsm_bk = os.path.normpath(_xlsm_path_bk)
+                    if os.path.isfile(_xlsm_bk):
+                        _xl_bk = win32com.client.DispatchEx("Excel.Application")
+                        _xl_bk.Visible = False
+                        _xl_bk.DisplayAlerts = False
+                        try:
+                            _wb_bk = _xl_bk.Workbooks.Open(_xlsm_bk, ReadOnly=True)
+                            _ws72_bk = None
+                            for _ib in range(1, _wb_bk.Sheets.Count + 1):
+                                if _wb_bk.Sheets(_ib).Name == "7.2 Dengan Nego":
+                                    _ws72_bk = _wb_bk.Sheets(_ib)
+                                    break
+                            if _ws72_bk is not None:
+                                _xl_bk.ActivePrinter = printer_name
+                                _ws72_bk.PrintOut(Copies=_copies_bk, ActivePrinter=printer_name)
+                                time.sleep(2)
+                        finally:
+                            try:
+                                _wb_bk.Close(False)
+                            except Exception:
+                                pass
+                            _xl_bk.Quit()
+                except Exception:
+                    pass  # sheet 7.2 tidak ada → skip
+
                 show_print_success(printer_name)
             except Exception as print_err:
                 show_error(f"Gagal print ke {printer_name}:\n{print_err}")
