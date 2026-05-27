@@ -1195,19 +1195,6 @@ Public Sub CetakBAPLJKKPDF()
     outMode = ChooseOutputModePL(printerName)
     If outMode = "" Then Exit Sub
 
-    ' Tanya jumlah rangkap (hanya untuk printer)
-    Dim nCopies As Integer
-    nCopies = 1
-    If outMode = "printer" Then
-        Dim sKopian As String
-        sKopian = InputBox("Cetak berapa rangkap?", "Jumlah Rangkap", "2")
-        If sKopian = "" Then Exit Sub
-        On Error Resume Next
-        nCopies = CInt(sKopian)
-        If Err.Number <> 0 Or nCopies < 1 Then nCopies = 1
-        On Error GoTo 0
-    End If
-
     Dim kodePkt As String
     kodePkt = CStr(ThisWorkbook.Sheets("@ Master Data").Range("G2").Value)
     If kodePkt = "" Or kodePkt = "Null" Or kodePkt = "None" Then kodePkt = "PL"
@@ -1217,17 +1204,14 @@ Public Sub CetakBAPLJKKPDF()
     Dim cmd As String
 
     If outMode = "printer" Then
-        ' arg6=copies, arg7=xlsm path (untuk cetak sheet 7.2 Dengan Nego)
         cmd = Chr(34) & pyExe & Chr(34) & " " & _
               Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " printer_bapljkk " & _
               Chr(34) & wordPath & Chr(34) & " " & _
               Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
               Chr(34) & WM_SHEET_BA & Chr(34) & " " & _
-              Chr(34) & printerName & Chr(34) & " " & _
-              CStr(nCopies) & " " & _
-              Chr(34) & ThisWorkbook.FullName & Chr(34)
+              Chr(34) & printerName & Chr(34)
         wsh.Run cmd, 0, False
-        Application.StatusBar = "Printing BA PLJKK " & nCopies & " rangkap ke " & printerName & " ..."
+        Application.StatusBar = "Printing BA PLJKK ke " & printerName & " ..."
     Else
         cmd = Chr(34) & pyExe & Chr(34) & " " & _
               Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " pdf_bapljkk " & _
