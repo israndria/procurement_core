@@ -167,7 +167,10 @@ Public Sub PrintBeritaAcara()
         Set ws = ThisWorkbook.Sheets(sheetNames(i))
         On Error GoTo 0
         If Not ws Is Nothing Then
-            ws.PrintOut
+            Dim nCopies As Long
+            nCopies = 1
+            If sheetNames(i) = "7.2 Dengan Nego" Then nCopies = 2
+            ws.PrintOut Copies:=nCopies
             printed = printed + 1
         End If
         Set ws = Nothing

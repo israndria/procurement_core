@@ -684,8 +684,8 @@ def run_merge_mode_pl(folder_path: str, excel_path: str) -> list:
         from config import WORD_SHEET_MAP_PL
     except ImportError:
         WORD_SHEET_MAP_PL = [
-            ("1. Full Dokumen BA PLJKK - Template.docx",  "satu_data"),
-            ("2. Isi Reviu PLJKK - Template.docm",        "list_reviu"),
+            ("5. BA PLJKK - Template.docx",               "satu_data"),
+            ("1. Reviu DPP PLJKK - Template.docx",        "list_reviu"),
             ("3. Dokpil Full PLJKK - Template.docx",      "list_dokpil"),
         ]
 
