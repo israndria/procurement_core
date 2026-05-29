@@ -131,13 +131,15 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             )
             if mode == "pdf_bapljkk":
                 _kode_pljkk = pdf_name if pdf_name else "PL"
+                _xlsm_path = None
                 try:
                     import glob as _glob_pl
                     _xlsm_pl = _glob_pl.glob(os.path.join(_folder, "*.xlsm"))
                     if _xlsm_pl:
+                        _xlsm_path = os.path.normpath(_xlsm_pl[0])
                         _xl_pl = win32com.client.DispatchEx("Excel.Application")
                         _xl_pl.Visible = False
-                        _wb_pl = _xl_pl.Workbooks.Open(os.path.normpath(_xlsm_pl[0]), ReadOnly=True)
+                        _wb_pl = _xl_pl.Workbooks.Open(_xlsm_path, ReadOnly=True)
                         _ku_pl = str(_wb_pl.Sheets("@ Master Data").Range("G2").Value).strip()
                         _wb_pl.Close(False)
                         _xl_pl.Quit()
@@ -146,17 +148,97 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 except Exception:
                     pass
                 _pdf_path = os.path.join(_folder, f"BA_PLJKK_{_kode_pljkk}.pdf")
-                _sec3_start = wdDoc.Sections(3).Range.Start
-                _doc_end = wdDoc.Content.End
-                _rng = wdDoc.Range(_sec3_start, _doc_end)
-                _rng.ExportAsFixedFormat(OutputFileName=_pdf_path, ExportFormat=17)
+                _tmp_word = _pdf_path + "_tmpword.pdf"
+                _tmp_72   = _pdf_path + "_tmp72.pdf"
+                # Export Word -> tmp
+                if wdDoc.Sections.Count >= 3:
+                    _start = wdDoc.Sections(3).Range.Start
+                else:
+                    _start = wdDoc.Content.Start
+                _rng = wdDoc.Range(_start, wdDoc.Content.End)
+                _rng.ExportAsFixedFormat(OutputFileName=_tmp_word, ExportFormat=17)
+                # Export sheet 7.2 Dengan Nego dari Excel -> tmp (jika ada)
+                _has_72 = False
+                if _xlsm_path:
+                    try:
+                        _xl72 = win32com.client.DispatchEx("Excel.Application")
+                        _xl72.Visible = False
+                        _wb72 = _xl72.Workbooks.Open(_xlsm_path, ReadOnly=True)
+                        _ws72 = None
+                        try:
+                            _ws72 = _wb72.Sheets("7.2 Dengan Nego")
+                        except Exception:
+                            pass
+                        if _ws72 is not None:
+                            _ws72.ExportAsFixedFormat(
+                                Type=0,  # xlTypePDF
+                                Filename=_tmp_72,
+                                Quality=0,
+                                IncludeDocProperties=True,
+                                IgnorePrintAreas=False,
+                                OpenAfterPublish=False,
+                            )
+                            _has_72 = True
+                        _wb72.Close(False)
+                        _xl72.Quit()
+                    except Exception:
+                        try:
+                            _xl72.Quit()
+                        except Exception:
+                            pass
+                # Gabung PDF: word_part1 + sheet72(2x) + word_part2
+                # Cari halaman "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI TEKNIS DAN BIAYA" di word PDF
+                if _has_72:
+                    try:
+                        import pdfplumber
+                        from pypdf import PdfWriter, PdfReader
+                        _rdr_word = PdfReader(_tmp_word)
+                        _n_word = len(_rdr_word.pages)
+                        # Cari halaman pertama daftar hadir klarifikasi nego
+                        _split_page = _n_word  # default: tidak ketemu = append di akhir
+                        with pdfplumber.open(_tmp_word) as _plb:
+                            for _pi, _pp in enumerate(_plb.pages):
+                                _txt = (_pp.extract_text() or "").upper()
+                                if "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI" in _txt:
+                                    _split_page = _pi  # 0-based
+                                    break
+                        _rdr_72 = PdfReader(_tmp_72)
+                        _writer = PdfWriter()
+                        # Bagian 1: word halaman 0.._split_page-1
+                        for _pi in range(_split_page):
+                            _writer.add_page(_rdr_word.pages[_pi])
+                        # Sheet 7.2: 2x
+                        for _ in range(2):
+                            for _pi in range(len(_rdr_72.pages)):
+                                _writer.add_page(_rdr_72.pages[_pi])
+                        # Bagian 2: word halaman _split_page..akhir
+                        for _pi in range(_split_page, _n_word):
+                            _writer.add_page(_rdr_word.pages[_pi])
+                        with open(_pdf_path, "wb") as _fout:
+                            _writer.write(_fout)
+                    except Exception as _merge_err:
+                        # Fallback: pakai word PDF saja
+                        import shutil as _sh
+                        _sh.copy2(_tmp_word, _pdf_path)
+                    finally:
+                        for _tf in (_tmp_word, _tmp_72):
+                            try:
+                                os.remove(_tf)
+                            except Exception:
+                                pass
+                else:
+                    # Tidak ada sheet 7.2, rename tmp -> final
+                    import shutil as _sh
+                    _sh.move(_tmp_word, _pdf_path)
                 show_success(_pdf_path)
             elif mode == "printer_bapljkk":
                 _printer_name = pdf_name
                 wdApp.ActivePrinter = _printer_name
-                _sec3_start = wdDoc.Sections(3).Range.Start
-                _doc_end = wdDoc.Content.End
-                _rng = wdDoc.Range(_sec3_start, _doc_end)
+                if wdDoc.Sections.Count >= 3:
+                    _start = wdDoc.Sections(3).Range.Start
+                else:
+                    _start = wdDoc.Content.Start
+                _rng = wdDoc.Range(_start, wdDoc.Content.End)
                 _rng.Select()
                 wdDoc.PrintOut(Background=False, Range=1)  # wdPrintSelection=1
                 time.sleep(3)
@@ -312,9 +394,11 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
 
             try:
                 wdApp.ActivePrinter = printer_name
-                _sec3_start = wdDoc.Sections(3).Range.Start
-                _doc_end = wdDoc.Content.End
-                _rng = wdDoc.Range(_sec3_start, _doc_end)
+                if wdDoc.Sections.Count >= 3:
+                    _start = wdDoc.Sections(3).Range.Start
+                else:
+                    _start = wdDoc.Content.Start
+                _rng = wdDoc.Range(_start, wdDoc.Content.End)
                 _rng.Select()
                 wdDoc.PrintOut(Background=False, Range=1)  # wdPrintSelection=1
                 time.sleep(3)
@@ -369,10 +453,12 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 except Exception:
                     pass
                 pdf_path = os.path.join(folder, f"BA_PLJKK_{_kode_pljkk}.pdf")
-                # Section 3 = index 3 (1-based), export dari start section 3 s/d akhir dokumen
-                _sec3_start = wdDoc.Sections(3).Range.Start
-                _doc_end = wdDoc.Content.End
-                _rng = wdDoc.Range(_sec3_start, _doc_end)
+                # File baru (BA-only) hanya 1 section; file lama (gabung Reviu) BA mulai Section 3
+                if wdDoc.Sections.Count >= 3:
+                    _start = wdDoc.Sections(3).Range.Start
+                else:
+                    _start = wdDoc.Content.Start
+                _rng = wdDoc.Range(_start, wdDoc.Content.End)
                 _rng.ExportAsFixedFormat(OutputFileName=pdf_path, ExportFormat=17)
                 show_success(pdf_path)
             elif mode == "pdf_revaluasi":
