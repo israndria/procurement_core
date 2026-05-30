@@ -30,7 +30,12 @@ def format_value(value):
         return value.strftime("%d-%m-%Y")
     if isinstance(value, float) and value == int(value):
         return str(int(value))
-    return str(value)
+    s = str(value)
+    # Bersihkan line break Excel (\r \n \r\n + literal _x000D_) → spasi tunggal.
+    # Excel simpan multiline sebagai CR → muncul "_x000D_" mentah di Word saat merge.
+    s = s.replace("_x000D_", "\n").replace("\r\n", "\n").replace("\r", "\n")
+    s = re.sub(r"\s*\n\s*", " ", s).strip()
+    return s
 
 
 def normalize_field_name(name):

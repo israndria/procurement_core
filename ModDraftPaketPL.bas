@@ -848,7 +848,8 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
     If InStr(noDokpil, "/01/PL/") > 0 Then
         no03 = Replace(noDokpil, "/01/PL/", "/03/PL/")
         no04 = Replace(noDokpil, "/01/PL/", "/04/PL/")
-        no05 = Replace(noDokpil, "/01/PL/", "/05/PL/")
+        ' No BA Klarifikasi & Negosiasi pakai /06/ (slot /05/ dipakai BA lain dari sistem)
+        no05 = Replace(noDokpil, "/01/PL/", "/06/PL/")
         no08 = Replace(noDokpil, "/01/PL/", "/08/PL/")
     End If
 
