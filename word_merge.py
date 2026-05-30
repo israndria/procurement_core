@@ -68,14 +68,28 @@ def read_excel_data(excel_path, sheet_name):
         values = [c.value for c in ws[2]]
         wb.close()
 
+        # Word mail-merge menomori kolom dengan nama duplikat: occurrence ke-2 dst
+        # dapat suffix "1", "2", ... (mis. Hari, Hari1, Hari2). Replikasi agar
+        # MERGEFIELD seperti "Harga_Penawaran1"/"Hari1" ketemu saat re-merge.
+        seen = {}
         for header, value in zip(headers, values):
             if header:
                 header = str(header).strip()
                 val = format_value(value)
-                data[header] = val
                 normalized = normalize_field_name(header)
-                if normalized != header:
-                    data[normalized] = val
+                # nomori per nama-ternormalisasi (sesuai perilaku Word data source):
+                # occurrence pertama = nama polos, ke-2 dst = suffix 1,2,...
+                # pakai setdefault agar occurrence PERTAMA menang (match Word base).
+                n = seen.get(normalized, 0)
+                if n == 0:
+                    data.setdefault(header, val)
+                    if normalized != header:
+                        data.setdefault(normalized, val)
+                else:
+                    data.setdefault(f"{normalized}{n}", val)
+                    if header != normalized:
+                        data.setdefault(f"{header}{n}", val)
+                seen[normalized] = n + 1
     except Exception as e:
         show_error(f"Error baca Excel:\n{e}")
         return None
@@ -114,26 +128,73 @@ def cleanup_blank_pages(doc):
     return
 
 
+def _replace_merge_fields(wdDoc, data):
+    """Replace semua MERGEFIELD di wdDoc dgn nilai dari data + apply format switch.
+    Field di-Unlink jadi teks statis. Loop backwards supaya index aman."""
+    field_count = wdDoc.Fields.Count
+    for i in range(field_count, 0, -1):
+        try:
+            field = wdDoc.Fields(i)
+            code_text = field.Code.Text.strip()
+            if code_text.upper().startswith("MERGEFIELD"):
+                parts = code_text.split()
+                if len(parts) >= 2:
+                    fname = parts[1].strip('"').strip()
+                    val = None
+                    if fname in data:
+                        val = data[fname]
+                    else:
+                        norm = normalize_field_name(fname)
+                        if norm in data:
+                            val = data[norm]
+
+                    if val is not None:
+                        val = str(val)
+                        format_str = " ".join(parts[2:]).upper()
+                        if "UPPER" in format_str:
+                            val = val.upper()
+                        elif "LOWER" in format_str:
+                            val = val.lower()
+                        elif "FIRSTCAP" in format_str:
+                            val = val.capitalize()
+                        field.Result.Text = val
+                    else:
+                        field.Result.Text = ""
+                    field.Unlink()
+        except:
+            pass
+
+
 def merge_word(word_path, data, mode="buka", pdf_name=""):
     import pythoncom
     import win32com.client
 
-    # Mode bapljkk: buka file asli ReadOnly, skip copy+merge
+    # Mode bapljkk: copy template -> (Merged), replace MERGEFIELD dari Excel, baru export.
+    # (sebelumnya buka ReadOnly tanpa merge -> PDF tampil cached hasil merge lama/template)
     if mode in ("pdf_bapljkk", "printer_bapljkk"):
-        _word_path_win = os.path.normpath(word_path)
+        _word_path_win = os.path.abspath(os.path.normpath(word_path))
         _folder = os.path.dirname(_word_path_win)
+        _base_b, _ext_b = os.path.splitext(os.path.basename(_word_path_win))
+        if _ext_b.lower() not in (".docx", ".docm"):
+            _ext_b = ".docx"
+        _merged_b = os.path.join(_folder, f"{_base_b} (Merged){_ext_b}")
+        shutil.copy2(_word_path_win, _merged_b)
         pythoncom.CoInitialize()
         wdApp = win32com.client.DispatchEx("Word.Application")
         wdApp.DisplayAlerts = 0
         wdApp.Visible = False
         try:
             wdDoc = wdApp.Documents.Open(
-                FileName=_word_path_win,
+                FileName=_merged_b,
                 ConfirmConversions=False,
-                ReadOnly=True,
+                ReadOnly=False,
                 AddToRecentFiles=False,
                 Visible=False,
             )
+            # re-merge field dari data Excel (satu_data) -> PDF selalu fresh
+            if data:
+                _replace_merge_fields(wdDoc, data)
+                wdDoc.Save()
             if mode == "pdf_bapljkk":
                 _kode_pljkk = pdf_name if pdf_name else "PL"
                 _xlsm_path = None
@@ -254,6 +315,10 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         finally:
             wdApp.Quit()
             pythoncom.CoUninitialize()
+            try:
+                os.remove(_merged_b)
+            except Exception:
+                pass
         return
 
     folder = os.path.dirname(word_path)
