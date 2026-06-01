@@ -615,10 +615,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     xlApp.DisplayAlerts = False
                     wb_xl = xlApp.Workbooks.Open(excel_path, ReadOnly=True)
                     ws_nego = wb_xl.Sheets("7.2 Dengan Nego")
-                    ws_nego.PageSetup.Orientation = 2 # xlLandscape
-                    ws_nego.PageSetup.Zoom = False
-                    ws_nego.PageSetup.FitToPagesWide = 1
-                    ws_nego.PageSetup.FitToPagesTall = 1
+                    ws_nego.PageSetup.Orientation = 2  # xlLandscape
                     ws_nego.ExportAsFixedFormat(0, temp_excel_pdf) # 0 = xlTypePDF
                 finally:
                     if wb_xl:
@@ -638,25 +635,24 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     if i < len(reader_word.pages):
                         writer.add_page(reader_word.pages[i])
                 
-                # Sisipkan Nego Pertama (Setelah Hal 17)
-                if len(reader_excel.pages) > 0:
-                    writer.add_page(reader_excel.pages[0])
-                
+                # Sisipkan Nego Pertama (Setelah Hal 17) — semua halaman Excel
+                for ep in reader_excel.pages:
+                    writer.add_page(ep)
+
                 # Word 18-26 itu index range(11, 20)
                 for i in range(11, 20):
                     if i < len(reader_word.pages):
                         writer.add_page(reader_word.pages[i])
-                    
-                # Sisipkan Nego Kedua (Setelah Hal 26)
-                if len(reader_excel.pages) > 0:
-                    writer.add_page(reader_excel.pages[0])
+
+                # Sisipkan Nego Kedua (Setelah Hal 26) — semua halaman Excel
+                for ep in reader_excel.pages:
+                    writer.add_page(ep)
                     
                 # Word 27-29 itu index range(20, end)
                 for i in range(20, len(reader_word.pages)):
                     writer.add_page(reader_word.pages[i])
                     
-                with open(final_pdf_path, 'wb') as fd_out:
-                    writer.write(fd_out)
+                final_pdf_path = _safe_write_pdf(writer, final_pdf_path)
                 show_success(final_pdf_path)
 
             elif mode == "pdf_pembuktian_timpang":
@@ -689,10 +685,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     
                     # Nego
                     ws_nego = wb_xl.Sheets("7.2 Dengan Nego")
-                    ws_nego.PageSetup.Orientation = 2 # xlLandscape
-                    ws_nego.PageSetup.Zoom = False
-                    ws_nego.PageSetup.FitToPagesWide = 1
-                    ws_nego.PageSetup.FitToPagesTall = 1
+                    ws_nego.PageSetup.Orientation = 2  # xlLandscape
                     ws_nego.ExportAsFixedFormat(0, temp_nego_pdf)
                     
                     # Timpang
@@ -721,10 +714,12 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                         if i < len(reader_word.pages): writer.add_page(reader_word.pages[i])
                 
                 def add_nego():
-                    if len(reader_nego.pages) > 0: writer.add_page(reader_nego.pages[0])
-                    
+                    for p in reader_nego.pages:
+                        writer.add_page(p)
+
                 def add_timpang():
-                    if len(reader_timpang.pages) > 0: writer.add_page(reader_timpang.pages[0])
+                    for p in reader_timpang.pages:
+                        writer.add_page(p)
                 
                 # Part 1: Word 7-16 (Index 0-9)
                 add_wp(0, 10)
@@ -765,8 +760,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 add_wp(37, 38)
                 add_wp(37, 38)
                 
-                with open(final_pdf_path, 'wb') as fd_out:
-                    writer.write(fd_out)
+                final_pdf_path = _safe_write_pdf(writer, final_pdf_path)
                 show_success(final_pdf_path)
 
             else:
@@ -801,6 +795,20 @@ def show_error(msg):
         ctypes.windll.user32.MessageBoxW(0, msg, "Word Merge Error", 0x10)
     except:
         print(f"ERROR: {msg}")
+
+
+def _safe_write_pdf(writer, target_path):
+    """Write PDF, fallback ke suffix _v2/_v3/... jika file di-lock proses lain."""
+    path = target_path
+    for attempt in range(5):
+        try:
+            with open(path, 'wb') as f:
+                writer.write(f)
+            return path
+        except PermissionError:
+            base, ext = os.path.splitext(target_path)
+            path = f"{base}_v{attempt + 2}{ext}"
+    raise PermissionError(f"Gagal tulis PDF setelah 5 percobaan: {target_path}")
 
 
 def show_success(pdf_path):
