@@ -137,7 +137,7 @@ def inject_buttons(filepath):
 
         # 3. Clean old buttons - langsung target 3 sheet yang diketahui ada tombolnya
         print("\n  Cleaning old buttons...")
-        target_clean = ["1. Input Data", "@ Master Data", "3. KK Evaluasi Kualifikasi", "0. Input BA"]
+        target_clean = ["1. Input Data", "@ Master Data", "3. KK Evaluasi Kualifikasi", "0. Input BA", "6. Harga Penawaran"]
         for sheet_name in target_clean:
             try:
                 ws = wb.Sheets(sheet_name)
@@ -243,13 +243,14 @@ def inject_buttons(filepath):
         except Exception as e:
             print(f"    [WARN] Sheet '@ Master Data': {e}")
 
-        # Sheet lain: pakai cell reference seperti biasa
+        # Sheet lain: pakai cell reference seperti biasa.
+        # Tombol "Muat KK Evaluasi" (sheet 3) & "Muat & Sync" (0. Input BA) DIHAPUS —
+        # KK Evaluasi + Input BA sekarang ditulis langsung dari Streamlit Asisten Pokja
+        # (Tab 6 & Tab 7), tombol VBA jadi redundant. Pola sama dgn mode PL.
         other_sheet_buttons = [
-            ("3. KK Evaluasi Kualifikasi", [
-                ("btnMuatKKEvaluasi", "Muat KK Evaluasi", "MuatKKEvaluasi", 1, 7, PURPLE),
-            ]),
-            ("0. Input BA", [
-                ("btnMuatDanSync", "Muat & Sync", "MuatDanSync", 1, 3, PURPLE),
+            ("6. Harga Penawaran", [
+                # K1 (col 11) — kanan dropdown J1, macro MuatHargaPenawaran
+                ("btnMuatHarga", "Muat Harga Penawaran", "MuatHargaPenawaran", 1, 11, PURPLE),
             ]),
         ]
 

@@ -580,9 +580,10 @@ Public Sub MuatHargaPenawaran()
         Exit Sub
     End If
 
-    ' ── 2. Populate dropdown di B1 ──
+    ' ── 2. Populate dropdown di J1 (B1 = header "Jenis barang/jasa", jangan disentuh) ──
     wsHP.Unprotect
-    With wsHP.Range("B1").Validation
+    wsHP.Range("I1").Value = "Pilih Peserta:"
+    With wsHP.Range("J1").Validation
         .Delete
         Dim listStr As String: listStr = ""
         Dim ni As Integer
@@ -593,11 +594,17 @@ Public Sub MuatHargaPenawaran()
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:=listStr
         .ShowInput = True
     End With
-    ' Reset B1 ke peserta pertama (hapus nilai lama yang mungkin tidak valid)
-    wsHP.Range("B1").Value = pesertaNama(0)
+    ' Set J1 ke peserta pertama HANYA jika J1 kosong atau isinya bukan nama peserta valid
+    Dim curJ1 As String: curJ1 = Trim(wsHP.Range("J1").Value)
+    Dim j1Valid As Boolean: j1Valid = False
+    Dim vi As Integer
+    For vi = 0 To pesertaCount - 1
+        If pesertaNama(vi) = curJ1 Then j1Valid = True: Exit For
+    Next vi
+    If Not j1Valid Then wsHP.Range("J1").Value = pesertaNama(0)
 
-    ' ── 3. Baca peserta yang dipilih di B1 ──
-    Dim namaDipilih As String: namaDipilih = Trim(wsHP.Range("B1").Value)
+    ' ── 3. Baca peserta yang dipilih di J1 ──
+    Dim namaDipilih As String: namaDipilih = Trim(wsHP.Range("J1").Value)
     Dim pidDipilih As String: pidDipilih = ""
     Dim totalDipilih As Double: totalDipilih = 0
     Dim ki As Integer
@@ -633,10 +640,10 @@ Public Sub MuatHargaPenawaran()
         Exit Sub
     End If
 
-    ' ── 5. Clear sheet dari baris 2 ke bawah ──
+    ' ── 5. Clear data lama baris 2+ kolom A:H saja (jangan clear row 1 header + jangan clear I:J dropdown) ──
     Dim lastRow As Long
     lastRow = wsHP.Cells(wsHP.Rows.Count, 2).End(xlUp).Row
-    If lastRow >= 2 Then wsHP.Rows("2:" & lastRow + 5).ClearContents
+    If lastRow >= 2 Then wsHP.Range("A2:H" & (lastRow + 5)).ClearContents
 
     ' ── 6. Parse + isi data ──
     Dim jsonI As String: jsonI = http.ResponseText
@@ -686,22 +693,25 @@ Public Sub MuatHargaPenawaran()
     Loop
 
     ' ── 7. Baris total + selisih ──
-    ' Ambil total HPS dari hps_items
-    Dim urlHPS As String
-    urlHPS = SB_URL & "/rest/v1/hps_items" & _
-             "?kode_tender=eq." & kodeTender & _
-             "&select=total_nilai_bulat&limit=1"
-    http.Open "GET", urlHPS, False
-    http.SetTimeouts 5000, 5000, 10000, 10000
-    http.SetRequestHeader "apikey", SB_KEY
-    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
-    http.SetRequestHeader "Accept", "application/json"
-    http.Send
-
+    ' Ambil total HPS dari sheet "5. HPS" (arsitektur baru: HPS ditulis langsung
+    ' ke Excel oleh Streamlit, tidak lagi lewat Supabase hps_items).
+    ' Scan kolom B cari label "TOTAL NILAI (Setelah Pembulatan SPSE)" → ambil kolom G.
     Dim totalHPS As Double: totalHPS = 0
-    If http.Status = 200 Then
-        Dim hpsStr As String: hpsStr = ExtractJSONVal(http.ResponseText, "total_nilai_bulat")
-        If hpsStr <> "" Then totalHPS = CDbl(hpsStr)
+    Dim wsHPSsrc As Worksheet
+    On Error Resume Next
+    Set wsHPSsrc = ThisWorkbook.Sheets("5. HPS")
+    On Error GoTo 0
+    If Not wsHPSsrc Is Nothing Then
+        Dim lrHPS As Long
+        lrHPS = wsHPSsrc.Cells(wsHPSsrc.Rows.Count, 2).End(xlUp).Row
+        Dim rH As Long
+        For rH = 2 To lrHPS
+            If InStr(1, CStr(wsHPSsrc.Cells(rH, 2).Value), "Setelah Pembulatan", vbTextCompare) > 0 Then
+                Dim gVal As Variant: gVal = wsHPSsrc.Cells(rH, 7).Value
+                If IsNumeric(gVal) Then totalHPS = CDbl(gVal)
+                Exit For
+            End If
+        Next rH
     End If
 
     curRow = curRow + 1  ' satu baris kosong
