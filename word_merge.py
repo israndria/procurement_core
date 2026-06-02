@@ -165,6 +165,84 @@ def _replace_merge_fields(wdDoc, data):
             pass
 
 
+def _sisip_2ba_pljkk(pdf_path, folder):
+    """
+    Sisip 2 file BA (Evaluasi /05/ + Hasil /07/) ke dalam BA_PLJKK final.
+
+    Posisi (anchor by judul section, occurrence-aware):
+      - BA Evaluasi  → setelah halaman judul 'DAFTAR HADIR PEMBUKTIAN KUALIFIKASI'
+                       occurrence #1 (di antara 2 daftar hadir pembuktian).
+      - BA Hasil     → setelah halaman judul 'DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI'
+                       occurrence #1 (di antara 2 daftar hadir klarifikasi).
+
+    File BA dicari via prefix '1. BA Evaluasi*.pdf' & '2. BA Hasil*.pdf' di folder.
+    Best-effort: jika file BA tidak ada / anchor tidak ketemu, lewati tanpa error.
+    Idempotent: jika anchor occurrence tidak cukup, BA terkait dilewati.
+    """
+    try:
+        import glob as _glob
+        import pdfplumber
+        from pypdf import PdfReader, PdfWriter
+
+        _ev = sorted(_glob.glob(os.path.join(folder, "1. BA Evaluasi*.pdf")))
+        _hs = sorted(_glob.glob(os.path.join(folder, "2. BA Hasil*.pdf")))
+        _ev_path = _ev[0] if _ev else None
+        _hs_path = _hs[0] if _hs else None
+        if not _ev_path and not _hs_path:
+            return  # tidak ada file BA, lewati
+
+        _rdr = PdfReader(pdf_path)
+        _n = len(_rdr.pages)
+
+        # Identifikasi halaman ANCHOR (judul section, bukan kop/teks berulang).
+        # Valid jika: judul muncul di AWAL halaman (idx < 200, setelah kop dinas) DAN
+        # halaman bukan "BERITA ACARA ..." (halaman BA punya judul section di bawah).
+        _PEMB = "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"
+        _KLAR = "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"
+        _pemb_pages = []    # index halaman daftar hadir pembuktian
+        _klarif_pages = []  # index halaman daftar hadir klarifikasi & negosiasi
+        with pdfplumber.open(pdf_path) as _plb:
+            for _i, _pp in enumerate(_plb.pages):
+                _u = (_pp.extract_text() or "").upper()
+                _is_ba = "BERITA ACARA" in _u
+                _ip = _u.find(_PEMB)
+                _ik = _u.find(_KLAR)
+                if _ip != -1 and _ip < 200 and not _is_ba:
+                    _pemb_pages.append(_i)
+                if _ik != -1 and _ik < 200 and not _is_ba:
+                    _klarif_pages.append(_i)
+
+        # Titik sisip (0-based index halaman SETELAH mana BA disisipkan).
+        # Evaluasi: setelah occurrence #1 pembuktian → butuh >=2 occurrence.
+        _insert_after = {}  # {page_index: [list_pdf_path]}
+        if _ev_path and len(_pemb_pages) >= 2:
+            _insert_after.setdefault(_pemb_pages[0], []).append(_ev_path)
+        if _hs_path and len(_klarif_pages) >= 2:
+            _insert_after.setdefault(_klarif_pages[0], []).append(_hs_path)
+
+        if not _insert_after:
+            return  # tidak ada anchor valid, biarkan PDF apa adanya
+
+        _writer = PdfWriter()
+        for _i in range(_n):
+            _writer.add_page(_rdr.pages[_i])
+            for _bp in _insert_after.get(_i, []):
+                try:
+                    _brdr = PdfReader(_bp)
+                    for _bpg in _brdr.pages:
+                        _writer.add_page(_bpg)
+                except Exception:
+                    pass
+
+        # Tulis ke file sementara lalu ganti (hindari korup jika gagal di tengah)
+        _tmp = pdf_path + "_withba.pdf"
+        with open(_tmp, "wb") as _f:
+            _writer.write(_f)
+        os.replace(_tmp, pdf_path)
+    except Exception:
+        pass  # best-effort, jangan gagalkan cetak utama
+
+
 def merge_word(word_path, data, mode="buka", pdf_name=""):
     import pythoncom
     import win32com.client
@@ -296,6 +374,8 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     # Tidak ada sheet 7.2, rename tmp -> final
                     import shutil as _sh
                     _sh.move(_tmp_word, _pdf_path)
+                # Sisip 2 BA (Evaluasi /05/ + Hasil /07/) jika file-nya ada di folder
+                _sisip_2ba_pljkk(_pdf_path, _folder)
                 show_success(_pdf_path)
             elif mode == "printer_bapljkk":
                 _printer_name = pdf_name
