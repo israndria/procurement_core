@@ -601,3 +601,113 @@
 [2026-05-09 07:53:17] ============================================================
 [2026-05-09 07:53:17] 🚀 Mulai sync jadwal tender...
 [2026-05-09 07:53:17] 📭 Database kosong — tidak ada URL untuk disync.
+[2026-05-15 16:43:00] ============================================================
+[2026-05-15 16:43:57] ============================================================
+[2026-05-15 16:43:57] 🚀 Mulai sync jadwal tender...
+[2026-05-15 16:43:57] 🔄 Refreshing Google token...
+[2026-05-15 16:46:24] ============================================================
+[2026-05-15 16:46:24] 🚀 Mulai sync jadwal tender...
+[2026-05-15 16:46:25] 🔄 Refreshing Google token...
+[2026-05-15 16:47:03] ============================================================
+[2026-05-15 16:47:03] 🚀 Mulai sync jadwal tender...
+[2026-05-15 16:47:03] 
+🔍 [1/2] Pembangunan Villa Wisata di Tahura Mandiangin/Bukit Batu
+[2026-05-15 16:47:03]   ✅ Tidak ada perubahan.
+[2026-05-15 16:47:03] 
+🔍 [2/2] Belanja Modal Asrama
+[2026-05-15 16:47:03]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-05-15 16:47:18]   📅 12 event berhasil dimasukkan.
+[2026-05-15 16:47:18] 
+📊 Selesai — Updated: 1 | Unchanged: 1 | Failed: 0
+[2026-05-15 16:47:18] ============================================================
+[2026-05-15 16:55:05] ============================================================
+[2026-05-15 16:55:05] 🚀 Mulai sync jadwal tender...
+[2026-05-15 16:55:05] 
+🔍 [1/4] Pembangunan Villa Wisata di Tahura Mandiangin/Bukit Batu
+[2026-05-15 16:55:06]   ✅ Tidak ada perubahan.
+[2026-05-15 16:55:06] 
+🔍 [2/4] Belanja Modal Asrama
+[2026-05-15 16:55:06]   ✅ Tidak ada perubahan.
+[2026-05-15 16:55:06] 
+🔍 [3/4] Belanja Modal Bangunan Kesehatan (Pembangunan Cytotoxic)
+[2026-05-15 16:55:06]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-05-15 16:55:13]   📅 12 event berhasil dimasukkan.
+[2026-05-15 16:55:13] 
+🔍 [4/4] Belanja Pemeliharaan Bangunan Gedung-Bangunan Gedung Tempat Kerja-Bangunan Kesehatan (Rehab Plafon/Pasad)
+[2026-05-15 16:55:13]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-05-15 16:55:21]   📅 12 event berhasil dimasukkan.
+[2026-05-15 16:55:21] 
+📊 Selesai — Updated: 2 | Unchanged: 2 | Failed: 0
+[2026-05-15 16:55:21] ============================================================
+[2026-05-15 17:11:05] ============================================================
+[2026-05-15 17:11:05] 🚀 Mulai sync jadwal tender...
+[2026-05-15 17:11:05] 
+🔍 [1/4] Pembangunan Villa Wisata di Tahura Mandiangin/Bukit Batu
+[2026-05-15 17:11:05]   ✅ Tidak ada perubahan.
+[2026-05-15 17:11:05] 
+🔍 [2/4] Belanja Modal Asrama
+[2026-05-15 17:11:05]   ✅ Tidak ada perubahan.
+[2026-05-15 17:11:05] 
+🔍 [3/4] Belanja Modal Bangunan Kesehatan (Pembangunan Cytotoxic)
+[2026-05-15 17:11:05]   ✅ Tidak ada perubahan.
+[2026-05-15 17:11:05] 
+🔍 [4/4] Belanja Pemeliharaan Bangunan Gedung-Bangunan Gedung Tempat Kerja-Bangunan Kesehatan (Rehab Plafon/Pasad)
+[2026-05-15 17:11:06]   ✅ Tidak ada perubahan.
+[2026-05-15 17:11:06] 
+📊 Selesai — Updated: 0 | Unchanged: 4 | Failed: 0
+[2026-05-15 17:11:06] ============================================================
+[2026-05-15 17:15:41] ============================================================
+[2026-05-15 17:15:41] 🚀 Mulai sync jadwal tender...
+[2026-05-15 17:15:41] 
+🔍 [1/4] Pembangunan Villa Wisata di Tahura Mandiangin/Bukit Batu
+[2026-05-15 17:15:41]   ✅ Tidak ada perubahan.
+[2026-05-15 17:15:41] 
+🔍 [2/4] Belanja Modal Asrama
+[2026-05-15 17:15:42]   ✅ Tidak ada perubahan.
+[2026-05-15 17:15:42] 
+🔍 [3/4] Belanja Modal Bangunan Kesehatan (Pembangunan Cytotoxic)
+[2026-05-15 17:15:42]   ✅ Tidak ada perubahan.
+[2026-05-15 17:15:42] 
+🔍 [4/4] Belanja Pemeliharaan Bangunan Gedung-Bangunan Gedung Tempat Kerja-Bangunan Kesehatan (Rehab Plafon/Pasad)
+[2026-05-15 17:15:42]   ✅ Tidak ada perubahan.
+[2026-05-15 17:15:42] 
+📊 Selesai — Updated: 0 | Unchanged: 4 | Failed: 0
+[2026-05-15 17:15:42] ============================================================
+[2026-05-18 19:22:38] ============================================================
+[2026-05-18 19:22:38] 🚀 Mulai sync jadwal tender...
+[2026-05-18 19:22:38] 
+🔍 [1/4] Pembangunan Villa Wisata di Tahura Mandiangin/Bukit Batu
+[2026-05-18 19:22:38]   ✅ Tidak ada perubahan.
+[2026-05-18 19:22:38] 
+🔍 [2/4] Belanja Modal Asrama
+[2026-05-18 19:22:39]   ✅ Tidak ada perubahan.
+[2026-05-18 19:22:39] 
+🔍 [3/4] Belanja Modal Bangunan Kesehatan (Pembangunan Cytotoxic)
+[2026-05-18 19:22:39]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-05-18 19:22:53]   📅 12 event berhasil dimasukkan.
+[2026-05-18 19:22:53] 
+🔍 [4/4] Belanja Pemeliharaan Bangunan Gedung-Bangunan Gedung Tempat Kerja-Bangunan Kesehatan (Rehab Plafon/Pasad)
+[2026-05-18 19:22:53]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-05-18 19:23:06]   📅 12 event berhasil dimasukkan.
+[2026-05-18 19:23:06] 
+📊 Selesai — Updated: 2 | Unchanged: 2 | Failed: 0
+[2026-05-18 19:23:06] ============================================================
+[2026-06-04 07:09:37] ============================================================
+[2026-06-04 07:09:37] 🚀 Mulai sync jadwal tender...
+[2026-06-04 07:09:37] 
+🔍 [1/4] Pembangunan Villa Wisata di Tahura Mandiangin/Bukit Batu
+[2026-06-04 07:09:38]   ✅ Tidak ada perubahan.
+[2026-06-04 07:09:38] 
+🔍 [2/4] Belanja Modal Asrama
+[2026-06-04 07:09:38]   ✅ Tidak ada perubahan.
+[2026-06-04 07:09:38] 
+🔍 [3/4] Belanja Modal Bangunan Kesehatan (Pembangunan Cytotoxic)
+[2026-06-04 07:09:38]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-06-04 07:09:50]   📅 12 event berhasil dimasukkan.
+[2026-06-04 07:09:50] 
+🔍 [4/4] Belanja Pemeliharaan Bangunan Gedung-Bangunan Gedung Tempat Kerja-Bangunan Kesehatan (Rehab Plafon/Pasad)
+[2026-06-04 07:09:50]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-06-04 07:10:02]   📅 12 event berhasil dimasukkan.
+[2026-06-04 07:10:02] 
+📊 Selesai — Updated: 2 | Unchanged: 2 | Failed: 0
+[2026-06-04 07:10:02] ============================================================
