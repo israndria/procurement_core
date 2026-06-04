@@ -243,6 +243,91 @@ def _sisip_2ba_pljkk(pdf_path, folder):
         pass  # best-effort, jangan gagalkan cetak utama
 
 
+def _export_sheet_pdf(excel_path, sheet_name, out_pdf, landscape=True, fit_wide=None, fit_tall=None):
+    """Export 1 sheet Excel -> PDF. Return True jika sukses, False jika sheet tak ada/gagal."""
+    import win32com.client
+    xlApp = None
+    wb_xl = None
+    try:
+        xlApp = win32com.client.DispatchEx("Excel.Application")
+        xlApp.Visible = False
+        xlApp.DisplayAlerts = False
+        wb_xl = xlApp.Workbooks.Open(excel_path, ReadOnly=True)
+        try:
+            ws = wb_xl.Sheets(sheet_name)
+        except Exception:
+            return False
+        if landscape:
+            ws.PageSetup.Orientation = 2  # xlLandscape
+        if fit_wide is not None or fit_tall is not None:
+            ws.PageSetup.Zoom = False
+            if fit_wide is not None:
+                ws.PageSetup.FitToPagesWide = fit_wide
+            if fit_tall is not None:
+                ws.PageSetup.FitToPagesTall = fit_tall
+        ws.ExportAsFixedFormat(0, out_pdf)  # 0 = xlTypePDF
+        return True
+    except Exception:
+        return False
+    finally:
+        if wb_xl:
+            try: wb_xl.Close(False)
+            except Exception: pass
+        if xlApp:
+            try: xlApp.Quit()
+            except Exception: pass
+
+
+def _stitch_excel_at_anchor(word_pdf, anchor_excel_pairs, out_pdf):
+    """
+    Sisip PDF Excel ke word_pdf SETELAH tiap halaman yang mengandung anchor teks.
+
+    anchor_excel_pairs: list of (anchor_text_upper, excel_pdf_path).
+      Tiap occurrence anchor di word_pdf -> sisip excel_pdf_path setelah halaman itu.
+      Anchor dicocokkan berurutan: occurrence ke-N halaman anchor -> excel ke-N (jika anchor
+      sama, daftarkan pasangan itu sekali per occurrence — lihat caller).
+
+    Implementasi: scan tiap halaman word, untuk tiap anchor yang match di halaman,
+    jadwalkan sisip excel-nya setelah halaman tsb. Robust thd geseran halaman.
+    """
+    import pdfplumber
+    from pypdf import PdfReader, PdfWriter
+
+    rdr_word = PdfReader(word_pdf)
+    n_word = len(rdr_word.pages)
+
+    # cache reader excel per path
+    _excel_readers = {}
+    def _rdr_excel(p):
+        if p not in _excel_readers:
+            _excel_readers[p] = PdfReader(p)
+        return _excel_readers[p]
+
+    # Hitung occurrence per anchor; tiap (anchor,excel) dipakai sekali berurutan.
+    # Bangun antrian per anchor_text -> list excel_pdf (FIFO).
+    from collections import defaultdict, deque
+    queues = defaultdict(deque)
+    for atext, epath in anchor_excel_pairs:
+        queues[atext.upper()].append(epath)
+
+    # Tentukan halaman -> list excel yang disisip setelahnya.
+    insert_after = defaultdict(list)  # page_idx -> [excel_path,...]
+    with pdfplumber.open(word_pdf) as plb:
+        for pi, pp in enumerate(plb.pages):
+            up = (pp.extract_text() or "").upper()
+            for atext, q in queues.items():
+                if q and atext in up:
+                    insert_after[pi].append(q.popleft())
+
+    writer = PdfWriter()
+    for pi in range(n_word):
+        writer.add_page(rdr_word.pages[pi])
+        for epath in insert_after.get(pi, []):
+            for epg in _rdr_excel(epath).pages:
+                writer.add_page(epg)
+    return _safe_write_pdf(writer, out_pdf)
+
+
 def merge_word(word_path, data, mode="buka", pdf_name=""):
     import pythoncom
     import win32com.client
@@ -464,10 +549,13 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             except:
                 pass
 
-        # Cleanup blank pages HANYA untuk "1. Full Dokumen BA PK"
-        # File "2. Isi Reviu" dan "3. Dokpil" dikecualikan karena strukturnya berbeda dan bisa berantakan
-        # Untuk mode PDF: Word tetap hidden (ScreenUpdating cukup untuk layout calculation)
-        if "1. Full Dokumen BA PK" in os.path.basename(word_path):
+        # Cleanup blank pages untuk file BA utama (satu_data) yang multi-section.
+        # File "2. Isi Reviu" & "3. Dokpil" dikecualikan (struktur beda, bisa berantakan).
+        # Template BA dipecah per-dokumen: 4=Undangan, 5=BA Utama, 6=Ringkasan, 7=Timpang.
+        _bn_cleanup = os.path.basename(word_path)
+        if any(_bn_cleanup.startswith(_p) for _p in (
+            "1. Full Dokumen", "4. Undangan", "5. Berita Acara", "6. Ringkasan", "7. BA Dengan"
+        )):
             wdApp.ScreenUpdating = True
             if mode in ("buka", "print"):
                 wdApp.Visible = True
@@ -564,7 +652,38 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         elif mode.startswith("pdf"):
             safe_name = pdf_name if pdf_name else "000"
 
-            if mode == "pdf_bareviu":
+            if mode == "pdf_full":
+                # Export full dokumen (template BA dipecah per-file, no page-range).
+                # Ambil kode_unik dari @ Master Data!G2 jika ada (fallback safe_name).
+                _ku_full = safe_name
+                try:
+                    import glob as _glob_full
+                    _xlsm_full = _glob_full.glob(os.path.join(folder, "*.xlsm"))
+                    if _xlsm_full:
+                        _xl_full = win32com.client.DispatchEx("Excel.Application")
+                        _xl_full.Visible = False
+                        _wb_full = _xl_full.Workbooks.Open(_xlsm_full[0], ReadOnly=True)
+                        _ku_v = str(_wb_full.Sheets("@ Master Data").Range("G2").Value).strip()
+                        _wb_full.Close(False)
+                        _xl_full.Quit()
+                        if _ku_v and _ku_v not in ("", "None", "null"):
+                            _ku_full = _ku_v
+                except Exception:
+                    pass
+                # Label dokumen dari nama file Word (prefix angka)
+                _bn_full = os.path.basename(word_path)
+                _label = "Dokumen"
+                if _bn_full.startswith("1. Reviu"):       _label = "BA_REVIU_DPP"
+                elif _bn_full.startswith("4. Undangan"):   _label = "Undangan"
+                elif _bn_full.startswith("6. Ringkasan"):  _label = "REvaluasi"
+                pdf_path = os.path.join(folder, f"{_label}_{_ku_full}.pdf")
+                wdDoc.ExportAsFixedFormat(
+                    OutputFileName=pdf_path,
+                    ExportFormat=17,
+                    Range=0,  # wdExportAllDocument
+                )
+                show_success(pdf_path)
+            elif mode == "pdf_bareviu":
                 pdf_path = os.path.join(folder, f"BA_REVIU_DPP_{safe_name}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
@@ -669,178 +788,64 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 show_success(pdf_path)
             elif mode == "pdf_pembuktian":
+                # File "5. Berita Acara Utama PK": export full Word -> PDF, sisip sheet
+                # "7.2 Dengan Nego" SETELAH tiap halaman anchor nego (2 occurrence).
+                # Anchor teks robust thd geseran halaman (ganti page-range/index manual).
                 import tempfile
-                from pypdf import PdfReader, PdfWriter
-                
                 final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Nego_{safe_name}.pdf")
                 temp_dir = tempfile.mkdtemp()
                 temp_word_pdf = os.path.join(temp_dir, "temp_word.pdf")
-                temp_excel_pdf = os.path.join(temp_dir, "temp_excel.pdf")
-                
-                # 1. Export Word Halaman 7-29
+                temp_nego_pdf = os.path.join(temp_dir, "temp_nego.pdf")
+
                 wdDoc.ExportAsFixedFormat(
-                    OutputFileName=temp_word_pdf,
-                    ExportFormat=17,
-                    Range=3,
-                    From=7,
-                    To=29,
+                    OutputFileName=temp_word_pdf, ExportFormat=17, Range=0,
                 )
-                
-                # 2. Export Excel Sheet 7.2
-                xlApp = None
-                wb_xl = None
-                try:
-                    xlApp = win32com.client.DispatchEx("Excel.Application")
-                    xlApp.Visible = False
-                    xlApp.DisplayAlerts = False
-                    wb_xl = xlApp.Workbooks.Open(excel_path, ReadOnly=True)
-                    ws_nego = wb_xl.Sheets("7.2 Dengan Nego")
-                    ws_nego.PageSetup.Orientation = 2  # xlLandscape
-                    ws_nego.ExportAsFixedFormat(0, temp_excel_pdf) # 0 = xlTypePDF
-                finally:
-                    if wb_xl:
-                        try: wb_xl.Close(False)
-                        except: pass
-                    if xlApp:
-                        try: xlApp.Quit()
-                        except: pass
-                
-                # 3. Gabungkan dengan PyPDF2
-                writer = PdfWriter()
-                reader_word = PdfReader(temp_word_pdf)
-                reader_excel = PdfReader(temp_excel_pdf)
-                
-                # Word 7-17 itu index range(0, 11) karena From=7 adalah index 0 di pdf word
-                for i in range(11):
-                    if i < len(reader_word.pages):
-                        writer.add_page(reader_word.pages[i])
-                
-                # Sisipkan Nego Pertama (Setelah Hal 17) — semua halaman Excel
-                for ep in reader_excel.pages:
-                    writer.add_page(ep)
+                _has_nego = _export_sheet_pdf(excel_path, "7.2 Dengan Nego", temp_nego_pdf, landscape=True)
 
-                # Word 18-26 itu index range(11, 20)
-                for i in range(11, 20):
-                    if i < len(reader_word.pages):
-                        writer.add_page(reader_word.pages[i])
-
-                # Sisipkan Nego Kedua (Setelah Hal 26) — semua halaman Excel
-                for ep in reader_excel.pages:
-                    writer.add_page(ep)
-                    
-                # Word 27-29 itu index range(20, end)
-                for i in range(20, len(reader_word.pages)):
-                    writer.add_page(reader_word.pages[i])
-                    
-                final_pdf_path = _safe_write_pdf(writer, final_pdf_path)
+                _ANCHOR_NEGO = "DAFTAR HADIR NEGOSIASI KUANTITAS DAN HARGA"
+                if _has_nego:
+                    # 2 occurrence anchor -> sisip nego 2x (FIFO antrian di helper)
+                    pairs = [(_ANCHOR_NEGO, temp_nego_pdf), (_ANCHOR_NEGO, temp_nego_pdf)]
+                    final_pdf_path = _stitch_excel_at_anchor(temp_word_pdf, pairs, final_pdf_path)
+                else:
+                    import shutil as _sh
+                    _sh.copy2(temp_word_pdf, final_pdf_path)
                 show_success(final_pdf_path)
 
             elif mode == "pdf_pembuktian_timpang":
+                # File "7. BA Dengan Timpang PK": export full Word -> PDF, sisip:
+                #   - "7.2 Dengan Nego" setelah tiap anchor nego (2 occurrence)
+                #   - "Klarifikasi Timpang Fix (2)" setelah tiap anchor timpang (2 occurrence)
+                # Urutan sisip per halaman ditentukan posisi anchor di dokumen (robust).
                 import tempfile
-                from pypdf import PdfReader, PdfWriter
-                
                 final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Timpang_{safe_name}.pdf")
                 temp_dir = tempfile.mkdtemp()
                 temp_word_pdf = os.path.join(temp_dir, "temp_word.pdf")
                 temp_nego_pdf = os.path.join(temp_dir, "temp_nego.pdf")
                 temp_timpang_pdf = os.path.join(temp_dir, "temp_timpang.pdf")
-                
-                # 1. Export Word Halaman 7-44 (44 = tanda terima timpang)
+
                 wdDoc.ExportAsFixedFormat(
-                    OutputFileName=temp_word_pdf,
-                    ExportFormat=17,
-                    Range=3,
-                    From=7,
-                    To=44,
+                    OutputFileName=temp_word_pdf, ExportFormat=17, Range=0,
                 )
-                
-                # 2. Export Excel Sheets (Nego dan Timpang)
-                xlApp = None
-                wb_xl = None
-                try:
-                    xlApp = win32com.client.DispatchEx("Excel.Application")
-                    xlApp.Visible = False
-                    xlApp.DisplayAlerts = False
-                    wb_xl = xlApp.Workbooks.Open(excel_path, ReadOnly=True)
-                    
-                    # Nego
-                    ws_nego = wb_xl.Sheets("7.2 Dengan Nego")
-                    ws_nego.PageSetup.Orientation = 2  # xlLandscape
-                    ws_nego.ExportAsFixedFormat(0, temp_nego_pdf)
-                    
-                    # Timpang
-                    ws_timpang = wb_xl.Sheets("Klarifikasi Timpang Fix (2)")
-                    ws_timpang.PageSetup.Orientation = 2 # xlLandscape
-                    ws_timpang.PageSetup.Zoom = False
-                    ws_timpang.PageSetup.FitToPagesWide = 1
-                    ws_timpang.PageSetup.FitToPagesTall = 1
-                    ws_timpang.ExportAsFixedFormat(0, temp_timpang_pdf)
-                finally:
-                    if wb_xl:
-                        try: wb_xl.Close(False)
-                        except: pass
-                    if xlApp:
-                        try: xlApp.Quit()
-                        except: pass
-                        
-                # 3. Merajut semuanya
-                writer = PdfWriter()
-                reader_word = PdfReader(temp_word_pdf)
-                reader_nego = PdfReader(temp_nego_pdf)
-                reader_timpang = PdfReader(temp_timpang_pdf)
-                
-                def add_wp(start_idx, end_idx):
-                    for i in range(start_idx, end_idx):
-                        if i < len(reader_word.pages): writer.add_page(reader_word.pages[i])
-                
-                def add_nego():
-                    for p in reader_nego.pages:
-                        writer.add_page(p)
+                _has_nego = _export_sheet_pdf(excel_path, "7.2 Dengan Nego", temp_nego_pdf, landscape=True)
+                _has_timpang = _export_sheet_pdf(
+                    excel_path, "Klarifikasi Timpang Fix (2)", temp_timpang_pdf,
+                    landscape=True, fit_wide=1, fit_tall=1,
+                )
 
-                def add_timpang():
-                    for p in reader_timpang.pages:
-                        writer.add_page(p)
-                
-                # Part 1: Word 7-16 (Index 0-9)
-                add_wp(0, 10)
-                
-                # ------ PENYISIPAN PERTAMA ------
-                # Sisipkan Word 38, 39 (Index 31, 32)
-                add_wp(31, 33)
-                # Sisipkan Timpang
-                add_timpang()
-                # Sisipkan Word 40 (Index 33)
-                add_wp(33, 34)
-                
-                # Part 4: Word 17 (Index 10)
-                add_wp(10, 11)
-                # Part 5: Sisipkan Nego
-                add_nego()
-                
-                # Part 6: Word 18-25 (Index 11-18)
-                add_wp(11, 19)
-                
-                # ------ PENYISIPAN KEDUA ------
-                # Sisipkan Word 41, 42 (Index 34, 35)
-                add_wp(34, 36)
-                # Sisipkan Timpang
-                add_timpang()
-                # Sisipkan Word 43 (Index 36)
-                add_wp(36, 37)
-                
-                # Part 9: Word 26 (Index 19)
-                add_wp(19, 20)
-                # Part 10: Sisipkan Nego
-                add_nego()
-                
-                # Part 11: Word 27 saja (Index 20)
-                add_wp(20, 21)
+                _ANCHOR_NEGO = "DAFTAR HADIR NEGOSIASI KUANTITAS DAN HARGA"
+                _ANCHOR_TIMPANG = "DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG"
+                pairs = []
+                if _has_nego:
+                    pairs += [(_ANCHOR_NEGO, temp_nego_pdf), (_ANCHOR_NEGO, temp_nego_pdf)]
+                if _has_timpang:
+                    pairs += [(_ANCHOR_TIMPANG, temp_timpang_pdf), (_ANCHOR_TIMPANG, temp_timpang_pdf)]
 
-                # Part 12: Tanda Terima Timpang (Word 44 = Index 37), 2x
-                add_wp(37, 38)
-                add_wp(37, 38)
-                
-                final_pdf_path = _safe_write_pdf(writer, final_pdf_path)
+                if pairs:
+                    final_pdf_path = _stitch_excel_at_anchor(temp_word_pdf, pairs, final_pdf_path)
+                else:
+                    import shutil as _sh
+                    _sh.copy2(temp_word_pdf, final_pdf_path)
                 show_success(final_pdf_path)
 
             else:
@@ -892,13 +897,18 @@ def _safe_write_pdf(writer, target_path):
 
 
 def show_success(pdf_path):
-    """Notifikasi popup setelah PDF selesai dibuat."""
+    """Notifikasi popup setelah PDF selesai dibuat, lalu buka file."""
     try:
         import ctypes
         filename = os.path.basename(pdf_path)
         ctypes.windll.user32.MessageBoxW(
             0, f"PDF berhasil dibuat:\n{filename}", "Export PDF Selesai", 0x40
         )
+    except:
+        pass
+    try:
+        if os.path.exists(pdf_path):
+            os.startfile(pdf_path)
     except:
         pass
 

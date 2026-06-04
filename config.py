@@ -29,17 +29,29 @@ SHEET_DOKPIL = "list_dokpil"
 
 # ===== WORD TEMPLATE → SHEET MAPPING =====
 # (nama_file_word, sheet_name)
+# Template BA tender DIPECAH per-dokumen (dulu monolitik "1. Full Dokumen BAPK").
+# File monolitik lama diarsipkan di Paket Experiment\backup\.
 WORD_SHEET_MAP = [
-    ("1. Full Dokumen BAPK - Template.docx", SHEET_BA),
-    ("2. Isi Reviu PK - Template.docm",       SHEET_REVIU),
-    ("3. Dokpil Full PK - Template.docx",      SHEET_DOKPIL),
+    ("1. Reviu Dok. Persiapan Pengadaan - Template.docx", SHEET_BA),
+    ("2. Isi Reviu PK - Template.docm",                   SHEET_REVIU),
+    ("3. Dokpil Full PK - Template.docx",                 SHEET_DOKPIL),
+    ("4. Undangan Full PK - Template.docx",               SHEET_BA),
+    ("5. Berita Acara Utama PK - Template.docx",          SHEET_BA),
+    ("6. Ringkasan Evaluasi PK - Template.docx",          SHEET_BA),
+    ("7. BA Dengan Timpang PK - Template.docx",           SHEET_BA),
 ]
 
-# Keyword mapping: untuk detect sheet dari nama file Word (dipakai relink)
+# Keyword mapping: untuk detect sheet dari nama file Word (dipakai relink).
+# Urutan penting: keyword spesifik dulu (Isi Reviu pakai list_reviu, selain itu satu_data).
 WORD_KEYWORD_MAP = {
-    "BAPK":    SHEET_BA,
-    "Reviu":   SHEET_REVIU,
-    "Dokpil":  SHEET_DOKPIL,
+    "Isi Reviu": SHEET_REVIU,
+    "Dokpil":    SHEET_DOKPIL,
+    "Reviu Dok": SHEET_BA,      # BA Reviu DPP — sumber satu_data
+    "Undangan":  SHEET_BA,
+    "Berita Acara Utama": SHEET_BA,
+    "Ringkasan Evaluasi": SHEET_BA,
+    "Timpang":   SHEET_BA,
+    "BAPK":      SHEET_BA,
 }
 
 # ===== PL (Pengadaan Langsung) TEMPLATE =====

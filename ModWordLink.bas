@@ -8,10 +8,14 @@ Attribute VB_Name = "ModWordLink"
 ' v1.4: Path dinamis - tidak perlu hardcode, otomatis detect dari lokasi Excel
 ' Struktur folder: @ POKJA 2026\<Paket>\file.xlsm  →  @ POKJA 2026\V19_Scheduler\WPy64-313110\
 
-' Pattern whitelist - cocok untuk semua varian nama (PK, PLJK, PLPK, dll)
-Private Const PATTERN_BA As String = "1. Full Dokumen"
-Private Const PATTERN_REVIU As String = "2. Isi Reviu"
+' Pattern whitelist per-dokumen (template BA tender dipecah dari monolitik "1. Full Dokumen")
+Private Const PATTERN_BAREVIU As String = "1. Reviu Dok"
+Private Const PATTERN_ISIREVIU As String = "2. Isi Reviu"
 Private Const PATTERN_DOKPIL As String = "3. Dokpil"
+Private Const PATTERN_UNDANGAN As String = "4. Undangan"
+Private Const PATTERN_BAUTAMA As String = "5. Berita Acara Utama"
+Private Const PATTERN_REVALUASI As String = "6. Ringkasan Evaluasi"
+Private Const PATTERN_TIMPANG As String = "7. BA Dengan Timpang"
 
 Private Const SHEET_BA As String = "satu_data"
 Private Const SHEET_REVIU As String = "list_reviu"
@@ -24,11 +28,11 @@ Private m_LastPrinter As String
 ' ===== BUKA (merge + tampilkan Word) =====
 
 Public Sub BukaBA()
-    RunMerge "buka", FindWordFile(PATTERN_BA), SHEET_BA
+    RunMerge "buka", FindWordFile(PATTERN_BAUTAMA), SHEET_BA
 End Sub
 
 Public Sub BukaReviu()
-    RunMerge "buka", FindWordFile(PATTERN_REVIU), SHEET_REVIU
+    RunMerge "buka", FindWordFile(PATTERN_ISIREVIU), SHEET_REVIU
 End Sub
 
 Public Sub BukaDokpil()
@@ -36,13 +40,14 @@ Public Sub BukaDokpil()
 End Sub
 
 ' ===== PRINT PDF (semua pakai RunPDF) =====
+' File BA tender DIPECAH per-dokumen: tiap tombol -> file Word sendiri, export full (no page-range)
 
 Public Sub PrintBAReviuPDF()
-    RunPDF "pdf_bareviu", FindWordFile(PATTERN_BA), SHEET_BA, "BA_REVIU_DPP"
+    RunPDF "pdf_full", FindWordFile(PATTERN_BAREVIU), SHEET_BA, "BA_REVIU_DPP"
 End Sub
 
 Public Sub PrintIsiReviuPDF()
-    RunPDF "pdf_all", FindWordFile(PATTERN_REVIU), SHEET_REVIU, "Isi_Reviu"
+    RunPDF "pdf_all", FindWordFile(PATTERN_ISIREVIU), SHEET_REVIU, "Isi_Reviu"
 End Sub
 
 Public Sub PrintDokpilPDF()
@@ -50,19 +55,19 @@ Public Sub PrintDokpilPDF()
 End Sub
 
 Public Sub PrintUndanganPDF()
-    RunPDF "pdf", FindWordFile(PATTERN_BA), SHEET_BA, "Undangan"
+    RunPDF "pdf_full", FindWordFile(PATTERN_UNDANGAN), SHEET_BA, "Undangan"
 End Sub
 
 Public Sub PrintPembuktianPDF()
-    RunPDF "pdf_pembuktian", FindWordFile(PATTERN_BA), SHEET_BA, "BA Pembuktian & Nego"
+    RunPDF "pdf_pembuktian", FindWordFile(PATTERN_BAUTAMA), SHEET_BA, "BA Pembuktian & Nego"
 End Sub
 
 Public Sub PrintREvaluasiPDF()
-    RunPDF "pdf_revaluasi", FindWordFile(PATTERN_BA), SHEET_BA, "REvaluasi"
+    RunPDF "pdf_full", FindWordFile(PATTERN_REVALUASI), SHEET_BA, "REvaluasi"
 End Sub
 
 Public Sub PrintPembuktianTimpangPDF()
-    RunPDF "pdf_pembuktian_timpang", FindWordFile(PATTERN_BA), SHEET_BA, "BA Pembuktian Timpang"
+    RunPDF "pdf_pembuktian_timpang", FindWordFile(PATTERN_TIMPANG), SHEET_BA, "BA Pembuktian Timpang"
 End Sub
 
 ' ===== CORE: Panggil Python script (non-blocking) =====
@@ -106,15 +111,9 @@ Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, stat
     Set wsh = CreateObject("WScript.Shell")
 
     If outputMode = "printer" Then
-        ' Mapping page range per mode (0 = all pages)
+        ' File BA dipecah per-dokumen: tiap file export full -> printer all pages (0,0)
         Dim fromPage As Long, toPage As Long
         fromPage = 0: toPage = 0
-        Select Case mode
-            Case "pdf_bareviu": fromPage = 3: toPage = 6
-            Case "pdf_revaluasi": fromPage = 30: toPage = 37
-            Case "pdf": fromPage = 1: toPage = 2  ' Undangan
-            ' pdf_all, pdf_dokpil = all pages (0,0)
-        End Select
 
         cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " printer " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(sheetName) & " " & Q(printerName) & " " & fromPage & " " & toPage
     Else

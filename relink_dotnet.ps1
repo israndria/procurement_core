@@ -52,12 +52,20 @@ $segments = $pathForUri.Split('/')
 $encodedSegments = $segments | ForEach-Object { [uri]::EscapeDataString($_) }
 $excelUri = "file:///" + ($encodedSegments -join "/")
 
-# Mapping
-$mapping = @{
-    "BAPK"   = "satu_data"
-    "Reviu"  = "list_reviu"
-    "Dokpil" = "list_dokpil"
-}
+# Mapping (URUTAN PENTING: keyword spesifik dicek dulu).
+# Template BA tender dipecah per-dokumen. Hanya "Isi Reviu" -> list_reviu, "Dokpil" -> list_dokpil,
+# SISANYA (Reviu Dok/Undangan/Berita Acara/Ringkasan/Timpang/BAPK/Full Dokumen) -> satu_data.
+$mappingOrdered = @(
+    ,@("Isi Reviu", "list_reviu")
+    ,@("Dokpil",    "list_dokpil")
+    ,@("Reviu Dok", "satu_data")
+    ,@("Undangan",  "satu_data")
+    ,@("Berita Acara", "satu_data")
+    ,@("Ringkasan", "satu_data")
+    ,@("Timpang",   "satu_data")
+    ,@("Full Dokumen", "satu_data")
+    ,@("BAPK",      "satu_data")
+)
 
 $results = @()
 
@@ -70,11 +78,11 @@ Get-ChildItem $folder | Where-Object {
     $docxPath = $_.FullName
     $docxName = $_.Name
 
-    # Detect sheet
+    # Detect sheet (urutan deterministik: keyword spesifik dulu)
     $sheet = $null
-    foreach ($kw in $mapping.Keys) {
-        if ($docxName -match [regex]::Escape($kw)) {
-            $sheet = $mapping[$kw]
+    foreach ($pair in $mappingOrdered) {
+        if ($docxName -match [regex]::Escape($pair[0])) {
+            $sheet = $pair[1]
             break
         }
     }

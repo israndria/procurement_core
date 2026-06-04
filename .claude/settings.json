@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl *)",
+      "Bash(tasklist *)",
+      "Bash(supabase db *)",
+      "Bash(supabase *)",
+      "Bash(mkdir *)",
+      "Bash(start *)",
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(rtk *)"
+    ]
+  }
+}
