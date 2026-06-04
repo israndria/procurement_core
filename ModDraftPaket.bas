@@ -1616,31 +1616,3 @@ Private Sub OverrideSBUdiHasilParse(sbuBaru As String, sbuLama As String)
     End If
 End Sub
 
-' ============================================================
-' UPDATE HPS SAJA (Tanpa Parse Draft)
-' Dipanggil dari tombol "Update HPS Saja" di @ Master Data
-' ============================================================
-Public Sub UpdateHPSSaja()
-    Dim ws As Worksheet
-    On Error Resume Next
-    Set ws = ThisWorkbook.Sheets("1. Input Data")
-    On Error GoTo 0
-    
-    If ws Is Nothing Then
-        MsgBox "Sheet '1. Input Data' tidak ditemukan.", vbExclamation, "Error"
-        Exit Sub
-    End If
-    
-    Dim kodeTender As String
-    kodeTender = Trim(CStr(ws.Range("B5").Value))
-    
-    If kodeTender = "" Then
-        MsgBox "Kode Tender tidak ditemukan di '1. Input Data' B5." & vbCrLf & _
-               "Pastikan data paket sudah dimuat/dipilih.", vbExclamation, "Error"
-        Exit Sub
-    End If
-    
-    MuatHPS kodeTender
-    MsgBox "Proses fetch dan update data HPS selesai." & vbCrLf & _
-           "Silakan cek sheet '5. HPS'.", vbInformation, "Update HPS Saja"
-End Sub
