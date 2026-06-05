@@ -1,5 +1,5 @@
 -- Jalankan SQL ini di Supabase SQL Editor:
--- https://supabase.com/dashboard/project/iubvqphzalodqqhpatcy/sql/new
+-- https://supabase.com/dashboard/project/<YOUR_SUPABASE_PROJECT_ID>/sql/new
 
 CREATE TABLE IF NOT EXISTS public.cara_pembayaran (
   id TEXT PRIMARY KEY,

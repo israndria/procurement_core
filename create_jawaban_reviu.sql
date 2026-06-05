@@ -1,5 +1,5 @@
 -- Tabel jawaban reviu DPP — 1 row per sesi rapat
--- Jalankan di: https://supabase.com/dashboard/project/iubvqphzalodqqhpatcy/sql/new
+-- Jalankan di: https://supabase.com/dashboard/project/<YOUR_SUPABASE_PROJECT_ID>/sql/new
 
 CREATE TABLE IF NOT EXISTS public.jawaban_reviu (
   id_sesi         TEXT PRIMARY KEY DEFAULT 'default',
