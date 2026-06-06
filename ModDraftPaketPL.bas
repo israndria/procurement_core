@@ -46,7 +46,7 @@ Private Const CELL_SELECTOR As String = "F1"
 '        19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
 '        24=mak, 25=nama_penyedia, 26=npwp_penyedia, 27=personil_json, 28=tgl_dokpil, 29=nomor_dokpil, 30=kode_unik
 '        31=tgl_evaluasi, 32=tgl_negosiasi, 33=tgl_penetapan, 34=nomor_nota_dinas, 35=nomor_rekomendasi, 36=tgl_rekomendasi
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan"
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan,tahap_spse"
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -132,18 +132,54 @@ Public Sub MuatDraftPaketPL()
     wsHidden.Columns(1).ClearContents
 
     Dim i As Integer
+    Dim baris As Long: baris = 0
+    Dim nDilewati As Long: nDilewati = 0
+    wsHidden.Columns(2).ClearContents    ' kolom B = tracker nama yang sudah ditulis (dedup)
     For i = 1 To m_DataCache.Count
         Dim item As Variant
         item = m_DataCache(i)
-        ' item(0)=kode_paket, item(1)=nama_paket, item(2)=satker, item(5)=jenis_pl
+        ' item(0)=kode_paket, item(1)=nama_paket, item(2)=satker, item(5)=jenis_pl, item(38)=tahap_spse
+
+        ' Filter: sembunyikan paket yang sudah Penandatanganan Kontrak (selesai)
+        Dim tahap As String: tahap = LCase(Trim(CStr(item(38))))
+        If InStr(tahap, "penandatanganan kontrak") > 0 Then
+            nDilewati = nDilewati + 1
+            GoTo LanjutPaket
+        End If
+
+        ' Dedup by nama_paket: skip bila nama yang sama sudah pernah ditulis
+        Dim namaPkt As String: namaPkt = Trim(CStr(item(1)))
+        Dim sudahAda As Boolean: sudahAda = False
+        Dim j As Long
+        For j = 1 To baris
+            If wsHidden.Cells(j, 2).Value = namaPkt Then
+                sudahAda = True
+                Exit For
+            End If
+        Next j
+        If sudahAda Then GoTo LanjutPaket
+
         Dim label As String
-        label = CStr(item(5)) & " - " & Left(Trim(CStr(item(1))), 55)
-        wsHidden.Cells(i, 1).Value = label
+        label = CStr(item(5)) & " - " & Left(namaPkt, 55)
+        ' Suffix kosmetik bila ada folder paket ulang di disk
+        If FolderUlangAdaPL(namaPkt) Then label = label & " (PL - Ulang)"
+
+        baris = baris + 1
+        wsHidden.Cells(baris, 1).Value = label
+        wsHidden.Cells(baris, 2).Value = namaPkt    ' tracker dedup
+LanjutPaket:
     Next i
+    wsHidden.Columns(2).ClearContents    ' bersihkan tracker
+
+    If baris = 0 Then
+        MsgBox "Semua paket PL sudah Penandatanganan Kontrak (selesai)." & vbCrLf & _
+               "Tidak ada paket aktif untuk dimuat.", vbInformation, "Draft Paket PL"
+        Exit Sub
+    End If
 
     ' Named Range "DaftarDraftPaketPL"
     Dim rngList As Range
-    Set rngList = wsHidden.Range(wsHidden.Cells(1, 1), wsHidden.Cells(m_DataCache.Count, 1))
+    Set rngList = wsHidden.Range(wsHidden.Cells(1, 1), wsHidden.Cells(baris, 1))
     On Error Resume Next
     ThisWorkbook.Names("DaftarDraftPaketPL").Delete
     On Error GoTo ErrHandler
@@ -169,7 +205,10 @@ Public Sub MuatDraftPaketPL()
         Application.EnableEvents = True
     End If
 
-    MsgBox m_DataCache.Count & " paket PL berhasil dimuat." & vbCrLf & _
+    Dim pesanMuat As String
+    pesanMuat = baris & " paket PL aktif dimuat."
+    If nDilewati > 0 Then pesanMuat = pesanMuat & " (" & nDilewati & " disembunyikan — sudah Penandatanganan Kontrak)"
+    MsgBox pesanMuat & vbCrLf & _
            "Pilih paket dari dropdown " & CELL_SELECTOR & ", lalu klik 'Isi Data PL'.", _
            vbInformation, "Draft Paket PL"
     Exit Sub
@@ -200,6 +239,11 @@ Public Sub IsiDataPL()
     If m_DataCache.Count = 0 Then MuatDraftPaketPL
     If m_DataCache.Count = 0 Then Exit Sub
 
+    ' Strip suffix kosmetik "(PL - Ulang)" sebelum match (label dropdown bisa bersuffix)
+    Dim selBersih As String: selBersih = selVal
+    Dim posSuf As Long: posSuf = InStr(selBersih, " (PL - Ulang)")
+    If posSuf > 0 Then selBersih = Trim(Left(selBersih, posSuf - 1))
+
     ' Cari item yang label-nya cocok
     Dim i As Integer
     For i = 1 To m_DataCache.Count
@@ -207,7 +251,7 @@ Public Sub IsiDataPL()
         item = m_DataCache(i)
         Dim label As String
         label = CStr(item(5)) & " - " & Left(Trim(CStr(item(1))), 55)
-        If label = selVal Then
+        If label = selBersih Then
             IsiMasterDataPL wsMD, item
             ' Auto diff highlight setelah isi data
             DiffHighlightPL CStr(item(0))
@@ -383,11 +427,11 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim singkatan As String: singkatan = LookupSingkatanDinas(CStr(item(2)))
         If singkatan = "" Then singkatan = "DPUPR"
 
-        ' Kode unik: prefer Supabase item(30), fallback G2
+        ' Kode unik: prefer Supabase item(30), fallback F2
         Dim koUnik As String: koUnik = CStr(item(30))
-        If koUnik = "" Or koUnik = "null" Then koUnik = CStr(wsMD.Range("G2").Value)
+        If koUnik = "" Or koUnik = "null" Then koUnik = CStr(wsMD.Range("F2").Value)
         If koUnik = "" Or koUnik = "null" Then koUnik = "KodeUnik"
-        wsMD.Range("G2").Value = koUnik
+        wsMD.Range("F2").Value = koUnik
 
         ' Tahun: ambil dari tahun anggaran yang sudah diisi
         Dim tahunDokpil As String: tahunDokpil = CStr(wsMD.Cells(PLR_TAHUN_ANGGARAN, 3).Value)
@@ -402,14 +446,20 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
                 "000.3.3/01/PL/PP-" & numStr & "/" & koUnik & "/" & singkatan & "/" & tahunDokpil
         End If
 
+        ' Paket ulang: sisip /PLU/ di nomor dokpil. Turunan (No Undangan + IsiEvaluasiPL) ikut otomatis.
+        If IsPaketUlang() Then _
+            .Cells(PLR_NOMOR_DOKPIL, 3).Value = SisipPLU(CStr(.Cells(PLR_NOMOR_DOKPIL, 3).Value))
+
         ' Auto-generate No Undangan dari Nomor Dokpil (ganti /01/PL/ -> /02/PL/)
         Dim noUndangan As String
         noUndangan = Replace(.Cells(PLR_NOMOR_DOKPIL, 3).Value, "/01/PL/", "/02/PL/")
         .Cells(PLR_NO_UNDANGAN, 3).Value = noUndangan
 
         ' ── NOMOR BA REVIU: 000.3.3/PP{NN}/02/SKPD/Reviu-KodeUnik/Tahun ────
-        .Cells(PLR_NO_BA_REVIU, 3).Value = _
-            "000.3.3/PP" & numStr & "/02/" & singkatan & "/Reviu-" & koUnik & "/" & tahunDokpil
+        Dim noBAReviu As String
+        noBAReviu = "000.3.3/PP" & numStr & "/02/" & singkatan & "/Reviu-" & koUnik & "/" & tahunDokpil
+        If IsPaketUlang() Then noBAReviu = SisipPLU(noBAReviu)
+        .Cells(PLR_NO_BA_REVIU, 3).Value = noBAReviu
 
         ' ── ALAMAT PP: lookup master_dinas.alamat_pp_bertugas via satker ───
         Dim alamatPP As String: alamatPP = LookupAlamatPP(CStr(item(2)))
@@ -902,6 +952,73 @@ End Sub
 
 
 ' ============================================================
+' PAKET ULANG: deteksi + sisip token /PLU/ di nomor dokumen
+' ============================================================
+Private Function IsPaketUlang() As Boolean
+    ' Workbook paket ulang otomatis bernama "...(PL - Ulang).xlsm"
+    IsPaketUlang = (ThisWorkbook.Name Like "*(PL - Ulang)*")
+End Function
+
+Private Function SisipPLU(ByVal nomor As String) As String
+    ' Sisip "/PLU" tepat setelah prefix "000.3.3". Idempoten.
+    ' 000.3.3/01/PL/...  -> 000.3.3/PLU/01/PL/...
+    SisipPLU = nomor
+    If nomor = "" Then Exit Function
+    If InStr(nomor, "/PLU/") > 0 Then Exit Function
+    If Left(nomor, 7) = "000.3.3" Then SisipPLU = "000.3.3/PLU" & Mid(nomor, 8)
+End Function
+
+' Cek apakah ADA folder paket ulang "...(PL - Ulang)" di root PL yang cocok namaPaket.
+' Root = parent dari folder workbook (ThisWorkbook.Path). Word-match: semua kata
+' panjang (>3 huruf) dari namaPaket harus muncul di nama folder.
+Private Function FolderUlangAdaPL(ByVal namaPaket As String) As Boolean
+    FolderUlangAdaPL = False
+    On Error GoTo SelesaiFU
+
+    Dim root As String
+    Dim p As Long: p = InStrRev(ThisWorkbook.Path, "\")
+    If p <= 3 Then Exit Function
+    root = Left(ThisWorkbook.Path, p - 1)          ' parent folder workbook = root PL
+    If Dir(root, vbDirectory) = "" Then Exit Function
+
+    ' Kumpulkan kata panjang dari namaPaket (lowercase)
+    Dim kata() As String
+    kata = Split(LCase(Trim(namaPaket)), " ")
+
+    Dim f As String
+    f = Dir(root & "\", vbDirectory)
+    Do While f <> ""
+        If f <> "." And f <> ".." Then
+            Dim fl As String: fl = LCase(f)
+            If InStr(fl, "(pl - ulang)") > 0 Then
+                ' cek semua kata panjang ada di nama folder
+                Dim semua As Boolean: semua = True
+                Dim adaKata As Boolean: adaKata = False
+                Dim k As Long
+                For k = LBound(kata) To UBound(kata)
+                    Dim w As String: w = Trim(kata(k))
+                    If Len(w) > 3 Then
+                        adaKata = True
+                        If InStr(fl, w) = 0 Then
+                            semua = False
+                            Exit For
+                        End If
+                    End If
+                Next k
+                If adaKata And semua Then
+                    FolderUlangAdaPL = True
+                    Exit Do
+                End If
+            End If
+        End If
+        f = Dir()
+    Loop
+
+SelesaiFU:
+End Function
+
+
+' ============================================================
 ' HTTP: GET draft_paket_pl dari Supabase
 ' ============================================================
 Private Function FetchSupabasePL() As String
@@ -972,7 +1089,7 @@ Private Function ParsePLJSON(json As String) As Collection
 
         Dim obj As String: obj = Mid(json, braceStart, braceEnd - braceStart + 1)
 
-        Dim item(37) As Variant
+        Dim item(38) As Variant
         item(0)  = ExtractJSONValPL(obj, "kode_paket")
         item(1)  = ExtractJSONValPL(obj, "nama_paket")
         item(2)  = ExtractJSONValPL(obj, "satker")
@@ -1011,6 +1128,7 @@ Private Function ParsePLJSON(json As String) As Collection
         item(35) = ExtractJSONValPL(obj, "nomor_rekomendasi")
         item(36) = ExtractJSONValPL(obj, "tgl_rekomendasi")
         item(37) = ExtractJSONValPL(obj, "tgl_pembukaan")
+        item(38) = ExtractJSONValPL(obj, "tahap_spse")
 
         col.Add item
         pos = braceEnd + 1
@@ -1197,7 +1315,7 @@ Public Sub CetakBAPLJKKPDF()
     If outMode = "" Then Exit Sub
 
     Dim kodePkt As String
-    kodePkt = CStr(ThisWorkbook.Sheets("@ Master Data").Range("G2").Value)
+    kodePkt = CStr(ThisWorkbook.Sheets("@ Master Data").Range("F2").Value)
     If kodePkt = "" Or kodePkt = "Null" Or kodePkt = "None" Then kodePkt = "PL"
 
     Dim wsh As Object
@@ -1793,8 +1911,15 @@ End Function
 
 Private Function CDblSafe(s As String) As Double
     If s = "" Or s = "null" Then CDblSafe = 0: Exit Function
+    ' Strip prefix Rp/Rp. dan titik ribuan, ganti koma desimal -> titik
+    Dim clean As String: clean = Trim(s)
+    If Left(clean, 3) = "Rp." Then clean = Trim(Mid(clean, 4))
+    If Left(clean, 2) = "Rp" Then clean = Trim(Mid(clean, 3))
+    clean = Replace(clean, ".", "")   ' hapus titik ribuan
+    clean = Replace(clean, ",", ".")  ' koma desimal -> titik
+    clean = Replace(clean, " ", "")
     On Error Resume Next
-    CDblSafe = CDbl(s)
+    CDblSafe = CDbl(clean)
     On Error GoTo 0
 End Function
 
@@ -2174,7 +2299,7 @@ End Sub
 
 
 ' ============================================================
-' MUAT KODE UNIK PL: GET kode_unik dari Supabase -> @ Master Data G2
+' MUAT KODE UNIK PL: GET kode_unik dari Supabase -> @ Master Data F2
 ' ============================================================
 Public Sub MuatKodeUnikPL()
     Dim wsMD As Worksheet
@@ -2214,8 +2339,8 @@ Public Sub MuatKodeUnikPL()
         Exit Sub
     End If
 
-    wsMD.Range("G2").Value = ku
-    MsgBox "Kode Unik diisi ke G2: " & ku, vbInformation, "Muat Kode Unik PL"
+    wsMD.Range("F2").Value = ku
+    MsgBox "Kode Unik diisi ke F2: " & ku, vbInformation, "Muat Kode Unik PL"
     Exit Sub
 
 ErrKU:

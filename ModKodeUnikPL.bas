@@ -5,7 +5,7 @@ Attribute VB_Name = "ModKodeUnikPL"
 ' Identik dengan ModKodeUnik (Tender) tapi:
 '   - Baca nama_paket dari @ Master Data C5 (bukan 1. Input Data F6)
 '   - Baca kode_paket dari @ Master Data C3 (bukan 1. Input Data E5)
-'   - Simpan kode_unik ke @ Master Data G2
+'   - Simpan kode_unik ke @ Master Data F2
 '   - Upsert ke Supabase draft_paket_pl via upsert_kode_unik_pl.py
 
 Private Function IsVowelPL(ch As String) As Boolean
@@ -342,12 +342,12 @@ Attribute GenerateKodeUnikPaketPL.VB_ProcData.VB_Invoke_Func = "R\n14"
     If StrPtr(hasil) = 0 Then Exit Sub
     If hasil = "" Then Exit Sub
 
-    ' Simpan ke G2 @ Master Data
+    ' Simpan ke F2 @ Master Data
     On Error Resume Next
     wsMD.Unprotect Password:="pokja2026"
     On Error GoTo 0
 
-    wsMD.Range("G2").Value = hasil
+    wsMD.Range("F2").Value = hasil
 
     On Error Resume Next
     wsMD.Protect Password:="pokja2026", AllowFormattingCells:=True
@@ -389,8 +389,8 @@ Attribute GenerateKodeUnikPaketPL.VB_ProcData.VB_Invoke_Func = "R\n14"
         End If
     End If
 
-    MsgBox "Kode unik PL disimpan di G2 @ Master Data:" & vbCrLf & hasil, vbInformation
+    MsgBox "Kode unik PL disimpan di F2 @ Master Data:" & vbCrLf & hasil, vbInformation
 
     wsMD.Activate
-    wsMD.Range("G2").Select
+    wsMD.Range("F2").Select
 End Sub
