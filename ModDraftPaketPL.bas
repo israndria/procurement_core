@@ -46,7 +46,8 @@ Private Const CELL_SELECTOR As String = "F1"
 '        19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
 '        24=mak, 25=nama_penyedia, 26=npwp_penyedia, 27=personil_json, 28=tgl_dokpil, 29=nomor_dokpil, 30=kode_unik
 '        31=tgl_evaluasi, 32=tgl_negosiasi, 33=tgl_penetapan, 34=nomor_nota_dinas, 35=nomor_rekomendasi, 36=tgl_rekomendasi
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan,tahap_spse"
+'        37=tgl_pembukaan, 38=tahap_spse, 39=masa_berlaku
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan,tahap_spse,masa_berlaku"
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -75,6 +76,7 @@ Private Const PLR_KODE_REKENING   As Integer = 25
 Private Const PLR_NO_BA_REVIU     As Integer = 26
 Private Const PLR_ALAMAT_PP       As Integer = 59  ' lookup master_dinas.alamat_pp_bertugas
 Private Const PLR_TELEPON_PP      As Integer = 58  ' lookup master_dinas.telepon_pp
+Private Const PLR_MASA_BERLAKU    As Integer = 60  ' masa berlaku penawaran (N Hari Kalender)
 Private Const PLR_SBU_BARU        As Integer = 29
 Private Const PLR_SBU_LAMA        As Integer = 30
 Private Const PLR_PERSONIL_BASE   As Integer = 32  ' R32-R49: stride=3 (jabatan/pengalaman/sertifikat)
@@ -473,6 +475,15 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             .Cells(PLR_TELEPON_PP, 3).Value = telPP
         End If
 
+        ' ── MASA BERLAKU PENAWARAN (item 39) ─────────────────────────────
+        If UBound(item) >= 39 Then
+            Dim mbStr As String: mbStr = CStr(item(39))
+            If mbStr <> "" And mbStr <> "null" And IsNumeric(mbStr) Then
+                .Cells(PLR_MASA_BERLAKU, 3).NumberFormat = "@"
+                .Cells(PLR_MASA_BERLAKU, 3).Value = CInt(mbStr) & " Hari Kalender"
+            End If
+        End If
+
         ' ── SBU ──────────────────────────────────────────────────────────
         If CStr(item(15)) <> "" Then
             .Cells(PLR_SBU_BARU, 3).Value = CStr(item(15))  ' sbu_baru
@@ -509,8 +520,9 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
 
     ' Konfirmasi
     Dim namaP As String: namaP = Left(Trim(CStr(item(1))), 50)
+    Dim labelUlang As String: labelUlang = IIf(IsPaketUlang(), " (PL - Ulang)", "")
     MsgBox "Data PL berhasil diisi:" & vbCrLf & vbCrLf & _
-           "  Paket  : " & namaP & vbCrLf & _
+           "  Paket  : " & namaP & labelUlang & vbCrLf & _
            "  Jenis  : " & CStr(item(5)) & vbCrLf & _
            "  HPS    : Rp " & Format(CDblSafe(CStr(item(4))), "#,##0") & vbCrLf & _
            "  SBU    : " & CStr(item(15)) & vbCrLf & vbCrLf & _
