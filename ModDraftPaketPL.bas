@@ -277,18 +277,21 @@ Public Sub AutoKodeUnikPL()
     namaPaket = Trim(CStr(wsMD.Range("C5").Value))
     If namaPaket = "" Then Exit Sub
 
-    Dim words() As String
-    words = Split(namaPaket, " ")
     Dim result As String
+    Dim akJ As Long
+    Dim akC As String
+    Dim akPrev As Boolean
     result = ""
-    Dim i As Long
-    For i = LBound(words) To UBound(words)
-        Dim w As String
-        w = Trim(words(i))
-        If Len(w) > 0 Then
-            result = result & UCase(Left(w, 1))
+    akPrev = True
+    For akJ = 1 To Len(namaPaket)
+        akC = Mid(namaPaket, akJ, 1)
+        If akC = " " Then
+            akPrev = True
+        ElseIf akPrev Then
+            result = result & UCase(akC)
+            akPrev = False
         End If
-    Next i
+    Next akJ
 
     wsMD.Range("F2").Value = result
 End Sub
@@ -462,16 +465,24 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
 
         ' Kode unik: prefer Supabase item(30), fallback generate dari huruf pertama nama paket
         Dim koUnik As String
-        Dim _kuWords() As String
+        Dim _kuNama As String
         Dim _kuRes As String
-        Dim _kuI As Long
+        Dim _kuJ As Long
+        Dim _kuPrevSpace As Boolean
         koUnik = CStr(item(30))
         If koUnik = "" Or koUnik = "null" Then
+            _kuNama = Trim(CStr(item(1)))
             _kuRes = ""
-            _kuWords = Split(Trim(CStr(item(1))), " ")
-            For _kuI = LBound(_kuWords) To UBound(_kuWords)
-                If Len(Trim(_kuWords(_kuI))) > 0 Then _kuRes = _kuRes & UCase(Left(Trim(_kuWords(_kuI)), 1))
-            Next _kuI
+            _kuPrevSpace = True
+            For _kuJ = 1 To Len(_kuNama)
+                Dim _kuC As String: _kuC = Mid(_kuNama, _kuJ, 1)
+                If _kuC = " " Then
+                    _kuPrevSpace = True
+                ElseIf _kuPrevSpace Then
+                    _kuRes = _kuRes & UCase(_kuC)
+                    _kuPrevSpace = False
+                End If
+            Next _kuJ
             koUnik = _kuRes
         End If
         If koUnik = "" Then koUnik = "KodeUnik"
