@@ -460,10 +460,19 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim singkatan As String: singkatan = LookupSingkatanDinas(CStr(item(2)))
         If singkatan = "" Then singkatan = "DPUPR"
 
-        ' Kode unik: prefer Supabase item(30), fallback F2
+        ' Kode unik: prefer Supabase item(30), fallback generate dari huruf pertama nama paket
         Dim koUnik As String: koUnik = CStr(item(30))
-        If koUnik = "" Or koUnik = "null" Then koUnik = CStr(wsMD.Range("F2").Value)
-        If koUnik = "" Or koUnik = "null" Then koUnik = "KodeUnik"
+        If koUnik = "" Or koUnik = "null" Then
+            ' Generate langsung dari nama paket (item(1)) — jangan pakai F2 yang stale
+            Dim _kuWords() As String: _kuWords = Split(Trim(CStr(item(1))), " ")
+            Dim _kuRes As String: _kuRes = ""
+            Dim _kuI As Long
+            For _kuI = LBound(_kuWords) To UBound(_kuWords)
+                If Len(Trim(_kuWords(_kuI))) > 0 Then _kuRes = _kuRes & UCase(Left(Trim(_kuWords(_kuI)), 1))
+            Next _kuI
+            koUnik = _kuRes
+        End If
+        If koUnik = "" Then koUnik = "KodeUnik"
         wsMD.Range("F2").Value = koUnik
 
         ' Tahun: ambil dari tahun anggaran yang sudah diisi
