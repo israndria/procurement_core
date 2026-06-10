@@ -464,7 +464,8 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim koUnik As String: koUnik = CStr(item(30))
         If koUnik = "" Or koUnik = "null" Then
             ' Generate langsung dari nama paket (item(1)) - jangan pakai F2 yang stale
-            Dim _kuWords() As String: _kuWords = Split(Trim(CStr(item(1))), " ")
+            Dim _kuWords() As String
+            _kuWords = Split(Trim(CStr(item(1))), " ")
             Dim _kuRes As String: _kuRes = ""
             Dim _kuI As Long
             For _kuI = LBound(_kuWords) To UBound(_kuWords)
