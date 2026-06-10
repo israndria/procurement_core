@@ -465,25 +465,26 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
 
         ' Kode unik: prefer Supabase item(30), fallback generate dari huruf pertama nama paket
         Dim koUnik As String
-        Dim _kuNama As String
-        Dim _kuRes As String
-        Dim _kuJ As Long
-        Dim _kuPrevSpace As Boolean
+        Dim kuNama As String
+        Dim kuRes As String
+        Dim kuJ As Long
+        Dim kuPrevSpace As Boolean
+        Dim kuC As String
         koUnik = CStr(item(30))
         If koUnik = "" Or koUnik = "null" Then
-            _kuNama = Trim(CStr(item(1)))
-            _kuRes = ""
-            _kuPrevSpace = True
-            For _kuJ = 1 To Len(_kuNama)
-                Dim _kuC As String: _kuC = Mid(_kuNama, _kuJ, 1)
-                If _kuC = " " Then
-                    _kuPrevSpace = True
-                ElseIf _kuPrevSpace Then
-                    _kuRes = _kuRes & UCase(_kuC)
-                    _kuPrevSpace = False
+            kuNama = Trim(CStr(item(1)))
+            kuRes = ""
+            kuPrevSpace = True
+            For kuJ = 1 To Len(kuNama)
+                kuC = Mid(kuNama, kuJ, 1)
+                If kuC = " " Then
+                    kuPrevSpace = True
+                ElseIf kuPrevSpace Then
+                    kuRes = kuRes & UCase(kuC)
+                    kuPrevSpace = False
                 End If
-            Next _kuJ
-            koUnik = _kuRes
+            Next kuJ
+            koUnik = kuRes
         End If
         If koUnik = "" Then koUnik = "KodeUnik"
         wsMD.Range("F2").Value = koUnik
