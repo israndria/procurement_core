@@ -17,8 +17,6 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 BAS_FILE = SCRIPT_DIR / "ModDraftPaketPL.bas"
 MOD_NAME = "ModDraftPaketPL"
-BAS_FILE_KODE_UNIK = SCRIPT_DIR / "ModKodeUnikPL.bas"
-MOD_NAME_KODE_UNIK = "ModKodeUnikPL"
 
 # Workbook_Open untuk BAPLJKK — hanya auto-relink Word template
 WORKBOOK_OPEN_CODE = (
@@ -82,18 +80,6 @@ def inject_pl(filepath: str):
         imported = vb.VBComponents.Import(tmp_path)
         print(f"  [OK] {imported.Name} imported ({imported.CodeModule.CountOfLines} baris)")
 
-        # Import ModKodeUnikPL
-        if BAS_FILE_KODE_UNIK.exists():
-            for comp in vb.VBComponents:
-                if comp.Name == MOD_NAME_KODE_UNIK:
-                    vb.VBComponents.Remove(comp)
-                    print(f"  {MOD_NAME_KODE_UNIK} lama dihapus")
-                    break
-            imported_ku = vb.VBComponents.Import(str(BAS_FILE_KODE_UNIK))
-            print(f"  [OK] {imported_ku.Name} imported ({imported_ku.CodeModule.CountOfLines} baris)")
-        else:
-            print(f"  [WARN] ModKodeUnikPL.bas tidak ditemukan, skip")
-
         # Inject Workbook_Open ke ThisWorkbook
         this_wb_comp = None
         for comp in vb.VBComponents:
@@ -121,7 +107,7 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnKodeUnikPL", "btnMuatHPS_PL", "btnMuatKodeUnik_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
@@ -141,7 +127,7 @@ def inject_pl(filepath: str):
             # Posisi absolut — diukur dari layout paket 1 (@ Master Data) setelah user rapikan
             # Baris 0 (Top=181.4): MuatPL | IsiPL | BukaDokpil | RelinkWord
             # Baris 1 (Top=212.4): BukaBA | BukaReviu | SyncDraft | ClearHighlight
-            # Baris 2 (Top=243.0): KodeUnik | MuatKodeUnik | CetakBAReviu | CetakDokpil
+            # Baris 2 (Top=243.0): CetakBAReviu | CetakDokpil | (kosong) | (kosong)
             # Baris 3 (Top=274.9): CetakIsiReviu | GabungReviu | MuatHPS | IsiEvaluasiPL
             # Baris 4 (Top=305.4): CetakBAPLJKK (col 0)
             _X = [641.8, 776.9, 911.3, 1046.4]           # Left per kolom 0-3
@@ -180,11 +166,9 @@ def inject_pl(filepath: str):
             add_btn("btnBukaReviu_PL",    "Buka Reviu",        "BukaReviuPlJkk",          1, 1, PURPLE)
             add_btn("btnSyncDraftPL",     "Sync Data Draft",   "SyncDataDraftPL",          1, 2, GREEN_SYNC)
             add_btn("btnClearHighlightPL","Clear Highlight",    "ClearHighlightPL",         1, 3, GREY)
-            # Baris 2: Kode Unik PL | Muat Kode Unik | Cetak BA Reviu PL | Cetak Dokpil PDF
-            add_btn("btnKodeUnikPL",      "Kode Unik PL",      "GenerateKodeUnikPaketPL", 2, 0, (128, 0, 128))
-            add_btn("btnMuatKodeUnik_PL", "Muat Kode Unik",    "MuatKodeUnikPL",          2, 1, (100, 0, 150))
-            add_btn("btnCetakBAReviu_PL", "Cetak BA Reviu PL", "CetakBAReviuPLPDF",       2, 2, RED_DARK)
-            add_btn("btnCetakDokpil_PL",  "Cetak Dokpil PDF",  "CetakDokpilPlJkkPDF",     2, 3, (0, 100, 180))
+            # Baris 2: Cetak BA Reviu PL | Cetak Dokpil PDF | (kosong) | (kosong)
+            add_btn("btnCetakBAReviu_PL", "Cetak BA Reviu PL", "CetakBAReviuPLPDF",       2, 0, RED_DARK)
+            add_btn("btnCetakDokpil_PL",  "Cetak Dokpil PDF",  "CetakDokpilPlJkkPDF",     2, 1, (0, 100, 180))
             # Baris 3: Cetak Isi Reviu (kolom 0) | Gabung Reviu (kolom 1) | Muat HPS (kolom 2) | Isi Evaluasi PL (kolom 3)
             add_btn("btnCetakReviu_PL",   "Cetak Isi Reviu",   "CetakReviuPlJkkPDF",          3, 0, (0, 120, 80))
             add_btn("btnGabungReviu_PL",  "Gabung Reviu",      "GabungReviuPL",               3, 1, (0, 80, 140))

@@ -142,9 +142,9 @@ Public Sub MuatDraftPaketPL()
         item = m_DataCache(i)
         ' item(0)=kode_paket, item(1)=nama_paket, item(2)=satker, item(5)=jenis_pl, item(38)=tahap_spse
 
-        ' Filter: sembunyikan paket yang sudah Penandatanganan Kontrak (selesai)
+        ' Filter: sembunyikan paket selesai (Penandatanganan Kontrak / Paket Sudah Selesai)
         Dim tahap As String: tahap = LCase(Trim(CStr(item(38))))
-        If InStr(tahap, "penandatanganan kontrak") > 0 Then
+        If InStr(tahap, "penandatanganan kontrak") > 0 Or InStr(tahap, "sudah selesai") > 0 Then
             nDilewati = nDilewati + 1
             GoTo LanjutPaket
         End If
@@ -260,6 +260,37 @@ Public Sub IsiDataPL()
             Exit For
         End If
     Next i
+End Sub
+
+
+' ============================================================
+' AUTO KODE UNIK PL: generate dari huruf pertama tiap kata nama paket (C5)
+' ============================================================
+Public Sub AutoKodeUnikPL()
+    Dim wsMD As Worksheet
+    On Error Resume Next
+    Set wsMD = ThisWorkbook.Sheets("@ Master Data")
+    On Error GoTo 0
+    If wsMD Is Nothing Then Exit Sub
+
+    Dim namaPaket As String
+    namaPaket = Trim(CStr(wsMD.Range("C5").Value))
+    If namaPaket = "" Then Exit Sub
+
+    Dim words() As String
+    words = Split(namaPaket, " ")
+    Dim result As String
+    result = ""
+    Dim i As Long
+    For i = LBound(words) To UBound(words)
+        Dim w As String
+        w = Trim(words(i))
+        If Len(w) > 0 Then
+            result = result & UCase(Left(w, 1))
+        End If
+    Next i
+
+    wsMD.Range("F2").Value = result
 End Sub
 
 
@@ -508,6 +539,9 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             Next iP
         End If
     End With
+
+    ' Auto-generate kode unik dari nama paket
+    AutoKodeUnikPL
 
     ' Isi sheet @ Evaluasi
     Dim wsEval As Worksheet
@@ -1177,7 +1211,7 @@ End Sub
 Public Sub CetakBAReviuPLPDF()
     ' Cetak BA Reviu PL halaman 1-3 ke PDF
     Dim wordFile As String
-    wordFile = FindWordFilePL(WM_PAT_BA)
+    wordFile = FindWordFilePL(WM_PAT_REVIU)
     If wordFile = "" Then Exit Sub
 
     Dim wordPath As String
@@ -2307,54 +2341,4 @@ Public Sub MuatHPSPL()
 
 ErrHPS:
     MsgBox "Gagal muat HPS PL: " & Err.Description, vbCritical, "Muat HPS PL"
-End Sub
-
-
-' ============================================================
-' MUAT KODE UNIK PL: GET kode_unik dari Supabase -> @ Master Data F2
-' ============================================================
-Public Sub MuatKodeUnikPL()
-    Dim wsMD As Worksheet
-    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
-    Dim kodePaket As String
-    kodePaket = CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value)
-    If kodePaket = "" Then
-        MsgBox "Kode Paket di @ Master Data C3 kosong. Pilih paket dulu.", vbExclamation, "Muat Kode Unik PL"
-        Exit Sub
-    End If
-
-    Dim url As String
-    url = SB_URL & "/rest/v1/draft_paket_pl" & _
-          "?kode_paket=eq." & kodePaket & _
-          "&select=kode_unik"
-
-    Dim http As Object
-    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
-    On Error GoTo ErrKU
-    http.Open "GET", url, False
-    http.SetTimeouts 5000, 5000, 10000, 10000
-    http.SetRequestHeader "apikey", SB_KEY
-    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
-    http.SetRequestHeader "Accept", "application/json"
-    http.Send
-
-    If http.Status <> 200 Then
-        MsgBox "Gagal fetch Kode Unik: HTTP " & http.Status, vbExclamation, "Muat Kode Unik PL"
-        Exit Sub
-    End If
-
-    Dim json As String: json = http.ResponseText
-    Dim ku As String: ku = ExtractJSONValPL(json, "kode_unik")
-    If ku = "" Or ku = "null" Then
-        MsgBox "Kode Unik belum ada di Supabase untuk paket ini." & vbCrLf & _
-               "Jalankan tombol 'Kode Unik PL' atau Streamlit dulu.", vbInformation, "Muat Kode Unik PL"
-        Exit Sub
-    End If
-
-    wsMD.Range("F2").Value = ku
-    MsgBox "Kode Unik diisi ke F2: " & ku, vbInformation, "Muat Kode Unik PL"
-    Exit Sub
-
-ErrKU:
-    MsgBox "Gagal muat Kode Unik: " & Err.Description, vbCritical, "Muat Kode Unik PL"
 End Sub
