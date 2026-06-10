@@ -461,13 +461,14 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         If singkatan = "" Then singkatan = "DPUPR"
 
         ' Kode unik: prefer Supabase item(30), fallback generate dari huruf pertama nama paket
-        Dim koUnik As String: koUnik = CStr(item(30))
+        Dim koUnik As String
+        Dim _kuWords() As String
+        Dim _kuRes As String
+        Dim _kuI As Long
+        koUnik = CStr(item(30))
         If koUnik = "" Or koUnik = "null" Then
-            ' Generate langsung dari nama paket (item(1)) - jangan pakai F2 yang stale
-            Dim _kuWords() As String
+            _kuRes = ""
             _kuWords = Split(Trim(CStr(item(1))), " ")
-            Dim _kuRes As String: _kuRes = ""
-            Dim _kuI As Long
             For _kuI = LBound(_kuWords) To UBound(_kuWords)
                 If Len(Trim(_kuWords(_kuI))) > 0 Then _kuRes = _kuRes & UCase(Left(Trim(_kuWords(_kuI)), 1))
             Next _kuI
