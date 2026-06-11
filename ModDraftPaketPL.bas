@@ -79,8 +79,9 @@ Private Const PLR_TELEPON_PP      As Integer = 58  ' lookup master_dinas.telepon
 Private Const PLR_MASA_BERLAKU    As Integer = 60  ' masa berlaku penawaran (N Hari Kalender)
 Private Const PLR_SBU_BARU        As Integer = 29
 Private Const PLR_SBU_LAMA        As Integer = 30
-Private Const PLR_PERSONIL_BASE   As Integer = 32  ' R32-R49: stride=3 (jabatan/pengalaman/sertifikat)
+Private Const PLR_PERSONIL_BASE   As Integer = 32  ' R32-R40: stride=3 (jabatan/pengalaman/sertifikat), max 3 personil
 Private Const PLR_PERSONIL_STRIDE As Integer = 3   ' 3 row per personil
+Private Const PLR_MINORANG_BASE   As Integer = 41  ' R41-R43: "Minimal Orang 1/2/3" (jumlah_orang per ahli)
 Private Const PLR_NAMA_PESERTA    As Integer = 51  ' geser dari 45 (6 personil * 3 row = 18 row, 32+18=50, +1=51)
 Private Const PLR_NPWP_PESERTA    As Integer = 52
 
@@ -171,6 +172,30 @@ ErrHandler:
     If Not m_SilentMode Then _
         MsgBox "Error IsiDataPLByKode: " & Err.Number & " - " & Err.Description, _
                vbCritical, "Isi Data PL"
+End Sub
+
+
+' ============================================================
+' REFRESH DATA PL: tombol @ Master Data — tarik ulang data terbaru
+' dari Supabase berdasarkan kode_paket di C3 (PLR_KODE_PAKET).
+' Dipakai untuk paket yang foldernya sudah ada (mis. paket ulang)
+' setelah "Serap Penyedia & Parse Dokumen" di Streamlit.
+' ============================================================
+Public Sub RefreshDataPL()
+    Dim wsMD As Worksheet
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+    Dim kode As String
+    kode = Trim(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))   ' C3
+    If kode = "" Then
+        If Not m_SilentMode Then _
+            MsgBox "Kode paket (C3) kosong. Tidak bisa refresh.", _
+                   vbExclamation, "Refresh Data PL"
+        Exit Sub
+    End If
+    IsiDataPLByKode kode
+    If Not m_SilentMode Then _
+        MsgBox "Data PL di-refresh dari Supabase." & vbCrLf & _
+               "Kode paket: " & kode, vbInformation, "Refresh Data PL"
 End Sub
 
 
@@ -463,19 +488,30 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             .Cells(PLR_SBU_LAMA, 3).Value = CStr(item(16))  ' sbu_lama
         End If
 
-        ' ── PERSONIL (R32-R49): jabatan/pengalaman/sertifikat P1-P6, stride=3 ──
+        ' ── PERSONIL (R32-R40): jabatan/pengalaman/sertifikat P1-P3, stride=3 di Excel ──
+        ' ── Jumlah orang (R41-R43 "Minimal Orang 1/2/3") dari field jumlah_orang ──
+        ' Array parser stride=4: jabatan/pengalaman/sertifikat/jumlah_orang. Max 3 personil.
         Dim personilJsonStr As String: personilJsonStr = CStr(item(27))
+        ' Bersihkan slot lama dulu (R32-R40 jabatan/pengalaman/sertifikat + R41-R43 jumlah)
+        Dim clrI As Long
+        For clrI = 0 To 2
+            .Cells(PLR_PERSONIL_BASE + clrI * PLR_PERSONIL_STRIDE, 3).ClearContents
+            .Cells(PLR_PERSONIL_BASE + clrI * PLR_PERSONIL_STRIDE + 1, 3).ClearContents
+            .Cells(PLR_PERSONIL_BASE + clrI * PLR_PERSONIL_STRIDE + 2, 3).ClearContents
+            .Cells(PLR_MINORANG_BASE + clrI, 3).ClearContents
+        Next clrI
         If personilJsonStr <> "" And personilJsonStr <> "null" Then
             Dim personilArr() As String
             personilArr = ParsePersonilArrayPL(personilJsonStr)
-            Dim nP As Long: nP = (UBound(personilArr) + 1) \ PLR_PERSONIL_STRIDE
+            Dim nP As Long: nP = (UBound(personilArr) + 1) \ 4
             Dim iP As Long
             For iP = 0 To nP - 1
-                If iP >= 6 Then Exit For
+                If iP >= 3 Then Exit For
                 Dim baseRow As Long: baseRow = PLR_PERSONIL_BASE + iP * PLR_PERSONIL_STRIDE
-                .Cells(baseRow, 3).Value     = personilArr(iP * PLR_PERSONIL_STRIDE)       ' jabatan
-                .Cells(baseRow + 1, 3).Value = personilArr(iP * PLR_PERSONIL_STRIDE + 1)   ' pengalaman
-                .Cells(baseRow + 2, 3).Value = personilArr(iP * PLR_PERSONIL_STRIDE + 2)   ' sertifikat
+                .Cells(baseRow, 3).Value     = personilArr(iP * 4)       ' jabatan
+                .Cells(baseRow + 1, 3).Value = personilArr(iP * 4 + 1)   ' pengalaman
+                .Cells(baseRow + 2, 3).Value = personilArr(iP * 4 + 2)   ' sertifikat
+                .Cells(PLR_MINORANG_BASE + iP, 3).Value = personilArr(iP * 4 + 3)  ' jumlah orang -> R41/R42/R43
             Next iP
         End If
     End With
@@ -1787,15 +1823,16 @@ End Function
 
 
 Private Function ParsePersonilArrayPL(jsonArr As String) As String()
-    ' Parse JSON array of {jabatan, pengalaman, sertifikat} objects.
-    ' Returns flat string array stride=3: [jabatan0, pengalaman0, sertifikat0, jabatan1, ...]
-    ' Maximum 6 personil = 18 elemen. sertifikat boleh "" (backward compatible).
-    Dim result(17) As String  ' max 6 personil * 3
+    ' Parse JSON array of {jabatan, pengalaman, sertifikat, jumlah_orang} objects.
+    ' Returns flat string array stride=4: [jabatan0, pengalaman0, sertifikat0, jumlah0, jabatan1, ...]
+    ' Maximum 3 personil = 12 elemen (slot Excel R32-R40 + R41-R43 jumlah).
+    ' sertifikat & jumlah_orang boleh "" (backward compatible; jumlah default "1").
+    Dim result(11) As String  ' max 3 personil * 4
     Dim count As Long: count = 0
     Dim pos As Long: pos = 1
     Dim arrLen As Long: arrLen = Len(jsonArr)
 
-    Do While pos <= arrLen And count < 6
+    Do While pos <= arrLen And count < 3
         Dim bStart As Long: bStart = InStr(pos, jsonArr, "{")
         If bStart = 0 Then Exit Do
         Dim bEnd As Long: bEnd = InStr(bStart, jsonArr, "}")
@@ -1805,24 +1842,27 @@ Private Function ParsePersonilArrayPL(jsonArr As String) As String()
         Dim jabatan As String: jabatan = ExtractJSONValPL(obj, "jabatan")
         Dim pengalaman As String: pengalaman = ExtractJSONValPL(obj, "pengalaman")
         Dim sertifikat As String: sertifikat = ExtractJSONValPL(obj, "sertifikat")
+        Dim jumlah As String: jumlah = ExtractJSONValPL(obj, "jumlah_orang")
+        If Trim(jumlah) = "" Then jumlah = "1"
 
-        result(count * 3) = jabatan
-        result(count * 3 + 1) = pengalaman
-        result(count * 3 + 2) = sertifikat
+        result(count * 4) = jabatan
+        result(count * 4 + 1) = pengalaman
+        result(count * 4 + 2) = sertifikat
+        result(count * 4 + 3) = jumlah
         count = count + 1
         pos = bEnd + 1
     Loop
 
     ' Resize to actual count
     If count = 0 Then
-        Dim emptyArr(2) As String
+        Dim emptyArr(3) As String
         ParsePersonilArrayPL = emptyArr
         Exit Function
     End If
 
-    ReDim resized(count * 3 - 1) As String
+    ReDim resized(count * 4 - 1) As String
     Dim ii As Long
-    For ii = 0 To count * 3 - 1
+    For ii = 0 To count * 4 - 1
         resized(ii) = result(ii)
     Next ii
     ParsePersonilArrayPL = resized

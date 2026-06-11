@@ -106,7 +106,7 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnRefreshDataPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
@@ -124,7 +124,7 @@ def inject_pl(filepath: str):
             TEAL    = (0, 128, 128)
 
             # Posisi absolut — diukur dari layout paket 1 (@ Master Data) setelah user rapikan
-            # Baris 0 (Top=181.4): MuatPL | IsiPL | BukaDokpil | RelinkWord
+            # Baris 0 (Top=181.4): BukaDokpil | RelinkWord | RefreshDataPL | (kosong)
             # Baris 1 (Top=212.4): BukaBA | BukaReviu | SyncDraft | ClearHighlight
             # Baris 2 (Top=243.0): CetakBAReviu | CetakDokpil | (kosong) | (kosong)
             # Baris 3 (Top=274.9): CetakIsiReviu | GabungReviu | MuatHPS | IsiEvaluasiPL
@@ -160,6 +160,7 @@ def inject_pl(filepath: str):
             #  via COM saat buat folder di Streamlit, lihat isi_master_data_pl.py)
             add_btn("btnBukaDokpil_PL",   "Buka Dokpil",       "BukaDokpilPlJkk",         0, 0, TEAL)
             add_btn("btnRelinkPL",        "Relink Word",       "RelinkPL",                 0, 1, (128, 0, 0))
+            add_btn("btnRefreshDataPL",   "Refresh Data PL",   "RefreshDataPL",            0, 2, (0, 150, 100))
             # Baris 1: Buka BA | Buka Reviu | Sync Data Draft | Clear Highlight
             add_btn("btnBukaBA_PL",       "Buka BA",           "BukaBAPlJkk",             1, 0, ORANGE)
             add_btn("btnBukaReviu_PL",    "Buka Reviu",        "BukaReviuPlJkk",          1, 1, PURPLE)
