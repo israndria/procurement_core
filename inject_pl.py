@@ -93,9 +93,8 @@ def inject_pl(filepath: str):
             cm.AddFromString(WORKBOOK_OPEN_CODE)
             print(f"  [OK] Workbook_Open injected ({cm.CountOfLines} baris)")
 
-        # Tambah 2 tombol di @ Master Data:
-        #   "Muat Paket PL"  — panggil MuatDraftPaketPL
-        #   "Isi Data PL"    — panggil IsiDataPL
+        # Tombol di @ Master Data (Muat Paket PL + Isi Data PL sudah dihapus —
+        # pengisian @ Master Data kini otomatis via COM saat buat folder).
         try:
             ws = wb.Sheets("@ Master Data")
 
@@ -156,11 +155,11 @@ def inject_pl(filepath: str):
             GREY       = (100, 100, 100)
             GREEN_SYNC = (20, 140, 60)
 
-            # Baris 0: Muat PL | Isi Data PL | Buka Dokpil | Relink Word
-            add_btn("btnMuatPL",          "Muat Paket PL",    "MuatDraftPaketPL",        0, 0, BLUE)
-            add_btn("btnIsiPL",           "Isi Data PL",       "IsiDataPL",               0, 1, GREEN_C)
-            add_btn("btnBukaDokpil_PL",   "Buka Dokpil",       "BukaDokpilPlJkk",         0, 2, TEAL)
-            add_btn("btnRelinkPL",        "Relink Word",       "RelinkPL",                 0, 3, (128, 0, 0))
+            # Baris 0: Buka Dokpil | Relink Word
+            # (Muat Paket PL + Isi Data PL dihapus — @ Master Data kini diisi otomatis
+            #  via COM saat buat folder di Streamlit, lihat isi_master_data_pl.py)
+            add_btn("btnBukaDokpil_PL",   "Buka Dokpil",       "BukaDokpilPlJkk",         0, 0, TEAL)
+            add_btn("btnRelinkPL",        "Relink Word",       "RelinkPL",                 0, 1, (128, 0, 0))
             # Baris 1: Buka BA | Buka Reviu | Sync Data Draft | Clear Highlight
             add_btn("btnBukaBA_PL",       "Buka BA",           "BukaBAPlJkk",             1, 0, ORANGE)
             add_btn("btnBukaReviu_PL",    "Buka Reviu",        "BukaReviuPlJkk",          1, 1, PURPLE)

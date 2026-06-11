@@ -6,8 +6,8 @@ Attribute VB_Name = "ModDraftPaketPL"
 ' Tidak ada dependency ke ModDraftPaket, ModInputBA, atau ModKKEvaluasi.
 '
 ' Flow:
-'   1. MuatDraftPaketPL()   -> GET Supabase draft_paket_pl -> dropdown PL_F1
-'   2. PilihDraftPaketPL()  -> dipanggil tombol "Pilih" -> autofill @ Master Data col C
+'   1. IsiDataPLByKode(kode) -> fetch satu row Supabase by kode_paket -> IsiMasterDataPL langsung
+'   2. SyncDataDraftPL()     -> baca @ Master Data col C -> upsert snapshot ke Supabase
 '
 ' @ Master Data layout (BAPLJKK):
 '   R3  Kode Paket       R14 Nilai HPS         R25 Kode Rekening (MAK)
@@ -34,9 +34,8 @@ Private Const WM_PAT_BA       As String = "5. BA PLJKK -"
 Private Const WM_PAT_REVIU    As String = "1. Reviu DPP PLJKK -"
 Private Const WM_PAT_DOKPIL   As String = "3. Dokpil Full PLJKK -"
 
-' Sheet & Cell selector
+' Sheet & Cell selector (F2 = kode_unik, aktif dipakai AutoKodeUnikPL + IsiMasterDataPL)
 Private Const MD_SHEET As String = "@ Master Data"
-Private Const CELL_SELECTOR As String = "F1"
 
 ' Kolom yang di-fetch dari draft_paket_pl
 ' index: 0=kode_paket, 1=nama_paket, 2=satker, 3=kode_rup, 4=nilai_hps,
@@ -84,183 +83,9 @@ Private Const PLR_PERSONIL_STRIDE As Integer = 3   ' 3 row per personil
 Private Const PLR_NAMA_PESERTA    As Integer = 51  ' geser dari 45 (6 personil * 3 row = 18 row, 32+18=50, +1=51)
 Private Const PLR_NPWP_PESERTA    As Integer = 52
 
-' Cache data in-memory
-Private m_DataCache As Collection
-Private m_LastLoad As Date
+' Silent mode: saat True, semua MsgBox di jalur fetch/isi di-skip (untuk trigger via COM headless)
+Private m_SilentMode As Boolean
 
-
-' ============================================================
-' FUNGSI UTAMA: Load dari Supabase, buat dropdown
-' ============================================================
-Public Sub MuatDraftPaketPL()
-    Dim wsMD As Worksheet
-    On Error GoTo ErrHandler
-    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
-
-    ' Unprotect sheet sebelum modifikasi validation + cells
-    On Error Resume Next
-    wsMD.Unprotect "pokja2026"
-    On Error GoTo ErrHandler
-
-    ' Fetch JSON dari Supabase
-    Dim json As String
-    json = FetchSupabasePL()
-    If json = "" Then
-        MsgBox "Gagal mengambil data PL dari Supabase.", vbExclamation, "Muat Draft PL"
-        Exit Sub
-    End If
-
-    ' Parse JSON -> Collection
-    Set m_DataCache = ParsePLJSON(json)
-    m_LastLoad = Now
-
-    If m_DataCache.Count = 0 Then
-        MsgBox "Tidak ada data Draft Paket PL di database." & vbCrLf & _
-               "Jalankan 'Serap Paket PL' di Asisten Pokja terlebih dahulu.", _
-               vbInformation, "Muat Draft PL"
-        Exit Sub
-    End If
-
-    ' Tulis label ke sheet tersembunyi "_DraftPaketPLList"
-    Dim wsHidden As Worksheet
-    On Error Resume Next
-    Set wsHidden = ThisWorkbook.Sheets("_DraftPaketPLList")
-    On Error GoTo ErrHandler
-    If wsHidden Is Nothing Then
-        Set wsHidden = ThisWorkbook.Sheets.Add
-        wsHidden.Name = "_DraftPaketPLList"
-    End If
-    wsHidden.Visible = xlSheetVeryHidden
-    wsHidden.Columns(1).ClearContents
-
-    Dim i As Integer
-    Dim baris As Long: baris = 0
-    Dim nDilewati As Long: nDilewati = 0
-    wsHidden.Columns(2).ClearContents    ' kolom B = tracker nama yang sudah ditulis (dedup)
-    For i = 1 To m_DataCache.Count
-        Dim item As Variant
-        item = m_DataCache(i)
-        ' item(0)=kode_paket, item(1)=nama_paket, item(2)=satker, item(5)=jenis_pl, item(38)=tahap_spse
-
-        ' Filter: sembunyikan paket selesai (Penandatanganan Kontrak / Paket Sudah Selesai)
-        Dim tahap As String: tahap = LCase(Trim(CStr(item(38))))
-        If InStr(tahap, "penandatanganan kontrak") > 0 Or InStr(tahap, "sudah selesai") > 0 Then
-            nDilewati = nDilewati + 1
-            GoTo LanjutPaket
-        End If
-
-        ' Dedup by nama_paket: skip bila nama yang sama sudah pernah ditulis
-        Dim namaPkt As String: namaPkt = Trim(CStr(item(1)))
-        Dim sudahAda As Boolean: sudahAda = False
-        Dim j As Long
-        For j = 1 To baris
-            If wsHidden.Cells(j, 2).Value = namaPkt Then
-                sudahAda = True
-                Exit For
-            End If
-        Next j
-        If sudahAda Then GoTo LanjutPaket
-
-        Dim label As String
-        label = CStr(item(5)) & " - " & Left(namaPkt, 55)
-        ' Suffix kosmetik bila ada folder paket ulang di disk
-        If FolderUlangAdaPL(namaPkt) Then label = label & " (PL - Ulang)"
-
-        baris = baris + 1
-        wsHidden.Cells(baris, 1).Value = label
-        wsHidden.Cells(baris, 2).Value = namaPkt    ' tracker dedup
-LanjutPaket:
-    Next i
-    wsHidden.Columns(2).ClearContents    ' bersihkan tracker
-
-    If baris = 0 Then
-        MsgBox "Semua paket PL sudah Penandatanganan Kontrak (selesai)." & vbCrLf & _
-               "Tidak ada paket aktif untuk dimuat.", vbInformation, "Draft Paket PL"
-        Exit Sub
-    End If
-
-    ' Named Range "DaftarDraftPaketPL"
-    Dim rngList As Range
-    Set rngList = wsHidden.Range(wsHidden.Cells(1, 1), wsHidden.Cells(baris, 1))
-    On Error Resume Next
-    ThisWorkbook.Names("DaftarDraftPaketPL").Delete
-    On Error GoTo ErrHandler
-    ThisWorkbook.Names.Add Name:="DaftarDraftPaketPL", RefersTo:=rngList
-
-    ' Dropdown validation di @ Master Data F1
-    With wsMD.Range(CELL_SELECTOR).Validation
-        .Delete
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, Formula1:="=DaftarDraftPaketPL"
-        .IgnoreBlank = True
-        .InCellDropdown = True
-        .ShowInput = False
-        .ShowError = False
-    End With
-
-    ' Restore pilihan yang sudah ada sebelumnya
-    Dim savedLabel As String
-    savedLabel = Trim(CStr(wsMD.Range(CELL_SELECTOR).Value))
-    If savedLabel <> "" Then
-        Application.EnableEvents = False
-        wsMD.Range(CELL_SELECTOR).Value = savedLabel
-        Application.EnableEvents = True
-    End If
-
-    Dim pesanMuat As String
-    pesanMuat = baris & " paket PL aktif dimuat."
-    If nDilewati > 0 Then pesanMuat = pesanMuat & " (" & nDilewati & " disembunyikan — sudah Penandatanganan Kontrak)"
-    MsgBox pesanMuat & vbCrLf & _
-           "Pilih paket dari dropdown " & CELL_SELECTOR & ", lalu klik 'Isi Data PL'.", _
-           vbInformation, "Draft Paket PL"
-    Exit Sub
-
-ErrHandler:
-    MsgBox "Error MuatDraftPaketPL: " & Err.Description, vbCritical, "Muat Draft PL"
-End Sub
-
-
-' ============================================================
-' ISI DATA: Dipanggil tombol "Isi Data PL" di @ Master Data
-' ============================================================
-Public Sub IsiDataPL()
-    Dim wsMD As Worksheet
-    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
-
-    Dim selVal As String
-    selVal = Trim(CStr(wsMD.Range(CELL_SELECTOR).Value))
-    If selVal = "" Then
-        MsgBox "Pilih paket dari dropdown " & CELL_SELECTOR & " terlebih dahulu.", _
-               vbExclamation, "Belum Ada Pilihan"
-        Exit Sub
-    End If
-
-    ' Auto-load jika cache kosong
-    If m_DataCache Is Nothing Then MuatDraftPaketPL
-    If m_DataCache Is Nothing Then Exit Sub
-    If m_DataCache.Count = 0 Then MuatDraftPaketPL
-    If m_DataCache.Count = 0 Then Exit Sub
-
-    ' Strip suffix kosmetik "(PL - Ulang)" sebelum match (label dropdown bisa bersuffix)
-    Dim selBersih As String: selBersih = selVal
-    Dim posSuf As Long: posSuf = InStr(selBersih, " (PL - Ulang)")
-    If posSuf > 0 Then selBersih = Trim(Left(selBersih, posSuf - 1))
-
-    ' Cari item yang label-nya cocok
-    Dim i As Integer
-    For i = 1 To m_DataCache.Count
-        Dim item As Variant
-        item = m_DataCache(i)
-        Dim label As String
-        label = CStr(item(5)) & " - " & Left(Trim(CStr(item(1))), 55)
-        If label = selBersih Then
-            IsiMasterDataPL wsMD, item
-            ' Auto diff highlight setelah isi data
-            DiffHighlightPL CStr(item(0))
-            Exit For
-        End If
-    Next i
-End Sub
 
 
 ' ============================================================
@@ -295,6 +120,97 @@ Public Sub AutoKodeUnikPL()
 
     wsMD.Range("F2").Value = result
 End Sub
+
+
+' ============================================================
+' SILENT MODE: dipanggil Python via COM untuk suppress MsgBox
+' ============================================================
+Public Sub SetSilentPL(silent As Boolean)
+    m_SilentMode = silent
+End Sub
+
+
+' ============================================================
+' ISI DATA BY KODE: fetch satu row Supabase by kode_paket -> IsiMasterDataPL langsung.
+' Fetch satu row Supabase by kode_paket -> IsiMasterDataPL langsung.
+' Dipanggil Python via COM saat buat folder (auto-isi @ Master Data).
+' ============================================================
+Public Sub IsiDataPLByKode(kodePaket As String)
+    Dim wsMD As Worksheet
+    On Error GoTo ErrHandler
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+
+    If Trim(kodePaket) = "" Then Exit Sub
+
+    Dim json As String
+    json = FetchSupabasePLByKode(kodePaket)
+    If json = "" Then
+        If Not m_SilentMode Then _
+            MsgBox "Gagal ambil data paket " & kodePaket & " dari Supabase.", _
+                   vbExclamation, "Isi Data PL"
+        Exit Sub
+    End If
+
+    Dim col As Collection
+    Set col = ParsePLJSON(json)
+    If col Is Nothing Then Exit Sub
+    If col.Count = 0 Then
+        If Not m_SilentMode Then _
+            MsgBox "Paket " & kodePaket & " tidak ditemukan di database.", _
+                   vbInformation, "Isi Data PL"
+        Exit Sub
+    End If
+
+    Dim item As Variant
+    item = col(1)
+    IsiMasterDataPL wsMD, item
+    Exit Sub
+
+ErrHandler:
+    If Not m_SilentMode Then _
+        MsgBox "Error IsiDataPLByKode: " & Err.Number & " - " & Err.Description, _
+               vbCritical, "Isi Data PL"
+End Sub
+
+
+' ============================================================
+' FETCH BY KODE: ambil satu row draft_paket_pl by kode_paket.
+' Tanpa filter status (paket selesai/ulang tetap kebaca).
+' ============================================================
+Private Function FetchSupabasePLByKode(kodePaket As String) As String
+    Dim url As String
+    url = SB_URL & "/rest/v1/draft_paket_pl" & _
+          "?select=" & SB_SELECT & _
+          "&kode_paket=eq." & kodePaket & _
+          "&limit=1"
+
+    Dim http As Object
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+
+    On Error GoTo ErrHTTP
+    http.Open "GET", url, False
+    http.SetTimeouts 5000, 5000, 15000, 15000
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+
+    If http.Status = 200 Then
+        FetchSupabasePLByKode = http.ResponseText
+    Else
+        If Not m_SilentMode Then _
+            MsgBox "HTTP Error " & http.Status & ": " & http.StatusText, _
+                   vbExclamation, "FetchSupabasePLByKode"
+        FetchSupabasePLByKode = ""
+    End If
+    Exit Function
+
+ErrHTTP:
+    If Not m_SilentMode Then _
+        MsgBox "WinHTTP Error: " & Err.Number & " - " & Err.Description, _
+               vbCritical, "FetchSupabasePLByKode"
+    FetchSupabasePLByKode = ""
+End Function
 
 
 ' ============================================================
@@ -578,7 +494,8 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
     ' Konfirmasi
     Dim namaP As String: namaP = Left(Trim(CStr(item(1))), 50)
     Dim labelUlang As String: labelUlang = IIf(IsPaketUlang(), " (PL - Ulang)", "")
-    MsgBox "Data PL berhasil diisi:" & vbCrLf & vbCrLf & _
+    If Not m_SilentMode Then _
+        MsgBox "Data PL berhasil diisi:" & vbCrLf & vbCrLf & _
            "  Paket  : " & namaP & labelUlang & vbCrLf & _
            "  Jenis  : " & CStr(item(5)) & vbCrLf & _
            "  HPS    : Rp " & Format(CDblSafe(CStr(item(4))), "#,##0") & vbCrLf & _
@@ -1088,42 +1005,6 @@ End Function
 
 
 ' ============================================================
-' HTTP: GET draft_paket_pl dari Supabase
-' ============================================================
-Private Function FetchSupabasePL() As String
-    Dim url As String
-    url = SB_URL & "/rest/v1/draft_paket_pl" & _
-          "?select=" & SB_SELECT & _
-          "&status=neq.selesai" & _
-          "&order=diambil_pada.desc"
-
-    Dim http As Object
-    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
-
-    On Error GoTo ErrHTTP
-    http.Open "GET", url, False
-    http.SetTimeouts 5000, 5000, 15000, 15000
-    http.SetRequestHeader "apikey", SB_KEY
-    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
-    http.SetRequestHeader "Accept", "application/json"
-    http.Send
-
-    If http.Status = 200 Then
-        FetchSupabasePL = http.ResponseText
-    Else
-        MsgBox "HTTP Error " & http.Status & ": " & http.StatusText & vbCrLf & _
-               "URL: " & url, vbExclamation, "FetchSupabasePL"
-        FetchSupabasePL = ""
-    End If
-    Exit Function
-
-ErrHTTP:
-    MsgBox "WinHTTP Error: " & Err.Number & " - " & Err.Description, vbCritical, "FetchSupabasePL"
-    FetchSupabasePL = ""
-End Function
-
-
-' ============================================================
 ' PARSER: JSON array -> Collection of Variant arrays
 ' ============================================================
 Private Function ParsePLJSON(json As String) As Collection
@@ -1620,95 +1501,6 @@ Public Sub SyncDataDraftPL()
 ErrSync:
     Application.StatusBar = False
     MsgBox "Error SyncDataDraftPL: " & Err.Description, vbCritical
-End Sub
-
-
-' ============================================================
-' DIFF HIGHLIGHT PL: Load snapshot → highlight sel yang berbeda
-' Dipanggil otomatis setelah IsiMasterDataPL selesai
-' ============================================================
-Public Sub DiffHighlightPL(Optional kodePaketOverride As String = "")
-    Dim wsMD As Worksheet
-    On Error GoTo ErrDiff
-    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
-
-    Dim kodePaket As String
-    kodePaket = kodePaketOverride
-    If kodePaket = "" Then
-        kodePaket = Trim(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))
-    End If
-    If kodePaket = "" Then Exit Sub
-
-    Dim sd As String: sd = ScriptDirPL()
-    If sd = "" Then Exit Sub
-
-    Dim inputFile As String:  inputFile  = sd & "\_sync_draft_pl_input.json"
-    Dim outputFile As String: outputFile = sd & "\_sync_draft_pl_output.json"
-
-    On Error Resume Next: Kill outputFile: On Error GoTo ErrDiff
-
-    WriteUTF8PL inputFile, "{""kode_paket"":""" & kodePaket & """}"
-
-    Dim pyExe As String: pyExe = sd & "\python\python.exe"
-    Dim cmd As String
-    cmd = """" & pyExe & """ """ & sd & "\sync_draft_pl.py"" load"
-
-    Application.StatusBar = "Diff Highlight PL: memuat snapshot..."
-    Dim wsh As Object: Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 0, True
-    Application.StatusBar = False
-
-    If Dir(outputFile) = "" Then Exit Sub
-
-    Dim result As String: result = ReadUTF8PL(outputFile)
-    If ExtractValPL2(result, "ok") <> "true" Then Exit Sub
-
-    ' snapshot kosong = belum pernah sync
-    Dim snapStart As Long: snapStart = InStr(result, """snapshot""")
-    If snapStart = 0 Then Exit Sub
-    Dim bracePos As Long: bracePos = InStr(snapStart, result, "{")
-    If bracePos = 0 Then
-        ClearHighlightPL wsMD
-        Exit Sub
-    End If
-
-    ' Bandingkan semua baris PLR kolom C
-    Dim rowList As Variant
-    rowList = Array(PLR_KODE_PAKET, PLR_KODE_RUP, PLR_NAMA_PEKERJAAN, PLR_NAMA_SKPD, _
-                    PLR_SUB_KEGIATAN, PLR_NAMA_PPK, PLR_NIP_PPK, PLR_NO_SK_PPK, _
-                    PLR_NAMA_PP, PLR_NIP_PP, PLR_PAGU, PLR_HPS, PLR_JANGKA_WAKTU, _
-                    PLR_SUMBER_DANA, PLR_LOKASI, PLR_JENIS_KONTRAK, PLR_URAIAN_SINGKAT, _
-                    PLR_NOMOR_DOKPIL, PLR_TANGGAL_DOKPIL, PLR_NO_UNDANGAN, _
-                    PLR_TAHUN_ANGGARAN, PLR_TGL_UNDANGAN, PLR_KODE_REKENING, _
-                    PLR_NO_BA_REVIU, PLR_ALAMAT_PP, PLR_SBU_BARU, PLR_SBU_LAMA, _
-                    PLR_NAMA_PESERTA, PLR_NPWP_PESERTA)
-
-    Dim ri As Long
-    For ri = 0 To UBound(rowList)
-        Dim r As Long: r = rowList(ri)
-        Dim cellVal As String: cellVal = Trim(CStr(wsMD.Cells(r, 3).Value))
-        Dim snapVal As String: snapVal = ExtractValPL2(result, "r" & r)
-        If snapVal <> cellVal Then
-            wsMD.Cells(r, 3).Interior.Color = 16776960  ' Kuning
-        Else
-            wsMD.Cells(r, 3).Interior.ColorIndex = -4142  ' xlNone
-        End If
-    Next ri
-
-    ' Personil baris R32-R49
-    Dim rp As Long
-    For rp = PLR_PERSONIL_BASE To PLR_PERSONIL_BASE + 17
-        Dim cpVal As String: cpVal = Trim(CStr(wsMD.Cells(rp, 3).Value))
-        Dim spVal As String: spVal = ExtractValPL2(result, "r" & rp)
-        If spVal <> cpVal Then
-            wsMD.Cells(rp, 3).Interior.Color = 16776960
-        Else
-            wsMD.Cells(rp, 3).Interior.ColorIndex = -4142
-        End If
-    Next rp
-    Exit Sub
-ErrDiff:
-    Application.StatusBar = False
 End Sub
 
 
