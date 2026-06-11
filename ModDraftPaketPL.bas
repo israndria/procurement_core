@@ -30,9 +30,10 @@ Private Const SB_KEY As String = "%%SUPABASE_KEY%%"
 Private Const WM_SHEET_BA     As String = "satu_data"
 Private Const WM_SHEET_REVIU  As String = "list_reviu"
 Private Const WM_SHEET_DOKPIL As String = "list_dokpil"
-Private Const WM_PAT_BA       As String = "5. BA PLJKK -"
-Private Const WM_PAT_REVIU    As String = "1. Reviu DPP PLJKK -"
-Private Const WM_PAT_DOKPIL   As String = "3. Dokpil Full PLJKK -"
+Private Const WM_PAT_BA           As String = "5. BA PLJKK -"
+Private Const WM_PAT_REVIU        As String = "1. Reviu DPP PLJKK -"  ' untuk CetakBAReviuPLPDF (cetak halaman BA dari file 1.)
+Private Const WM_PAT_ISI_REVIU    As String = "2. Isi Reviu PLJKK -"  ' untuk BukaReviu + CetakIsiReviu (Word merge dari list_reviu)
+Private Const WM_PAT_DOKPIL       As String = "3. Dokpil Full PLJKK -"
 
 ' Sheet & Cell selector (F2 = kode_unik, aktif dipakai AutoKodeUnikPL + IsiMasterDataPL)
 Private Const MD_SHEET As String = "@ Master Data"
@@ -1097,7 +1098,7 @@ Public Sub BukaBAPlJkk()
 End Sub
 
 Public Sub BukaReviuPlJkk()
-    RunMergePL "buka", WM_PAT_REVIU, WM_SHEET_REVIU
+    RunMergePL "buka", WM_PAT_ISI_REVIU, WM_SHEET_REVIU
 End Sub
 
 Public Sub BukaDokpilPlJkk()
@@ -1109,7 +1110,7 @@ Public Sub CetakDokpilPlJkkPDF()
 End Sub
 
 Public Sub CetakReviuPlJkkPDF()
-    RunMergePL "pdf_all", WM_PAT_REVIU, WM_SHEET_REVIU
+    RunMergePL "pdf_all", WM_PAT_ISI_REVIU, WM_SHEET_REVIU
 End Sub
 
 Public Sub CetakBAReviuPLPDF()
