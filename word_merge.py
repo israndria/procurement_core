@@ -726,7 +726,10 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 show_success(pdf_path)
             elif mode == "pdf_all":
-                pdf_path = os.path.join(folder, f"Isi_Reviu_DPP_{nama_paket_pdf}.pdf")
+                # Output ke subfolder "6. BA Reviu Lengkap" (buat kalau belum ada)
+                _ba_reviu_dir = os.path.join(folder, "6. BA Reviu Lengkap")
+                os.makedirs(_ba_reviu_dir, exist_ok=True)
+                pdf_path = os.path.join(_ba_reviu_dir, f"Isi_Reviu_DPP_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,

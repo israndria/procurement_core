@@ -1333,6 +1333,30 @@ Public Sub CetakBAPLJKKPDF()
     Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
 
+
+Public Sub GabungBAReviu()
+    ' Gabung BA Reviu Lengkap: scan hal 1-2 + Isi Reviu + scan hal 3
+    ' Output: 6. BA Reviu Lengkap\BA_REVIU_FULL_{nama_paket}.pdf
+    Dim folderPaket As String
+    folderPaket = ThisWorkbook.Path
+
+    Dim scriptDir As String
+    scriptDir = ScriptDirPL()
+    If scriptDir = "" Then
+        MsgBox "Python tidak ditemukan.", vbCritical
+        Exit Sub
+    End If
+
+    Dim pyExe As String
+    pyExe = scriptDir & "\python\python.exe"
+
+    Dim cmd As String
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    cmd = Chr(34) & pyExe & Chr(34) & " " & Chr(34) & scriptDir & "\gabung_ba_reviu.py" & Chr(34) & " " & Chr(34) & folderPaket & Chr(34)
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+End Sub
 Public Sub GabungReviuPL()
     ' Gabung BA Reviu scan + Isi Reviu → Gabung_Reviu_{kode_unik}.pdf
     ' BA scan dicari di D:\Download\REVIU KONSULTAN PERENCANAAN {N}.pdf

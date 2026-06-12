@@ -60,7 +60,20 @@ End Sub
 
 Public Sub PrintPembuktianPDF()
     RunPDF "pdf_pembuktian", FindWordFile(PATTERN_BAUTAMA), SHEET_BA, "BA Pembuktian & Nego"
-End Sub
+End Sub
+Public Sub GabungBAReviu()
+    ' Gabung BA Reviu Lengkap: scan hal 1-2 + Isi Reviu + scan hal 3
+    ' Output: 6. BA Reviu Lengkap\BA_REVIU_FULL_{nama_paket}.pdf
+    Dim folderPaket As String
+    folderPaket = ThisWorkbook.Path
+    Dim cmd As String
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\gabung_ba_reviu.py") & " " & Q(folderPaket)
+    wsh.Run cmd, 0, False
+    Set wsh = Nothing
+End Sub
+
 
 Public Sub PrintREvaluasiPDF()
     RunPDF "pdf_full", FindWordFile(PATTERN_REVALUASI), SHEET_BA, "REvaluasi"

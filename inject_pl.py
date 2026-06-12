@@ -106,7 +106,7 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnRefreshDataPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnRefreshDataPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK", "btnGabungBAReviu")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
@@ -176,6 +176,8 @@ def inject_pl(filepath: str):
             add_btn("btnIsiEvaluasiPL",   "Isi Evaluasi PL",   "IsiEvaluasiPLStandalone",     3, 3, (160, 60, 0))
             # Baris 4: Cetak BA PLJKK (col 0)
             add_btn("btnCetakBAPLJKK",    "Cetak BA PLJKK",    "CetakBAPLJKKPDF",             4, 0, (140, 20, 20))
+            # Baris 5: Gabung BA Reviu
+            add_btn("btnGabungBAReviu",   "Gabung BA Reviu",   "GabungBAReviu",               5, 0, (0, 128, 96))
 
             # Sengaja TIDAK re-protect @ Master Data — user butuh edit bebas
             # (Aturan PL: sheet @ Master Data harus selalu unprotected)

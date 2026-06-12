@@ -203,6 +203,8 @@ def inject_buttons(filepath):
             # Baris 6
             ("btnSyncDraft",       "Sync Data Draft",     "SyncDataDraft",             5, 0, (0, 112, 192)),
             ("btnDiffHighlight",   "Diff Highlight",      "DiffHighlight",             5, 1, (255, 165, 0)),
+            # Baris 7
+            ("btnGabungBAReviu",   "Gabung BA Reviu",     "GabungBAReviu",             6, 0, (0, 128, 96)),
         ]
 
         def _add_master_btn(ws_md, name, label, macro, yi, xi, color):
