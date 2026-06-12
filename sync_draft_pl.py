@@ -78,7 +78,11 @@ def cmd_save():
         _write_output({"ok": False, "error": "kode_paket kosong"})
         return
 
-    result = _http_patch(kode_paket, {"data_snapshot": snapshot})
+    patch_payload = {"data_snapshot": snapshot}
+    kode_unik = inp.get("kode_unik", "")
+    if kode_unik:
+        patch_payload["kode_unik"] = kode_unik
+    result = _http_patch(kode_paket, patch_payload)
     _write_output(result)
 
 

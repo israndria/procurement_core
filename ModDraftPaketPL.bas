@@ -1533,8 +1533,10 @@ Public Sub SyncDataDraftPL()
     Application.Wait Now + TimeSerial(0, 0, 0) + 0.0001  ' yield ~100ms
 
     Dim snapshot As String: snapshot = BuildSnapshotPL(wsMD)
+    Dim kodeUnik As String
+    kodeUnik = Trim(CStr(wsMD.Cells(2, 6).Value))  ' F2 = kode_unik
     Dim payload As String
-    payload = "{""kode_paket"":""" & kodePaket & """,""snapshot"":" & snapshot & "}"
+    payload = "{""kode_paket"":""" & kodePaket & """,""snapshot"":" & snapshot & ",""kode_unik"":""" & kodeUnik & """}"
     WriteUTF8PL inputFile, payload
 
     Dim pyExe As String: pyExe = sd & "\python\python.exe"
