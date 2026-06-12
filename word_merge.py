@@ -486,7 +486,9 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             wdApp.Quit()
             pythoncom.CoUninitialize()
             try:
-                os.remove(_merged_b)
+                if os.path.exists(_merged_b):
+                    import send2trash
+                    send2trash.send2trash(_merged_b)
             except Exception:
                 pass
         return
@@ -837,6 +839,13 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         show_error(f"Error saat merge:\n{e}")
     finally:
         pythoncom.CoUninitialize()
+        # Hapus file (Merged) ke Recycle Bin setelah selesai
+        try:
+            if os.path.exists(copy_path):
+                import send2trash
+                send2trash.send2trash(copy_path)
+        except Exception:
+            pass
 
 
 def show_error(msg):
