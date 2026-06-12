@@ -1355,7 +1355,7 @@ Public Sub GabungBAReviu()
     Dim wsh As Object
     Set wsh = CreateObject("WScript.Shell")
     cmd = Chr(34) & pyExe & Chr(34) & " " & Chr(34) & scriptDir & "\gabung_ba_reviu.py" & Chr(34) & " " & Chr(34) & folderPaket & Chr(34)
-    wsh.Run cmd, 1, True
+    wsh.Run cmd, 0, True
     Set wsh = Nothing
 End Sub
 
