@@ -171,13 +171,11 @@ def inject_pl(filepath: str):
             add_btn("btnCetakDokpil_PL",  "Cetak Dokpil PDF",  "CetakDokpilPlJkkPDF",     2, 1, (0, 100, 180))
             # Baris 3: Cetak Isi Reviu (kolom 0) | Gabung Reviu (kolom 1) | Muat HPS (kolom 2) | Isi Evaluasi PL (kolom 3)
             add_btn("btnCetakReviu_PL",   "Cetak Isi Reviu",   "CetakReviuPlJkkPDF",          3, 0, (0, 120, 80))
-            add_btn("btnGabungReviu_PL",  "Gabung Reviu",      "GabungReviuPL",               3, 1, (0, 80, 140))
+            add_btn("btnGabungReviu_PL",  "Gabung BA Reviu",   "GabungBAReviu",               3, 1, (0, 128, 96))
             add_btn("btnMuatHPS_PL",      "Muat HPS",          "MuatHPSPL",                  3, 2, (200, 100, 0))
             add_btn("btnIsiEvaluasiPL",   "Isi Evaluasi PL",   "IsiEvaluasiPLStandalone",     3, 3, (160, 60, 0))
             # Baris 4: Cetak BA PLJKK (col 0)
             add_btn("btnCetakBAPLJKK",    "Cetak BA PLJKK",    "CetakBAPLJKKPDF",             4, 0, (140, 20, 20))
-            # Baris 5: Gabung BA Reviu
-            add_btn("btnGabungBAReviu",   "Gabung BA Reviu",   "GabungBAReviu",               5, 0, (0, 128, 96))
 
             # Sengaja TIDAK re-protect @ Master Data — user butuh edit bebas
             # (Aturan PL: sheet @ Master Data harus selalu unprotected)
