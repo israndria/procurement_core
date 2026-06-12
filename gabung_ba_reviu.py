@@ -174,6 +174,14 @@ def main():
         print(f"[WARN] {result['warning']}")
     if result['ok']:
         print(f"[OK] {result['pesan']}")
+        try:
+            import ctypes
+            msg = result['pesan']
+            if result.get('warning'):
+                msg += f'\n\n⚠️ {result["warning"]}'
+            ctypes.windll.user32.MessageBoxW(0, msg, 'Gabung BA Reviu - Selesai', 0x40)
+        except Exception:
+            pass
         # Buka file hasil
         if not dry_run and os.path.exists(result['output']):
             os.startfile(result['output'])
