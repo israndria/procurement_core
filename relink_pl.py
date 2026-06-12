@@ -22,7 +22,7 @@ import tempfile
 WORD_SHEET_MAP = [
     ("Isi Reviu PLJKK",     "list_reviu"),
     ("BA PLJKK",            "satu_data"),
-    ("Reviu DPP PLJKK",     "list_reviu"),
+    ("BA Reviu DPP PLJKK", "list_reviu"),
     ("Dokpil Full PLJKK",   "list_dokpil"),
     ("Undangan Full PLJK",  "satu_data"),
     ("BA PLPK",             "satu_data"),

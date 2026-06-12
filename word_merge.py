@@ -23,6 +23,11 @@ import datetime
 import shutil
 
 
+def _safe_filename(s: str, max_len: int = 80) -> str:
+    s = re.sub(r'[<>:"/\\|?*]', '', str(s)).strip().replace('\n',' ').replace('\r','')
+    return s[:max_len] if s else 'Dokumen'
+
+
 def format_value(value):
     if value is None:
         return ""
@@ -652,31 +657,24 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         elif mode.startswith("pdf"):
             safe_name = pdf_name if pdf_name else "000"
 
+            # Ambil nama paket dari data dict
+            _npk = ''
+            for _nk in ['Nama_Paket','NamaTender','Nama_Tender','nama_paket','nama_tender']:
+                _v = data.get(_nk) or data.get(_nk.lower())
+                if _v and str(_v).strip() not in ('','None','null'):
+                    _npk = str(_v).strip(); break
+            nama_paket_pdf = _safe_filename(_npk) if _npk else safe_name
+
             if mode == "pdf_full":
                 # Export full dokumen (template BA dipecah per-file, no page-range).
-                # Ambil kode_unik dari @ Master Data!G2 jika ada (fallback safe_name).
-                _ku_full = safe_name
-                try:
-                    import glob as _glob_full
-                    _xlsm_full = _glob_full.glob(os.path.join(folder, "*.xlsm"))
-                    if _xlsm_full:
-                        _xl_full = win32com.client.DispatchEx("Excel.Application")
-                        _xl_full.Visible = False
-                        _wb_full = _xl_full.Workbooks.Open(_xlsm_full[0], ReadOnly=True)
-                        _ku_v = str(_wb_full.Sheets("@ Master Data").Range("G2").Value).strip()
-                        _wb_full.Close(False)
-                        _xl_full.Quit()
-                        if _ku_v and _ku_v not in ("", "None", "null"):
-                            _ku_full = _ku_v
-                except Exception:
-                    pass
                 # Label dokumen dari nama file Word (prefix angka)
                 _bn_full = os.path.basename(word_path)
                 _label = "Dokumen"
-                if _bn_full.startswith("1. Reviu"):       _label = "BA_REVIU_DPP"
+                if _bn_full.startswith("1. BA Reviu") or _bn_full.startswith("1. Reviu"):
+                    _label = "BA_REVIU_DPP"
                 elif _bn_full.startswith("4. Undangan"):   _label = "Undangan"
                 elif _bn_full.startswith("6. Ringkasan"):  _label = "REvaluasi"
-                pdf_path = os.path.join(folder, f"{_label}_{_ku_full}.pdf")
+                pdf_path = os.path.join(folder, f"{_label}_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -684,7 +682,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 show_success(pdf_path)
             elif mode == "pdf_bareviu":
-                pdf_path = os.path.join(folder, f"BA_REVIU_DPP_{safe_name}.pdf")
+                pdf_path = os.path.join(folder, f"BA_REVIU_DPP_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -694,7 +692,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 show_success(pdf_path)
             elif mode == "pdf_bareviu_pl":
-                pdf_path = os.path.join(folder, f"BA_REVIU_PL_{safe_name}.pdf")
+                pdf_path = os.path.join(folder, f"BA_REVIU_PL_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -706,22 +704,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             elif mode == "pdf_bapljkk":
                 # Export Section 3 s/d akhir (skip Section 1+2 = Reviu DPP)
                 # Pakai Range agar tidak perlu tahu nomor halaman (robust terhadap perubahan isi Reviu)
-                _kode_pljkk = safe_name
-                try:
-                    import glob as _glob_pl
-                    _xlsm_pl = _glob_pl.glob(os.path.join(folder, "*.xlsm"))
-                    if _xlsm_pl:
-                        _xl_pl = win32com.client.DispatchEx("Excel.Application")
-                        _xl_pl.Visible = False
-                        _wb_pl = _xl_pl.Workbooks.Open(_xlsm_pl[0], ReadOnly=True)
-                        _ku_pl = str(_wb_pl.Sheets("@ Master Data").Range("G2").Value).strip()
-                        _wb_pl.Close(False)
-                        _xl_pl.Quit()
-                        if _ku_pl and _ku_pl not in ("", "None", "null"):
-                            _kode_pljkk = _ku_pl
-                except Exception:
-                    pass
-                pdf_path = os.path.join(folder, f"BA_PLJKK_{_kode_pljkk}.pdf")
+                pdf_path = os.path.join(folder, f"BA_PLJKK_{nama_paket_pdf}.pdf")
                 # File baru (BA-only) hanya 1 section; file lama (gabung Reviu) BA mulai Section 3
                 if wdDoc.Sections.Count >= 3:
                     _start = wdDoc.Sections(3).Range.Start
@@ -731,7 +714,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 _rng.ExportAsFixedFormat(OutputFileName=pdf_path, ExportFormat=17)
                 show_success(pdf_path)
             elif mode == "pdf_revaluasi":
-                pdf_path = os.path.join(folder, f"REvaluasi_{safe_name}.pdf")
+                pdf_path = os.path.join(folder, f"REvaluasi_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -741,23 +724,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 show_success(pdf_path)
             elif mode == "pdf_all":
-                # Ambil kode_unik dari @ Master Data!G2
-                _ku_all = safe_name
-                try:
-                    import glob as _glob_all
-                    _xlsm_all = _glob_all.glob(os.path.join(folder, "*.xlsm"))
-                    if _xlsm_all:
-                        _xl_all = win32com.client.DispatchEx("Excel.Application")
-                        _xl_all.Visible = False
-                        _wb_all = _xl_all.Workbooks.Open(_xlsm_all[0], ReadOnly=True)
-                        _ku_val = str(_wb_all.Sheets("@ Master Data").Range("G2").Value).strip()
-                        _wb_all.Close(False)
-                        _xl_all.Quit()
-                        if _ku_val and _ku_val not in ("", "None", "null"):
-                            _ku_all = _ku_val
-                except Exception:
-                    pass
-                pdf_path = os.path.join(folder, f"Isi_Reviu_DPP_{_ku_all}.pdf")
+                pdf_path = os.path.join(folder, f"Isi_Reviu_DPP_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -765,22 +732,20 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 show_success(pdf_path)
             elif mode == "pdf_dokpil":
-                # Ambil kode_unik dari Excel @ Master Data!G2 (cari xlsm di folder yang sama)
-                kode_unik_pdf = ""
-                try:
-                    import glob as _glob2
-                    _xlsm_list = _glob2.glob(os.path.join(folder, "*.xlsm"))
-                    if _xlsm_list:
-                        _xl2 = win32com.client.DispatchEx("Excel.Application")
-                        _xl2.Visible = False
-                        _wb2 = _xl2.Workbooks.Open(_xlsm_list[0], ReadOnly=True)
-                        kode_unik_pdf = str(_wb2.Sheets("@ Master Data").Range("G2").Value).strip()
-                        _wb2.Close(False)
-                        _xl2.Quit()
-                except Exception:
-                    pass
-                _pdf_suffix = kode_unik_pdf if kode_unik_pdf and kode_unik_pdf not in ("", "None", "null") else safe_name
-                pdf_path = os.path.join(folder, f"dokpil_{_pdf_suffix}.pdf")
+                # Ambil nama paket dari sheet satu_data (list_dokpil tidak punya field nama paket)
+                _np_dokpil = nama_paket_pdf
+                if _np_dokpil == safe_name:  # fallback belum dapat nama
+                    try:
+                        _data_sd = read_excel_data(excel_path, "satu_data")
+                        if _data_sd:
+                            for _nk in ['Nama_Paket', 'NamaTender', 'Nama_Tender', 'nama_paket']:
+                                _v = _data_sd.get(_nk) or _data_sd.get(_nk.lower())
+                                if _v and str(_v).strip() not in ('', 'None', 'null'):
+                                    _np_dokpil = _safe_filename(str(_v).strip())
+                                    break
+                    except Exception:
+                        pass
+                pdf_path = os.path.join(folder, f"dokpil_{_np_dokpil}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -792,7 +757,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 # "7.2 Dengan Nego" SETELAH tiap halaman anchor nego (2 occurrence).
                 # Anchor teks robust thd geseran halaman (ganti page-range/index manual).
                 import tempfile
-                final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Nego_{safe_name}.pdf")
+                final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Nego_{nama_paket_pdf}.pdf")
                 temp_dir = tempfile.mkdtemp()
                 temp_word_pdf = os.path.join(temp_dir, "temp_word.pdf")
                 temp_nego_pdf = os.path.join(temp_dir, "temp_nego.pdf")
@@ -818,7 +783,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 #   - "Klarifikasi Timpang Fix (2)" setelah tiap anchor timpang (2 occurrence)
                 # Urutan sisip per halaman ditentukan posisi anchor di dokumen (robust).
                 import tempfile
-                final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Timpang_{safe_name}.pdf")
+                final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Timpang_{nama_paket_pdf}.pdf")
                 temp_dir = tempfile.mkdtemp()
                 temp_word_pdf = os.path.join(temp_dir, "temp_word.pdf")
                 temp_nego_pdf = os.path.join(temp_dir, "temp_nego.pdf")
@@ -849,7 +814,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 show_success(final_pdf_path)
 
             else:
-                pdf_path = os.path.join(folder, f"Undangan_{safe_name}.pdf")
+                pdf_path = os.path.join(folder, f"Undangan_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -939,7 +904,7 @@ def run_merge_mode_pl(folder_path: str, excel_path: str) -> list:
     except ImportError:
         WORD_SHEET_MAP_PL = [
             ("5. BA PLJKK - Template.docx",               "satu_data"),
-            ("1. Reviu DPP PLJKK - Template.docx",        "list_reviu"),
+            ("1. BA Reviu DPP PLJKK - Template.docx",      "list_reviu"),
             ("3. Dokpil Full PLJKK - Template.docx",      "list_dokpil"),
         ]
 

@@ -71,7 +71,7 @@ SHEET_REVIU_PL = "list_reviu"
 SHEET_DOKPIL_PL = "list_dokpil"
 
 WORD_SHEET_MAP_PL = [
-    ("1. Reviu DPP PLJKK - Template.docx",        SHEET_REVIU_PL),
+    ("1. BA Reviu DPP PLJKK - Template.docx",     SHEET_REVIU_PL),
     ("2. Isi Reviu PLJKK - Template.docm",        SHEET_REVIU_PL),
     ("3. Dokpil Full PLJKK - Template.docx",      SHEET_DOKPIL_PL),
     ("4. Undangan Full PLJK - Template.docx",     SHEET_BA_PL),

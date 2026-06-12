@@ -136,7 +136,10 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
             for f in files_exist[:5]:
                 print(f"    - {f}")
         if sys.stdin.isatty():
-            jawab = input("\nLanjutkan? File yang sudah ada tidak akan di-overwrite. (y/n): ").strip().lower()
+            try:
+                jawab = input("\nLanjutkan? File yang sudah ada tidak akan di-overwrite. (y/n): ").strip().lower()
+            except EOFError:
+                jawab = 'y'
             if jawab != 'y':
                 print("[BATAL]")
                 return
