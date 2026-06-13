@@ -149,6 +149,8 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
         os.makedirs(target_dir)
 
     # Auto-create subfolder (untuk semua tipe paket, baru maupun existing)
+    draft_ppk_dir = os.path.join(target_dir, "0. Draft Dokumen PPK")
+    os.makedirs(draft_ppk_dir, exist_ok=True)
     ba_reviu_dir = os.path.join(target_dir, "6. BA Reviu Lengkap")
     os.makedirs(ba_reviu_dir, exist_ok=True)
     ba_summary_dir = os.path.join(target_dir, "7. Berita Acara + Summary Non Tender")
