@@ -149,12 +149,24 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
         os.makedirs(target_dir)
 
     # Auto-create subfolder (untuk semua tipe paket, baru maupun existing)
-    draft_ppk_dir = os.path.join(target_dir, "0. Draft Dokumen PPK")
-    os.makedirs(draft_ppk_dir, exist_ok=True)
-    ba_reviu_dir = os.path.join(target_dir, "6. BA Reviu Lengkap")
-    os.makedirs(ba_reviu_dir, exist_ok=True)
-    ba_summary_dir = os.path.join(target_dir, "7. Berita Acara + Summary Non Tender")
-    os.makedirs(ba_summary_dir, exist_ok=True)
+    # Mode Tender: subfolder identik dengan PL JKK, kecuali no.9
+    is_tender = bool(re.search(r"Pokja\s+\d+", folder_name, re.IGNORECASE))
+    _subfolder_9 = "9. Dokumen Penawaran Teknis & Biaya" if is_tender else "9. Dokumen Teknis Biaya"
+    _subfolders = [
+        "0. Draft Dokumen PPK",
+        "1. KAK & Spesifikasi Teknis",
+        "2. Rancangan Kontrak",
+        "3. Uraian Singkat Pekerjaan",
+        "4. Informasi Lainnya",
+        "5. Evaluator Kualifikasi & Teknis",
+        "6. BA Reviu Lengkap",
+        "7. Berita Acara + Summary Non Tender",
+        "8. Dokumen Kualifikasi",
+        _subfolder_9,
+    ]
+    for _sub in _subfolders:
+        os.makedirs(os.path.join(target_dir, _sub), exist_ok=True)
+
 
     # Extract suffix untuk rename Excel
     # Tender:  "Pokja 086" → "086"
