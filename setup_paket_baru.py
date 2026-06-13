@@ -148,9 +148,11 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     else:
         os.makedirs(target_dir)
 
-    # Auto-create subfolder "6. BA Reviu Lengkap" (untuk semua tipe paket)
+    # Auto-create subfolder (untuk semua tipe paket, baru maupun existing)
     ba_reviu_dir = os.path.join(target_dir, "6. BA Reviu Lengkap")
     os.makedirs(ba_reviu_dir, exist_ok=True)
+    ba_summary_dir = os.path.join(target_dir, "7. Berita Acara + Summary Non Tender")
+    os.makedirs(ba_summary_dir, exist_ok=True)
 
     # Extract suffix untuk rename Excel
     # Tender:  "Pokja 086" → "086"

@@ -1359,6 +1359,30 @@ Public Sub GabungBAReviu()
     Set wsh = Nothing
 End Sub
 
+Public Sub GabungBAPLJKK()
+    ' Gabung BA PLJKK: BA Utama + sisip BA Eval + BA Hasil Non Tender
+    ' Output: 7. Berita Acara + Summary Non Tender\BA_PLJKK_{kode}.pdf
+    Dim folderPaket As String
+    folderPaket = ThisWorkbook.Path
+
+    Dim scriptDir As String
+    scriptDir = ScriptDirPL()
+    If scriptDir = "" Then
+        MsgBox "Python tidak ditemukan.", vbCritical
+        Exit Sub
+    End If
+
+    Dim pyExe As String
+    pyExe = scriptDir & "\python\python.exe"
+
+    Dim cmd As String
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    cmd = Chr(34) & pyExe & Chr(34) & " " & Chr(34) & scriptDir & "\gabung_ba_pljkk.py" & Chr(34) & " " & Chr(34) & folderPaket & Chr(34)
+    wsh.Run cmd, 0, True
+    Set wsh = Nothing
+End Sub
+
 Public Sub GabungReviuPL()
     ' Gabung BA Reviu scan + Isi Reviu → Gabung_Reviu_{kode_unik}.pdf
     ' BA scan dicari di D:\Download\REVIU KONSULTAN PERENCANAAN {N}.pdf
