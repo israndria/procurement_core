@@ -168,6 +168,7 @@ def inject_buttons(filepath):
         # Baris 4 (yi=3): UpdateHPS | BukaReviu | PrintIsiReviu | PrintBAReviu2
         # Baris 5 (yi=4): BukaDokpil | PrintDokpil | Relink | —
         # Baris 6 (yi=5): SyncDraft | DiffHighlight | — | —
+        # Baris 7 (yi=6): GabungBAReviu | RefreshDataTender | — | —
         _ws_md_anchor = wb.Sheets("@ Master Data")
         _AX = _ws_md_anchor.Cells(28, 6).Left + 14  # col F row 28 + 5mm kanan
         _AY = _ws_md_anchor.Rows(28).Top + 7        # row 28 + 2.5mm bawah
@@ -204,6 +205,7 @@ def inject_buttons(filepath):
             ("btnDiffHighlight",   "Diff Highlight",      "DiffHighlight",             5, 1, (255, 165, 0)),
             # Baris 7
             ("btnGabungBAReviu",   "Gabung BA Reviu",     "GabungBAReviu",             6, 0, (0, 128, 96)),
+            ("btnRefreshTender",   "Refresh Data Tender", "RefreshDataTender",         6, 1, (0, 112, 192)),
         ]
 
         def _add_master_btn(ws_md, name, label, macro, yi, xi, color):

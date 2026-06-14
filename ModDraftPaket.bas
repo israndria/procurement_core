@@ -232,6 +232,142 @@ End Sub
 
 
 ' ============================================================
+' SILENT MODE untuk COM automation dari Python
+' ============================================================
+Private m_SilentModeTender As Boolean
+
+Public Sub SetSilentTender(bSilent As Boolean)
+    m_SilentModeTender = bSilent
+End Sub
+
+' ============================================================
+' ISI DATA TENDER BY KODE: fetch 1 row Supabase by kode_tender
+' Dipanggil dari isi_master_data_tender.py via COM saat create folder
+' Identik dengan IsiDataPLByKode di ModDraftPaketPL.bas
+' ============================================================
+Public Sub IsiDataByKodeTender(kodeTender As String)
+    Dim wsMD As Worksheet
+    On Error GoTo ErrHandlerIT
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+
+    If Trim(kodeTender) = "" Then Exit Sub
+
+    Dim url As String
+    url = SB_URL & "/rest/v1/" & SB_TABLE & "?select=" & SB_SELECT & _
+          "&kode_tender=eq." & kodeTender & "&limit=1"
+
+    Dim http As Object
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    http.Open "GET", url, False
+    http.setRequestHeader "apikey", SB_KEY
+    http.setRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.setRequestHeader "Accept", "application/json"
+    http.send
+
+    If http.Status <> 200 Then
+        If Not m_SilentModeTender Then _
+            MsgBox "Gagal ambil data paket " & kodeTender & " dari Supabase. HTTP " & http.Status, _
+                   vbExclamation, "Isi Data Tender"
+        Exit Sub
+    End If
+
+    Dim json As String
+    json = http.responseText
+    If json = "[]" Or json = "" Then
+        If Not m_SilentModeTender Then _
+            MsgBox "Paket " & kodeTender & " tidak ditemukan di database.", _
+                   vbInformation, "Isi Data Tender"
+        Exit Sub
+    End If
+
+    Dim col As Collection
+    Set col = ParseDraftJSON(json)
+    If col Is Nothing Then Exit Sub
+    If col.Count = 0 Then Exit Sub
+
+    Dim item As Variant
+    item = col(1)
+
+    With wsMD
+        .Cells(MD_E3, 3).Value  = CStr(item(2))   ' MAK
+        .Cells(MD_E5, 3).Value  = CStr(item(6))   ' Kode Pokja
+        .Cells(MD_E6, 3).Value  = CStr(item(1))   ' Nama Tender
+        .Cells(MD_E8, 3).Value  = CStr(item(3))   ' Kode RUP
+        .Cells(MD_E10, 3).Value = CStr(item(4))   ' Nilai Pagu
+        .Cells(MD_E11, 3).Value = CStr(item(5))   ' Nilai HPS
+        .Cells(MD_E12, 3).Value = CStr(item(8))   ' Nomor Surat Dinas
+        .Cells(MD_E13, 3).Value = CStr(item(7))   ' Nomor PP
+        .Cells(MD_E14, 3).NumberFormat = "@"
+        .Cells(MD_E14, 3).Value = CStr(item(0))   ' Kode Tender
+        Dim jw As String: jw = Trim(CStr(item(11)))
+        Dim spPos As Long: spPos = InStr(jw, " ")
+        If spPos > 0 Then jw = Left(jw, spPos - 1)
+        If IsNumeric(jw) Then
+            .Cells(MD_E15, 3).Value = CLng(jw)
+        Else
+            .Cells(MD_E15, 3).Value = CStr(item(11))
+        End If
+        .Cells(MD_E17, 3).Value = CStr(item(9))   ' SKPD/OPD
+    End With
+
+    Dim ppkNama As String: ppkNama = Trim(CStr(item(10)))
+    Dim komaPos As Long: komaPos = InStr(ppkNama, ",")
+    Dim ppkNamaBersih As String
+    If komaPos > 0 Then
+        ppkNamaBersih = Trim(Left(ppkNama, komaPos - 1))
+        wsMD.Cells(MD_E19, 3).Value = ppkNamaBersih
+    Else
+        ppkNamaBersih = ppkNama
+        wsMD.Cells(MD_E19, 3).Value = ppkNama
+    End If
+
+    Dim nipPPK As String: nipPPK = Trim(CStr(item(19)))
+    Dim skPPK As String:  skPPK  = Trim(CStr(item(20)))
+    If nipPPK = "" Or skPPK = "" Then
+        Dim nipLookup As String, skLookup As String, gelarLookup As String
+        LookupPPK ppkNamaBersih, nipLookup, skLookup, gelarLookup
+        If nipPPK = "" Then nipPPK = nipLookup
+        If skPPK  = "" Then skPPK  = skLookup
+    End If
+    If nipPPK <> "" Then
+        wsMD.Cells(MD_E20, 3).NumberFormat = "@"
+        wsMD.Cells(MD_E20, 3).Value = nipPPK
+    End If
+    If skPPK <> "" Then wsMD.Cells(MD_E21, 3).Value = skPPK
+
+    wsMD.Cells(MD_E33, 3).Value = CStr(item(12))  ' Sumber Anggaran
+    IsiAnggotaPokjaToMaster wsMD, CStr(item(13)), CStr(item(14)), CStr(item(15))
+
+    Exit Sub
+ErrHandlerIT:
+    If Not m_SilentModeTender Then _
+        MsgBox "Error IsiDataByKodeTender: " & Err.Number & " - " & Err.Description, _
+               vbCritical, "Isi Data Tender"
+End Sub
+
+' ============================================================
+' REFRESH DATA TENDER: tombol @ Master Data — tarik ulang dari Supabase
+' berdasarkan kode_tender di C5 (row MD_E5=4, col 3)
+' ============================================================
+Public Sub RefreshDataTender()
+    Dim wsMD As Worksheet
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+    Dim kode As String
+    kode = Trim(CStr(wsMD.Cells(MD_E5, 3).Value))
+    If kode = "" Then
+        If Not m_SilentModeTender Then _
+            MsgBox "Kode tender (C5) kosong. Tidak bisa refresh.", _
+                   vbExclamation, "Refresh Data Tender"
+        Exit Sub
+    End If
+    IsiDataByKodeTender kode
+    If Not m_SilentModeTender Then _
+        MsgBox "Data Tender di-refresh dari Supabase." & vbCrLf & _
+               "Kode tender: " & kode, vbInformation, "Refresh Data Tender"
+End Sub
+
+
+' ============================================================
 ' AUTOFILL: Dipanggil dari Worksheet_Change
 ' ============================================================
 Public Sub PilihDraftPaket(selectedLabel As String)
