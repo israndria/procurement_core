@@ -163,7 +163,7 @@ def inject_buttons(filepath):
         # Tombol mulai row 26 (2 baris gap setelah border) — konsisten semua paket.
         # Kolom J (col 10) ke kanan — area kosong di semua paket.
         # Baris 1 (yi=0): BukaBA PK | Print BA Reviu | — | —
-        # Baris 2 (yi=1): Undangan PDF | PrintPembuktian | REvaluasi | —
+        # Baris 2 (yi=1): PrintPembuktian | REvaluasi | — | —
         # Baris 3 (yi=2): PrintTimpang | MuatDraft | ParseDraft | KodeUnik
         # Baris 4 (yi=3): UpdateHPS | BukaReviu | PrintIsiReviu | PrintBAReviu2
         # Baris 5 (yi=4): BukaDokpil | PrintDokpil | Relink | —
@@ -183,9 +183,8 @@ def inject_buttons(filepath):
             ("btnBukaBA",          "Buka BA PK",          "BukaBA",                   0, 0, BLUE_WORD),
             ("btnPrintBAReviu",    "Print BA Reviu",       "PrintBAReviuPDF",          0, 1, BLACK),
             # Baris 2
-            ("btnUndanganPDF",     "Print Undangan PDF",  "PrintUndanganPDF",          1, 0, RED_PDF),
-            ("btnPrintPembuktian", "Print BA Pembuktian", "PrintPembuktianPDF",        1, 1, BLACK),
-            ("btnREvaluasi",       "Print REvaluasi",     "PrintREvaluasiPDF",         1, 2, BLACK),
+            ("btnPrintPembuktian", "Print BA Pembuktian", "PrintPembuktianPDF",        1, 0, BLACK),
+            ("btnREvaluasi",       "Print REvaluasi",     "PrintREvaluasiPDF",         1, 1, BLACK),
             # Baris 3
             ("btnPembuktianTimpang","Print Timpang",       "PrintPembuktianTimpangPDF",2, 0, BLACK),
             ("btnMuatDraft",       "Muat Draft Paket",    "MuatDraftPaket",            2, 1, PURPLE),
