@@ -230,12 +230,12 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     print(f"  Word   : {success_count}/{len(word_sheet_map)} terhubung")
 
 
-def setup_paket_baru(folder_name=None):
+def setup_paket_baru(folder_name=None, output_base=None):
     """Setup paket baru mode Tender (PK): copy template + auto-link mail merge."""
     if not folder_name:
         print("\nContoh: '19. Pokja 091'")
         folder_name = input("Nama folder paket baru: ").strip()
-    _setup_folder(folder_name, TEMPLATE_DIR, EXCEL_TEMPLATE, WORD_SHEET_MAP)
+    _setup_folder(folder_name, TEMPLATE_DIR, EXCEL_TEMPLATE, WORD_SHEET_MAP, output_base=output_base)
 
 
 def setup_paket_baru_pl(folder_name=None, output_base=None):
@@ -273,4 +273,4 @@ if __name__ == "__main__":
     if mode_pl:
         setup_paket_baru_pl(folder_name, output_base=output_dir)
     else:
-        setup_paket_baru(folder_name)
+        setup_paket_baru(folder_name, output_base=output_dir)
