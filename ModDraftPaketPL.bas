@@ -46,8 +46,8 @@ Private Const MD_SHEET As String = "@ Master Data"
 '        19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
 '        24=mak, 25=nama_penyedia, 26=npwp_penyedia, 27=personil_json, 28=tgl_dokpil, 29=nomor_dokpil, 30=kode_unik
 '        31=tgl_evaluasi, 32=tgl_negosiasi, 33=tgl_penetapan, 34=nomor_nota_dinas, 35=nomor_rekomendasi, 36=tgl_rekomendasi
-'        37=tgl_pembukaan, 38=tahap_spse, 39=masa_berlaku
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan,tahap_spse,masa_berlaku"
+'        37=tgl_pembukaan, 38=tahap_spse, 39=masa_berlaku, 40=uraian_singkat
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan,tahap_spse,masa_berlaku,uraian_singkat
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -375,15 +375,23 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             .Cells(PLR_NPWP_PESERTA, 3).Value = CStr(item(26))  ' npwp_penyedia
         End If
 
-        ' ── URAIAN SINGKAT (hardcode template) ───────────────────────────
-        Dim namaUraian As String: namaUraian = Trim(CStr(item(23)))
-        If namaUraian = "" Then namaUraian = "Uraian Singkat Pekerjaan"
-        ' Buang ekstensi .pdf di display
-        If LCase(Right(namaUraian, 4)) = ".pdf" Then
-            namaUraian = Left(namaUraian, Len(namaUraian) - 4)
+        ' ── URAIAN SINGKAT ────────────────────────────────────────────────
+        ' Prioritas: item(40)=uraian_singkat (auto-build dari divisi HPS, untuk PK konstruksi)
+        ' Fallback: template lama "Mengerjakan ... sesuai dengan KAK/Dokumen ..." (untuk JKK konsultansi)
+        Dim uraianPK As String
+        If UBound(item) >= 40 Then uraianPK = Trim(CStr(item(40)))
+        If uraianPK <> "" Then
+            .Cells(PLR_URAIAN_SINGKAT, 3).Value = uraianPK
+        Else
+            Dim namaUraian As String: namaUraian = Trim(CStr(item(23)))
+            If namaUraian = "" Then namaUraian = "Uraian Singkat Pekerjaan"
+            ' Buang ekstensi .pdf di display
+            If LCase(Right(namaUraian, 4)) = ".pdf" Then
+                namaUraian = Left(namaUraian, Len(namaUraian) - 4)
+            End If
+            .Cells(PLR_URAIAN_SINGKAT, 3).Value = _
+                "Mengerjakan " & CStr(item(1)) & " sesuai dengan KAK/Dokumen " & namaUraian
         End If
-        .Cells(PLR_URAIAN_SINGKAT, 3).Value = _
-            "Mengerjakan " & CStr(item(1)) & " sesuai dengan KAK/Dokumen " & namaUraian
 
         ' ── NOMOR DOKPIL: 000.3.3/01/PL/PP-NN/KodeUnik/SKPD/Tahun ────────
         ' PP-NN dari angka terakhir di nama_paket (Paket 2 -> 02, Paket 12 -> 12)
@@ -557,7 +565,7 @@ Public Sub MuatPenawaranPL()
     Dim kodePaket As String
     kodePaket = Trim(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))
     If kodePaket = "" Then
-        MsgBox "Kode Paket (C3) kosong. Klik 'Isi Data PL' terlebih dahulu.", vbExclamation, "Muat Penawaran PL"
+        If Not m_SilentMode Then MsgBox "Kode Paket (C3) kosong. Klik 'Isi Data PL' terlebih dahulu.", vbExclamation, "Muat Penawaran PL"
         Exit Sub
     End If
 
@@ -567,13 +575,13 @@ Public Sub MuatPenawaranPL()
     Set wsPen = ThisWorkbook.Sheets("6. Penawaran")
     On Error GoTo 0
     If wsPen Is Nothing Then
-        MsgBox "Sheet '6. Penawaran' tidak ditemukan di workbook ini.", vbCritical, "Muat Penawaran PL"
+        If Not m_SilentMode Then MsgBox "Sheet '6. Penawaran' tidak ditemukan di workbook ini.", vbCritical, "Muat Penawaran PL"
         Exit Sub
     End If
 
     Dim scriptDir As String: scriptDir = ScriptDirPL()
     If scriptDir = "" Then
-        MsgBox "Python tidak ditemukan.", vbCritical, "Muat Penawaran PL"
+        If Not m_SilentMode Then MsgBox "Python tidak ditemukan.", vbCritical, "Muat Penawaran PL"
         Exit Sub
     End If
 
@@ -744,7 +752,7 @@ NextItem:
 NextPeserta:
     Next iP
 
-    MsgBox "Sheet '6. Penawaran' berhasil diisi.", vbInformation, "Muat Penawaran PL"
+    If Not m_SilentMode Then MsgBox "Sheet '6. Penawaran' berhasil diisi.", vbInformation, "Muat Penawaran PL"
 End Sub
 
 
@@ -836,7 +844,7 @@ Public Sub IsiEvaluasiPLStandalone()
     Dim kodePaket As String
     kodePaket = Trim(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))
     If kodePaket = "" Then
-        MsgBox "Kode Paket (C3) kosong. Klik 'Isi Data PL' terlebih dahulu.", vbExclamation, "Isi Evaluasi PL"
+        If Not m_SilentMode Then MsgBox "Kode Paket (C3) kosong. Klik 'Isi Data PL' terlebih dahulu.", vbExclamation, "Isi Evaluasi PL"
         Exit Sub
     End If
 
@@ -857,13 +865,13 @@ Public Sub IsiEvaluasiPLStandalone()
     http.Send
 
     If http.Status <> 200 Then
-        MsgBox "Fetch Supabase gagal: HTTP " & http.Status, vbExclamation, "Isi Evaluasi PL"
+        If Not m_SilentMode Then MsgBox "Fetch Supabase gagal: HTTP " & http.Status, vbExclamation, "Isi Evaluasi PL"
         Exit Sub
     End If
 
     Dim json As String: json = http.ResponseText
     If json = "[]" Or json = "" Then
-        MsgBox "Data paket tidak ditemukan di Supabase: " & kodePaket, vbExclamation, "Isi Evaluasi PL"
+        If Not m_SilentMode Then MsgBox "Data paket tidak ditemukan di Supabase: " & kodePaket, vbExclamation, "Isi Evaluasi PL"
         Exit Sub
     End If
 
@@ -890,12 +898,12 @@ Public Sub IsiEvaluasiPLStandalone()
     Set wsEval = ThisWorkbook.Sheets("@ Evaluasi")
     On Error GoTo ErrFetch
     If wsEval Is Nothing Then
-        MsgBox "Sheet '@ Evaluasi' tidak ditemukan di workbook ini.", vbCritical, "Isi Evaluasi PL"
+        If Not m_SilentMode Then MsgBox "Sheet '@ Evaluasi' tidak ditemukan di workbook ini.", vbCritical, "Isi Evaluasi PL"
         Exit Sub
     End If
 
     IsiEvaluasiPL wsMD, wsEval, item
-    MsgBox "Sheet '@ Evaluasi' berhasil diisi dari Supabase.", vbInformation, "Isi Evaluasi PL"
+    If Not m_SilentMode Then MsgBox "Sheet '@ Evaluasi' berhasil diisi dari Supabase.", vbInformation, "Isi Evaluasi PL"
 
     ' Auto muat harga penawaran dari SPSE → sheet "6. Penawaran"
     MuatPenawaranPL
@@ -903,7 +911,7 @@ Public Sub IsiEvaluasiPLStandalone()
     Exit Sub
 
 ErrFetch:
-    MsgBox "Error IsiEvaluasiPLStandalone: " & Err.Description, vbCritical, "Isi Evaluasi PL"
+    If Not m_SilentMode Then MsgBox "Error IsiEvaluasiPLStandalone: " & Err.Description, vbCritical, "Isi Evaluasi PL"
 End Sub
 
 
