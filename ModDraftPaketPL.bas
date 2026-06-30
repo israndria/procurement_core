@@ -489,11 +489,15 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         End If
 
         ' ── SBU ──────────────────────────────────────────────────────────
-        If CStr(item(15)) <> "" Then
+        If CStr(item(15)) <> "" And CStr(item(15)) <> "null" Then
             .Cells(PLR_SBU_BARU, 3).Value = CStr(item(15))  ' sbu_baru
+        Else
+            .Cells(PLR_SBU_BARU, 3).ClearContents
         End If
-        If CStr(item(16)) <> "" Then
+        If CStr(item(16)) <> "" And CStr(item(16)) <> "null" Then
             .Cells(PLR_SBU_LAMA, 3).Value = CStr(item(16))  ' sbu_lama
+        Else
+            .Cells(PLR_SBU_LAMA, 3).ClearContents
         End If
 
         ' ── PERSONIL (R32-R40): jabatan/pengalaman/sertifikat P1-P3, stride=3 di Excel ──
