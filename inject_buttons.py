@@ -20,8 +20,10 @@ def inject_buttons(filepath):
         "ModUtilitas",      # Export PDF, Direct Print, konversi bulan
         "ModNavigator",     # Navigasi sheet, input data tender, daftar isi
         "ModKodeUnik",      # Generate kode unik otomatis
+        "ModKodeUnikPL",    # Generate kode unik otomatis untuk PL
         "ModAutoFit",       # Auto-fit baris
         "ModDraftPaket",    # Load draft paket dari Supabase + autofill
+        "ModDraftPaketPL",  # Load draft paket PL dari Supabase + autofill
         "ModKKEvaluasi",    # Muat data KK Evaluasi Kualifikasi dari Supabase
         "ModInputBA",       # Muat sheet "0. Input BA" dari Supabase + GCal
         "ModSyncDraft",     # Sync Data Draft + Diff Highlight ke Supabase
