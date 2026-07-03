@@ -46,8 +46,8 @@ Private Const MD_SHEET As String = "@ Master Data"
 '        19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
 '        24=mak, 25=nama_penyedia, 26=npwp_penyedia, 27=personil_json, 28=tgl_dokpil, 29=nomor_dokpil, 30=kode_unik
 '        31=tgl_evaluasi, 32=tgl_negosiasi, 33=tgl_penetapan, 34=nomor_nota_dinas, 35=nomor_rekomendasi, 36=tgl_rekomendasi
-'        37=tgl_pembukaan, 38=tahap_spse, 39=masa_berlaku, 40=uraian_singkat
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan,tahap_spse,masa_berlaku,uraian_singkat
+'        37=tgl_pembukaan, 38=tahap_spse, 39=masa_berlaku, 40=uraian_singkat, 41=nomor_urut
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan,tahap_spse,masa_berlaku,uraian_singkat,nomor_urut"
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -393,21 +393,52 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
                 "Mengerjakan " & CStr(item(1)) & " sesuai dengan KAK/Dokumen " & namaUraian
         End If
 
-        ' ── NOMOR DOKPIL: 000.3.3/01/PL/PP-NN/KodeUnik/SKPD/Tahun ────────
-        ' PP-NN dari angka terakhir di nama_paket (Paket 2 -> 02, Paket 12 -> 12)
-        Dim npaket As String: npaket = CStr(item(1))
+        ' ── NOMOR DOKPIL: 000.3.3/NN/PL/PP-NN/KodeUnik/SKPD/Tahun ────────
+        ' PP-NN dari angka prefix nama FOLDER workbook (misal "16. PLJKK - ..." -> 16)
+        ' Fallback: nomor_urut Supabase (item(41)), lalu "01"
         Dim numStr As String: numStr = ""
-        Dim ii As Long
-        For ii = Len(npaket) To 1 Step -1
-            Dim chr As String: chr = Mid(npaket, ii, 1)
-            If chr >= "0" And chr <= "9" Then
-                numStr = chr & numStr
-            ElseIf numStr <> "" Then
-                Exit For  ' sudah kumpul digit, ketemu non-digit -> stop
+        Dim folderBase As String
+        folderBase = Mid(ThisWorkbook.Path, InStrRev(ThisWorkbook.Path, "\") + 1)
+        ' Ekstrak digit di awal nama folder sebelum titik pertama
+        Dim dotPos As Long: dotPos = InStr(folderBase, ".")
+        If dotPos > 1 Then
+            Dim maybeNum As String: maybeNum = Left(folderBase, dotPos - 1)
+            Dim allDigit As Boolean: allDigit = True
+            Dim ci As Long
+            For ci = 1 To Len(maybeNum)
+                If Mid(maybeNum, ci, 1) < "0" Or Mid(maybeNum, ci, 1) > "9" Then
+                    allDigit = False: Exit For
+                End If
+            Next ci
+            If allDigit And Len(maybeNum) > 0 Then
+                Dim noFolderLong As Long: noFolderLong = CLng(maybeNum)
+                If noFolderLong > 0 Then
+                    If noFolderLong < 10 Then
+                        numStr = "0" & CStr(noFolderLong)
+                    Else
+                        numStr = CStr(noFolderLong)
+                    End If
+                End If
             End If
-        Next ii
-        If numStr = "" Then numStr = "1"
-        If Len(numStr) = 1 Then numStr = "0" & numStr
+        End If
+        ' Fallback ke nomor_urut Supabase jika folder tidak berangka
+        If numStr = "" Then
+            Dim noUrut As String: noUrut = Trim(CStr(item(41)))
+            If noUrut <> "" And noUrut <> "null" Then
+                Dim noUrutLong As Long
+                On Error Resume Next
+                noUrutLong = CLng(noUrut)
+                On Error GoTo 0
+                If noUrutLong > 0 Then
+                    If noUrutLong < 10 Then
+                        numStr = "0" & CStr(noUrutLong)
+                    Else
+                        numStr = CStr(noUrutLong)
+                    End If
+                End If
+            End If
+        End If
+        If numStr = "" Then numStr = "01"  ' fallback terakhir
 
         ' Singkatan SKPD dari master_dinas via lookup
         Dim singkatan As String: singkatan = LookupSingkatanDinas(CStr(item(2)))
@@ -443,22 +474,27 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim tahunDokpil As String: tahunDokpil = CStr(wsMD.Cells(PLR_TAHUN_ANGGARAN, 3).Value)
         If tahunDokpil = "" Then tahunDokpil = CStr(Year(Now))
 
-        ' Nomor Dokpil: prefer Supabase (sudah di-upload via Tab 4), fallback compose
-        Dim noDokpilSupa As String: noDokpilSupa = CStr(item(29))
-        If noDokpilSupa <> "" And noDokpilSupa <> "null" Then
-            .Cells(PLR_NOMOR_DOKPIL, 3).Value = noDokpilSupa
-        Else
-            .Cells(PLR_NOMOR_DOKPIL, 3).Value = _
-                "000.3.3/01/PL/PP-" & numStr & "/" & koUnik & "/" & singkatan & "/" & tahunDokpil
-        End If
+        ' Nomor Dokpil: selalu ikut nomor prefix folder workbook.
+        ' Supabase nomor_dokpil bisa stale dari folder lama (mis. PP-01 saat workbook di folder 16).
+        .Cells(PLR_NOMOR_DOKPIL, 3).Value = _
+            "000.3.3/" & numStr & "/PL/PP-" & numStr & "/" & koUnik & "/" & singkatan & "/" & tahunDokpil
 
         ' Paket ulang: sisip /PLU/ di nomor dokpil. Turunan (No Undangan + IsiEvaluasiPL) ikut otomatis.
         If IsPaketUlang() Then _
             .Cells(PLR_NOMOR_DOKPIL, 3).Value = SisipPLU(CStr(.Cells(PLR_NOMOR_DOKPIL, 3).Value))
 
-        ' Auto-generate No Undangan dari Nomor Dokpil (ganti /01/PL/ -> /02/PL/)
+        ' Auto-generate No Undangan dari Nomor Dokpil (ganti /NN/PL/ -> /(NN+1)/PL/)
         Dim noUndangan As String
-        noUndangan = Replace(.Cells(PLR_NOMOR_DOKPIL, 3).Value, "/01/PL/", "/02/PL/")
+        noUndangan = Replace(.Cells(PLR_NOMOR_DOKPIL, 3).Value, "/" & numStr & "/PL/", "/" & numStr & "/PL/")
+        ' Undangan = nomor urut +1 dari Dokpil (urutan surat keluar berikutnya)
+        Dim numStrU As String
+        Dim noUrutU As Long: noUrutU = CLng(numStr) + 1
+        If noUrutU < 10 Then
+            numStrU = "0" & CStr(noUrutU)
+        Else
+            numStrU = CStr(noUrutU)
+        End If
+        noUndangan = Replace(.Cells(PLR_NOMOR_DOKPIL, 3).Value, "/" & numStr & "/PL/", "/" & numStrU & "/PL/")
         .Cells(PLR_NO_UNDANGAN, 3).Value = noUndangan
 
         ' ── NOMOR BA REVIU: 000.3.3/PP{NN}/02/SKPD/Reviu-KodeUnik/Tahun ────
@@ -1088,7 +1124,7 @@ Private Function ParsePLJSON(json As String) As Collection
 
         Dim obj As String: obj = Mid(json, braceStart, braceEnd - braceStart + 1)
 
-        Dim item(38) As Variant
+        Dim item(41) As Variant
         item(0)  = ExtractJSONValPL(obj, "kode_paket")
         item(1)  = ExtractJSONValPL(obj, "nama_paket")
         item(2)  = ExtractJSONValPL(obj, "satker")
@@ -1128,6 +1164,9 @@ Private Function ParsePLJSON(json As String) As Collection
         item(36) = ExtractJSONValPL(obj, "tgl_rekomendasi")
         item(37) = ExtractJSONValPL(obj, "tgl_pembukaan")
         item(38) = ExtractJSONValPL(obj, "tahap_spse")
+        item(39) = ExtractJSONValPL(obj, "masa_berlaku")
+        item(40) = ExtractJSONValPL(obj, "uraian_singkat")
+        item(41) = ExtractJSONValPL(obj, "nomor_urut")
 
         col.Add item
         pos = braceEnd + 1
