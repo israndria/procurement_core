@@ -959,20 +959,11 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
     ' Ambil nomor dokpil dari @ Master Data R20 (sudah diisi IsiMasterDataPL)
     Dim noDokpil As String: noDokpil = Trim(CStr(wsMD.Cells(PLR_NOMOR_DOKPIL, 3).Value))
 
-    ' Helper: ganti /01/PL/ -> /NN/PL/
-    ' noDokpil contoh: 000.3.3/01/PL/PP-02/BAPLJKK/DPUPR/2026
-
-    Dim no03 As String: no03 = ""
-    Dim no04 As String: no04 = ""
-    Dim no05 As String: no05 = ""
-    Dim no08 As String: no08 = ""
-    If InStr(noDokpil, "/01/PL/") > 0 Then
-        no03 = Replace(noDokpil, "/01/PL/", "/03/PL/")
-        no04 = Replace(noDokpil, "/01/PL/", "/04/PL/")
-        ' No BA Klarifikasi & Negosiasi pakai /06/ (slot /05/ dipakai BA lain dari sistem)
-        no05 = Replace(noDokpil, "/01/PL/", "/06/PL/")
-        no08 = Replace(noDokpil, "/01/PL/", "/08/PL/")
-    End If
+    Dim no03 As String: no03 = NomorDokPL(noDokpil, "03")
+    Dim no04 As String: no04 = NomorDokPL(noDokpil, "04")
+    ' No BA Klarifikasi & Negosiasi pakai /06/ (slot /05/ dipakai BA lain dari sistem)
+    Dim no05 As String: no05 = NomorDokPL(noDokpil, "06")
+    Dim no08 As String: no08 = NomorDokPL(noDokpil, "08")
 
     ' R3  No BA Pembukaan Penawaran
     wsEval.Cells(3, 3).Value = no03
@@ -1012,15 +1003,34 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
     End If
     ' R41 Alamat Perusahaan → manual, skip
     ' R42 Nomor BA Pengantar = no09 (turunan noDokpil)
-    Dim no09 As String: no09 = ""
-    If InStr(noDokpil, "/01/PL/") > 0 Then
-        no09 = Replace(noDokpil, "/01/PL/", "/09/PL/")
-    End If
+    Dim no09 As String: no09 = NomorDokPL(noDokpil, "09")
     wsEval.Cells(42, 3).Value = no09
     ' R43 Tanggal Lengkap BA Pengantar = tgl_penetapan (item 33), format "Rabu, 03 Juni 2026"
     wsEval.Cells(43, 3).Value = FormatTanggalLengkap(CStr(item(33)))
 End Sub
 
+
+Private Function NomorDokPL(ByVal nomorDokpil As String, ByVal nomorBaru As String) As String
+    ' Ganti segmen nomor dokumen tepat sebelum /PL/.
+    ' 000.3.3/16/PL/...      -> 000.3.3/03/PL/...
+    ' 000.3.3/PLU/16/PL/...  -> 000.3.3/PLU/03/PL/...
+    Dim parts() As String
+    parts = Split(nomorDokpil, "/")
+    If UBound(parts) < 3 Then
+        NomorDokPL = ""
+        Exit Function
+    End If
+
+    Dim i As Long
+    For i = 1 To UBound(parts) - 1
+        If UCase(parts(i + 1)) = "PL" Then
+            parts(i) = nomorBaru
+            NomorDokPL = Join(parts, "/")
+            Exit Function
+        End If
+    Next i
+    NomorDokPL = ""
+End Function
 
 ' ============================================================
 ' PAKET ULANG: deteksi + sisip token /PLU/ di nomor dokumen
@@ -1193,11 +1203,123 @@ Public Sub BukaDokpilPlJkk()
 End Sub
 
 Public Sub CetakDokpilPlJkkPDF()
-    RunMergePL "pdf_dokpil", WM_PAT_DOKPIL, WM_SHEET_DOKPIL
+    Dim wordFile As String
+    wordFile = FindWordFilePL(WM_PAT_DOKPIL)
+    If wordFile = "" Then Exit Sub
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & wordFile
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim scriptDir As String
+    scriptDir = ScriptDirPL()
+    If scriptDir = "" Then
+        MsgBox "Python tidak ditemukan.", vbCritical
+        Exit Sub
+    End If
+    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+
+    Dim outMode As String, printerName As String
+    outMode = ChooseOutputModePL(printerName)
+    If outMode = "" Then Exit Sub
+
+    Dim kodePkt As String
+    kodePkt = CStr(ThisWorkbook.Sheets("@ Master Data").Cells(3, 3).Value)
+    If kodePkt = "" Then kodePkt = "000"
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    Dim cmd As String
+
+    If outMode = "printer" Then
+        cmd = Chr(34) & pyExe & Chr(34) & " " & _
+              Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " printer " & _
+              Chr(34) & wordPath & Chr(34) & " " & _
+              Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
+              Chr(34) & WM_SHEET_DOKPIL & Chr(34) & " " & _
+              Chr(34) & printerName & Chr(34) & " 0 0"
+        wsh.Run cmd, 0, False
+        Application.StatusBar = "Printing Dokpil PL ke " & printerName & " ..."
+    Else
+        cmd = Chr(34) & pyExe & Chr(34) & " " & _
+              Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " pdf_dokpil " & _
+              Chr(34) & wordPath & Chr(34) & " " & _
+              Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
+              Chr(34) & WM_SHEET_DOKPIL & Chr(34) & " " & _
+              Chr(34) & kodePkt & Chr(34)
+        wsh.Run cmd, 0, False
+        Application.StatusBar = "Membuat PDF DOKPIL_" & kodePkt & " ..."
+    End If
+
+    Set wsh = Nothing
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
 
 Public Sub CetakReviuPlJkkPDF()
-    RunMergePL "pdf_all", WM_PAT_ISI_REVIU, WM_SHEET_REVIU
+    Dim wordFile As String
+    wordFile = FindWordFilePL(WM_PAT_ISI_REVIU)
+    If wordFile = "" Then Exit Sub
+
+    Dim wordPath As String
+    wordPath = ThisWorkbook.Path & "\" & wordFile
+    If Dir(wordPath) = "" Then
+        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Save
+    On Error GoTo 0
+
+    Dim scriptDir As String
+    scriptDir = ScriptDirPL()
+    If scriptDir = "" Then
+        MsgBox "Python tidak ditemukan.", vbCritical
+        Exit Sub
+    End If
+    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+
+    Dim outMode As String, printerName As String
+    outMode = ChooseOutputModePL(printerName)
+    If outMode = "" Then Exit Sub
+
+    Dim kodePkt As String
+    kodePkt = CStr(ThisWorkbook.Sheets("@ Master Data").Cells(3, 3).Value)
+    If kodePkt = "" Then kodePkt = "000"
+
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    Dim cmd As String
+
+    If outMode = "printer" Then
+        cmd = Chr(34) & pyExe & Chr(34) & " " & _
+              Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " printer " & _
+              Chr(34) & wordPath & Chr(34) & " " & _
+              Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
+              Chr(34) & WM_SHEET_REVIU & Chr(34) & " " & _
+              Chr(34) & printerName & Chr(34) & " 0 0"
+        wsh.Run cmd, 0, False
+        Application.StatusBar = "Printing Isi Reviu PL ke " & printerName & " ..."
+    Else
+        cmd = Chr(34) & pyExe & Chr(34) & " " & _
+              Chr(34) & scriptDir & "\word_merge.py" & Chr(34) & " pdf_all " & _
+              Chr(34) & wordPath & Chr(34) & " " & _
+              Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
+              Chr(34) & WM_SHEET_REVIU & Chr(34) & " " & _
+              Chr(34) & kodePkt & Chr(34)
+        wsh.Run cmd, 0, False
+        Application.StatusBar = "Membuat PDF Isi_Reviu_DPP_" & kodePkt & " ..."
+    End If
+
+    Set wsh = Nothing
+    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
 End Sub
 
 Public Sub CetakBAReviuPLPDF()

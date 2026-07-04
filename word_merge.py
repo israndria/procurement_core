@@ -730,11 +730,14 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 _ba_reviu_dir = os.path.join(folder, "6. BA Reviu Lengkap")
                 os.makedirs(_ba_reviu_dir, exist_ok=True)
                 pdf_path = os.path.join(_ba_reviu_dir, f"Isi_Reviu_DPP_{nama_paket_pdf}.pdf")
-                wdDoc.ExportAsFixedFormat(
-                    OutputFileName=pdf_path,
-                    ExportFormat=17,
-                    Range=0,  # wdExportAllDocument
-                )
+                try:
+                    wdDoc.ExportAsFixedFormat(
+                        OutputFileName=pdf_path,
+                        ExportFormat=17,
+                        Range=0,  # wdExportAllDocument
+                    )
+                except Exception:
+                    wdDoc.SaveAs2(pdf_path, FileFormat=17)
                 show_success(pdf_path)
             elif mode == "pdf_dokpil":
                 # Ambil nama paket dari sheet satu_data (list_dokpil tidak punya field nama paket)
