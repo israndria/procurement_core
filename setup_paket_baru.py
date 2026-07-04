@@ -238,7 +238,7 @@ def setup_paket_baru(folder_name=None, output_base=None):
     _setup_folder(folder_name, TEMPLATE_DIR, EXCEL_TEMPLATE, WORD_SHEET_MAP, output_base=output_base)
 
 
-def setup_paket_baru_pl(folder_name=None, output_base=None):
+def setup_paket_baru_pl(folder_name=None, output_base=None, template_dir=None):
     """Setup paket baru mode Pengadaan Langsung (PL): copy template BAPLJKK + auto-link.
     output_base: override folder tujuan (default: deteksi dari nama PLJKK/PLPK).
     """
@@ -253,7 +253,7 @@ def setup_paket_baru_pl(folder_name=None, output_base=None):
         else:
             output_base = OUTPUT_DIR_PL_JKK
 
-    _setup_folder(folder_name, TEMPLATE_DIR_PL, EXCEL_TEMPLATE_PL, WORD_SHEET_MAP_PL, output_base)
+    _setup_folder(folder_name, template_dir or TEMPLATE_DIR_PL, EXCEL_TEMPLATE_PL, WORD_SHEET_MAP_PL, output_base)
 
 
 if __name__ == "__main__":
@@ -267,10 +267,16 @@ if __name__ == "__main__":
         output_dir = args[idx + 1]
         args = args[:idx] + args[idx + 2:]
 
+    template_dir = None
+    if "--template-dir" in args:
+        idx = args.index("--template-dir")
+        template_dir = args[idx + 1]
+        args = args[:idx] + args[idx + 2:]
+
     name_args = [a for a in args if not a.startswith("--") and a != "pl"]
     folder_name = " ".join(name_args).strip() or None
 
     if mode_pl:
-        setup_paket_baru_pl(folder_name, output_base=output_dir)
+        setup_paket_baru_pl(folder_name, output_base=output_dir, template_dir=template_dir)
     else:
         setup_paket_baru(folder_name, output_base=output_dir)
