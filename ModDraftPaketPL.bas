@@ -474,19 +474,7 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim tahunDokpil As String: tahunDokpil = CStr(wsMD.Cells(PLR_TAHUN_ANGGARAN, 3).Value)
         If tahunDokpil = "" Then tahunDokpil = CStr(Year(Now))
 
-        ' Nomor Dokpil: selalu ikut nomor prefix folder workbook.
-        ' Supabase nomor_dokpil bisa stale dari folder lama (mis. PP-01 saat workbook di folder 16).
-        .Cells(PLR_NOMOR_DOKPIL, 3).Value = _
-            "000.3.3/" & numStr & "/PL/PP-" & numStr & "/" & koUnik & "/" & singkatan & "/" & tahunDokpil
-
-        ' Paket ulang: sisip /PLU/ di nomor dokpil. Turunan (No Undangan + IsiEvaluasiPL) ikut otomatis.
-        If IsPaketUlang() Then _
-            .Cells(PLR_NOMOR_DOKPIL, 3).Value = SisipPLU(CStr(.Cells(PLR_NOMOR_DOKPIL, 3).Value))
-
-        ' Auto-generate No Undangan dari Nomor Dokpil (ganti /NN/PL/ -> /(NN+1)/PL/)
-        Dim noUndangan As String
-        noUndangan = Replace(.Cells(PLR_NOMOR_DOKPIL, 3).Value, "/" & numStr & "/PL/", "/" & numStr & "/PL/")
-        ' Undangan = nomor urut +1 dari Dokpil (urutan surat keluar berikutnya)
+        ' Nomor surat pakai formula agar edit manual F2 (Kode Unik) langsung mengalir.
         Dim numStrU As String
         Dim noUrutU As Long: noUrutU = CLng(numStr) + 1
         If noUrutU < 10 Then
@@ -494,14 +482,19 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Else
             numStrU = CStr(noUrutU)
         End If
-        noUndangan = Replace(.Cells(PLR_NOMOR_DOKPIL, 3).Value, "/" & numStr & "/PL/", "/" & numStrU & "/PL/")
-        .Cells(PLR_NO_UNDANGAN, 3).Value = noUndangan
 
-        ' ── NOMOR BA REVIU: 000.3.3/PP{NN}/02/SKPD/Reviu-KodeUnik/Tahun ────
-        Dim noBAReviu As String
-        noBAReviu = "000.3.3/PP" & numStr & "/02/" & singkatan & "/Reviu-" & koUnik & "/" & tahunDokpil
-        If IsPaketUlang() Then noBAReviu = SisipPLU(noBAReviu)
-        .Cells(PLR_NO_BA_REVIU, 3).Value = noBAReviu
+        .Cells(PLR_NOMOR_DOKPIL, 3).Formula = _
+            "=""000.3.3/" & numStr & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """"
+        .Cells(PLR_NO_UNDANGAN, 3).Formula = _
+            "=""000.3.3/" & numStrU & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """"
+        .Cells(PLR_NO_BA_REVIU, 3).Formula = _
+            "=""000.3.3/PP" & numStr & "/02/" & singkatan & "/Reviu-""&$F$2&""/" & tahunDokpil & """"
+
+        If IsPaketUlang() Then
+            .Cells(PLR_NOMOR_DOKPIL, 3).Value = SisipPLU(CStr(.Cells(PLR_NOMOR_DOKPIL, 3).Value))
+            .Cells(PLR_NO_UNDANGAN, 3).Value = SisipPLU(CStr(.Cells(PLR_NO_UNDANGAN, 3).Value))
+            .Cells(PLR_NO_BA_REVIU, 3).Value = SisipPLU(CStr(.Cells(PLR_NO_BA_REVIU, 3).Value))
+        End If
 
         ' ── ALAMAT PP: lookup master_dinas.alamat_pp_bertugas via satker ───
         Dim alamatPP As String: alamatPP = LookupAlamatPP(CStr(item(2)))

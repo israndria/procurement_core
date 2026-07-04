@@ -133,6 +133,59 @@ def cleanup_blank_pages(doc):
     return
 
 
+def _fit_path(folder, filename, max_total=240):
+    """Word COM (ExportAsFixedFormat/SaveAs2) menolak path >255 char
+    ('String is longer than 255 characters', wdmain11.chm 41873).
+    Potong stem filename agar total path aman."""
+    path = os.path.join(folder, filename)
+    if len(path) <= max_total:
+        return path
+    stem, ext = os.path.splitext(filename)
+    avail = max_total - len(folder) - len(ext) - 1  # -1 utk separator
+    if avail < 10:
+        avail = 10
+    return os.path.join(folder, stem[:avail].rstrip() + ext)
+
+
+def _strip_mailmerge_datasource(docx_path):
+    """Hapus attachment mail merge (w:mailMerge di word/settings.xml) dari copy
+    (Merged). Path Excel panjang bikin connection string/SQL >255 char sehingga
+    Word error 41873 'String is longer than 255 characters' saat auto-connect
+    data source di Documents.Open. Script ini merge field sendiri via COM,
+    jadi attachment tidak diperlukan di file copy."""
+    import re
+    import zipfile
+    try:
+        with zipfile.ZipFile(docx_path, "r") as zin:
+            names = zin.namelist()
+            if "word/settings.xml" not in names:
+                return
+            settings = zin.read("word/settings.xml").decode("utf-8")
+            new_settings = re.sub(
+                r"<w:mailMerge>.*?</w:mailMerge>|<w:mailMerge\s*/>",
+                "", settings, flags=re.DOTALL)
+            if new_settings == settings:
+                return
+            items = [(n, zin.read(n)) for n in names]
+        tmp = docx_path + ".tmp"
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+            for n, blob in items:
+                zout.writestr(n, new_settings.encode("utf-8") if n == "word/settings.xml" else blob)
+        os.replace(tmp, docx_path)
+    except Exception:
+        pass  # gagal strip -> lanjut; worst case error lama muncul lagi
+
+
+def _set_field_result(field, val):
+    if len(val) <= 255:
+        field.Result.Text = val
+        field.Unlink()
+        return
+    rng = field.Result
+    field.Unlink()
+    rng.Text = val
+
+
 def _replace_merge_fields(wdDoc, data):
     """Replace semua MERGEFIELD di wdDoc dgn nilai dari data + apply format switch.
     Field di-Unlink jadi teks statis. Loop backwards supaya index aman."""
@@ -162,10 +215,9 @@ def _replace_merge_fields(wdDoc, data):
                             val = val.lower()
                         elif "FIRSTCAP" in format_str:
                             val = val.capitalize()
-                        field.Result.Text = val
                     else:
-                        field.Result.Text = ""
-                    field.Unlink()
+                        val = ""
+                    _set_field_result(field, val)
         except:
             pass
 
@@ -345,8 +397,9 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         _base_b, _ext_b = os.path.splitext(os.path.basename(_word_path_win))
         if _ext_b.lower() not in (".docx", ".docm"):
             _ext_b = ".docx"
-        _merged_b = os.path.join(_folder, f"{_base_b} (Merged){_ext_b}")
+        _merged_b = _fit_path(_folder, f"{_base_b[:60].rstrip()} (Merged){_ext_b}")
         shutil.copy2(_word_path_win, _merged_b)
+        _strip_mailmerge_datasource(_merged_b)
         pythoncom.CoInitialize()
         wdApp = win32com.client.DispatchEx("Word.Application")
         wdApp.DisplayAlerts = 0
@@ -381,7 +434,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                             _kode_pljkk = _ku_pl
                 except Exception:
                     pass
-                _pdf_path = os.path.join(_folder, f"BA_PLJKK_{_kode_pljkk}.pdf")
+                _pdf_path = _fit_path(_folder, f"BA_PLJKK_{_kode_pljkk}.pdf")
                 _tmp_word = _pdf_path + "_tmpword.pdf"
                 _tmp_72   = _pdf_path + "_tmp72.pdf"
                 # Export Word -> tmp
@@ -497,10 +550,11 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
     base, ext = os.path.splitext(os.path.basename(word_path))
     if ext.lower() not in (".docx", ".docm"):
         ext = ".docx"
-    copy_path = os.path.join(folder, f"{base} (Merged){ext}")
+    copy_path = _fit_path(folder, f"{base[:60].rstrip()} (Merged){ext}")
 
     # Copy template ke (Merged) - template asli tidak diubah
     shutil.copy2(word_path, copy_path)
+    _strip_mailmerge_datasource(copy_path)
 
     pythoncom.CoInitialize()
     wdApp = None
@@ -521,40 +575,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             Visible=False
         )
 
-        # Replace MERGEFIELD fields (loop backwards)
-        field_count = wdDoc.Fields.Count
-        for i in range(field_count, 0, -1):
-            try:
-                field = wdDoc.Fields(i)
-                code_text = field.Code.Text.strip()
-                if code_text.upper().startswith("MERGEFIELD"):
-                    parts = code_text.split()
-                    if len(parts) >= 2:
-                        fname = parts[1].strip('"').strip()
-                        val = None
-                        if fname in data:
-                            val = data[fname]
-                        else:
-                            norm = normalize_field_name(fname)
-                            if norm in data:
-                                val = data[norm]
-
-                        if val is not None:
-                            val = str(val)
-                            # Terapkan format switch Word (\* Upper, \* Lower, \* FirstCap)
-                            format_str = " ".join(parts[2:]).upper()
-                            if "UPPER" in format_str:
-                                val = val.upper()
-                            elif "LOWER" in format_str:
-                                val = val.lower()
-                            elif "FIRSTCAP" in format_str:
-                                val = val.capitalize()
-                            field.Result.Text = val
-                        else:
-                            field.Result.Text = ""
-                        field.Unlink()
-            except:
-                pass
+        _replace_merge_fields(wdDoc, data)
 
         # Cleanup blank pages untuk file BA utama (satu_data) yang multi-section.
         # File "2. Isi Reviu" & "3. Dokpil" dikecualikan (struktur beda, bisa berantakan).
@@ -676,7 +697,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     _label = "BA_REVIU_DPP"
                 elif _bn_full.startswith("4. Undangan"):   _label = "Undangan"
                 elif _bn_full.startswith("6. Ringkasan"):  _label = "REvaluasi"
-                pdf_path = os.path.join(folder, f"{_label}_{nama_paket_pdf}.pdf")
+                pdf_path = _fit_path(folder, f"{_label}_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -684,7 +705,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 show_success(pdf_path)
             elif mode == "pdf_bareviu":
-                pdf_path = os.path.join(folder, f"BA_REVIU_DPP_{nama_paket_pdf}.pdf")
+                pdf_path = _fit_path(folder, f"BA_REVIU_DPP_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -694,7 +715,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 show_success(pdf_path)
             elif mode == "pdf_bareviu_pl":
-                pdf_path = os.path.join(folder, f"BA_REVIU_PL_{nama_paket_pdf}.pdf")
+                pdf_path = _fit_path(folder, f"BA_REVIU_PL_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -706,7 +727,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             elif mode == "pdf_bapljkk":
                 # Export Section 3 s/d akhir (skip Section 1+2 = Reviu DPP)
                 # Pakai Range agar tidak perlu tahu nomor halaman (robust terhadap perubahan isi Reviu)
-                pdf_path = os.path.join(folder, f"BA_PLJKK_{nama_paket_pdf}.pdf")
+                pdf_path = _fit_path(folder, f"BA_PLJKK_{nama_paket_pdf}.pdf")
                 # File baru (BA-only) hanya 1 section; file lama (gabung Reviu) BA mulai Section 3
                 if wdDoc.Sections.Count >= 3:
                     _start = wdDoc.Sections(3).Range.Start
@@ -716,7 +737,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 _rng.ExportAsFixedFormat(OutputFileName=pdf_path, ExportFormat=17)
                 show_success(pdf_path)
             elif mode == "pdf_revaluasi":
-                pdf_path = os.path.join(folder, f"REvaluasi_{nama_paket_pdf}.pdf")
+                pdf_path = _fit_path(folder, f"REvaluasi_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -729,7 +750,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 # Output ke subfolder "6. BA Reviu Lengkap" (buat kalau belum ada)
                 _ba_reviu_dir = os.path.join(folder, "6. BA Reviu Lengkap")
                 os.makedirs(_ba_reviu_dir, exist_ok=True)
-                pdf_path = os.path.join(_ba_reviu_dir, f"Isi_Reviu_DPP_{nama_paket_pdf}.pdf")
+                pdf_path = _fit_path(_ba_reviu_dir, f"Isi_Reviu_DPP_{nama_paket_pdf}.pdf")
                 try:
                     wdDoc.ExportAsFixedFormat(
                         OutputFileName=pdf_path,
@@ -753,7 +774,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                                     break
                     except Exception:
                         pass
-                pdf_path = os.path.join(folder, f"dokpil_{_np_dokpil}.pdf")
+                pdf_path = _fit_path(folder, f"dokpil_{_np_dokpil}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
@@ -765,7 +786,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 # "7.2 Dengan Nego" SETELAH tiap halaman anchor nego (2 occurrence).
                 # Anchor teks robust thd geseran halaman (ganti page-range/index manual).
                 import tempfile
-                final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Nego_{nama_paket_pdf}.pdf")
+                final_pdf_path = _fit_path(folder, f"BA_Pembuktian_Nego_{nama_paket_pdf}.pdf")
                 temp_dir = tempfile.mkdtemp()
                 temp_word_pdf = os.path.join(temp_dir, "temp_word.pdf")
                 temp_nego_pdf = os.path.join(temp_dir, "temp_nego.pdf")
@@ -791,7 +812,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 #   - "Klarifikasi Timpang Fix (2)" setelah tiap anchor timpang (2 occurrence)
                 # Urutan sisip per halaman ditentukan posisi anchor di dokumen (robust).
                 import tempfile
-                final_pdf_path = os.path.join(folder, f"BA_Pembuktian_Timpang_{nama_paket_pdf}.pdf")
+                final_pdf_path = _fit_path(folder, f"BA_Pembuktian_Timpang_{nama_paket_pdf}.pdf")
                 temp_dir = tempfile.mkdtemp()
                 temp_word_pdf = os.path.join(temp_dir, "temp_word.pdf")
                 temp_nego_pdf = os.path.join(temp_dir, "temp_nego.pdf")
@@ -822,7 +843,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 show_success(final_pdf_path)
 
             else:
-                pdf_path = os.path.join(folder, f"Undangan_{nama_paket_pdf}.pdf")
+                pdf_path = _fit_path(folder, f"Undangan_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
