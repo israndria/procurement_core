@@ -951,37 +951,28 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
     ' Ambil nomor dokpil dari @ Master Data R20 (sudah diisi IsiMasterDataPL)
     Dim noDokpil As String: noDokpil = Trim(CStr(wsMD.Cells(PLR_NOMOR_DOKPIL, 3).Value))
 
-    Dim no03 As String: no03 = NomorDokPL(noDokpil, "03")
-    Dim no04 As String: no04 = NomorDokPL(noDokpil, "04")
+    ' R3/R10/R17/R31/R42/R44: pakai formula SUBSTITUTE dari MD C20 (Nomor Dokpil)
+    ' agar edit F2 (Kode Unik) di @ Master Data langsung mengalir ke semua nomor BA.
+    ' MD C20 = ="000.3.3/01/PL/PP-NN/"&$F$2&"/SKPD/TAHUN"
+    ' Formula: =SUBSTITUTE('@ Master Data'!C20,"/01/","/03/") dst.
+    Dim mdRef As String: mdRef = "'@ Master Data'!C20"
+    wsEval.Cells(3, 3).Formula  = "=SUBSTITUTE(" & mdRef & "," & Chr(34) & "/01/" & Chr(34) & "," & Chr(34) & "/03/" & Chr(34) & ")"
+    wsEval.Cells(10, 3).Formula = "=SUBSTITUTE(" & mdRef & "," & Chr(34) & "/01/" & Chr(34) & "," & Chr(34) & "/04/" & Chr(34) & ")"
     ' No BA Klarifikasi & Negosiasi pakai /06/ (slot /05/ dipakai BA lain dari sistem)
-    Dim no05 As String: no05 = NomorDokPL(noDokpil, "06")
-    Dim no08 As String: no08 = NomorDokPL(noDokpil, "08")
+    wsEval.Cells(17, 3).Formula = "=SUBSTITUTE(" & mdRef & "," & Chr(34) & "/01/" & Chr(34) & "," & Chr(34) & "/06/" & Chr(34) & ")"
+    wsEval.Cells(31, 3).Formula = "=SUBSTITUTE(" & mdRef & "," & Chr(34) & "/01/" & Chr(34) & "," & Chr(34) & "/08/" & Chr(34) & ")"
+    wsEval.Cells(42, 3).Formula = "=SUBSTITUTE(" & mdRef & "," & Chr(34) & "/01/" & Chr(34) & "," & Chr(34) & "/09/" & Chr(34) & ")"
 
-    ' R3  No BA Pembukaan Penawaran
-    wsEval.Cells(3, 3).Value = no03
-    ' R4  Tanggal Pembukaan Penawaran = tgl_pembukaan (item 37) dari GCal T2
+    ' R4  Tanggal Pembukaan Penawaran = tgl_pembukaan (item 37)
     Dim tglPembukaan As String: tglPembukaan = FormatTanggalIndo(CStr(item(37)))
     If tglPembukaan <> "" Then wsEval.Cells(4, 3).Value = tglPembukaan
-    ' R5 =LEFT(C4,2) / R6 CHOOSE(WEEKDAY) / R7 =terbilang(C5) / R8 =TRIM(MID) / R9 =RIGHT(C4,4) → formula, skip
-    ' R10 No BA Pembuktian Kualifikasi
-    wsEval.Cells(10, 3).Value = no04
-    ' R11 Tanggal Pembuktian Kualifikasi = tgl_negosiasi (item 32)
+    ' R10 Tanggal Pembuktian Kualifikasi = tgl_negosiasi (item 32)
     Dim tglNego As String: tglNego = FormatTanggalIndo(CStr(item(32)))
     wsEval.Cells(11, 3).Value = tglNego
-    ' R12-R16 formula turunan → skip
-    ' R17 No BA Klarifikasi & Negosiasi
-    wsEval.Cells(17, 3).Value = no05
     ' R18 Tanggal Klarifikasi & Negosiasi = tglNego
     wsEval.Cells(18, 3).Value = tglNego
-    ' R19-R23 formula turunan / R24 Jenis Kontrak (formula MD) → skip
-    ' R25 Harga Penawaran / R26 Harga Negosiasi / R27 Harga Pembulatan → manual, skip
-    ' R28 Team Leader / R29 Petugas K3 → formula → skip
-    ' R30 Nama Direktur → manual, skip
-    ' R31 No BA Hasil Pengadaan Langsung
-    wsEval.Cells(31, 3).Value = no08
     ' R32 Tanggal BA Hasil = tgl_penetapan (item 33)
     wsEval.Cells(32, 3).Value = FormatTanggalIndo(CStr(item(33)))
-    ' R33 =LEFT(C32,2) / R34 CHOOSE(WEEKDAY) / R35 =terbilang(C33) / R36 =TRIM(MID(C32)) → formula, skip
     ' R37 Nomor Nota Dinas (item 34)
     wsEval.Cells(37, 3).Value = CStr(item(34))
     ' R38 Tanggal Nota Dinas = tgl_rekomendasi (item 36)
@@ -993,10 +984,6 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
     If alamatUKPBJ <> "" And alamatUKPBJ <> "null" Then
         wsEval.Cells(40, 3).Value = alamatUKPBJ
     End If
-    ' R41 Alamat Perusahaan → manual, skip
-    ' R42 Nomor BA Pengantar = no09 (turunan noDokpil)
-    Dim no09 As String: no09 = NomorDokPL(noDokpil, "09")
-    wsEval.Cells(42, 3).Value = no09
     ' R43 Tanggal Lengkap BA Pengantar = tgl_penetapan (item 33), format "Rabu, 03 Juni 2026"
     wsEval.Cells(43, 3).Value = FormatTanggalLengkap(CStr(item(33)))
 End Sub
