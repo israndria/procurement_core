@@ -475,20 +475,17 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         If tahunDokpil = "" Then tahunDokpil = CStr(Year(Now))
 
         ' Nomor surat pakai formula agar edit manual F2 (Kode Unik) langsung mengalir.
-        Dim numStrU As String
-        Dim noUrutU As Long: noUrutU = CLng(numStr) + 1
-        If noUrutU < 10 Then
-            numStrU = "0" & CStr(noUrutU)
-        Else
-            numStrU = CStr(noUrutU)
-        End If
+        ' Seq surat (01, 02, ...) independen dari numStr (nomor folder paket, dipakai
+        ' hanya untuk "PP-NN") — Dokpil selalu seq 01, Undangan & BA Reviu seq 02.
+        Const seqDokpil As String = "01"
+        Const seqUndangan As String = "02"
 
         .Cells(PLR_NOMOR_DOKPIL, 3).Formula = _
-            "=""000.3.3/" & numStr & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """"
+            "=""000.3.3/" & seqDokpil & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """"
         .Cells(PLR_NO_UNDANGAN, 3).Formula = _
-            "=""000.3.3/" & numStrU & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """"
+            "=""000.3.3/" & seqUndangan & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """"
         .Cells(PLR_NO_BA_REVIU, 3).Formula = _
-            "=""000.3.3/PP" & numStr & "/02/" & singkatan & "/Reviu-""&$F$2&""/" & tahunDokpil & """"
+            "=""000.3.3/" & seqUndangan & "/PL/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """"
 
         If IsPaketUlang() Then
             .Cells(PLR_NOMOR_DOKPIL, 3).Value = SisipPLU(CStr(.Cells(PLR_NOMOR_DOKPIL, 3).Value))
@@ -557,8 +554,10 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         End If
     End With
 
-    ' Auto-generate kode unik dari nama paket
-    AutoKodeUnikPL
+    ' Kode Unik (F2) sudah diisi di dalam With di atas (prefer Supabase,
+    ' fallback auto-generate) — AutoKodeUnikPL TIDAK dipanggil di sini lagi
+    ' karena akan overwrite F2 tanpa cek Supabase (bug: kode_unik valid
+    ' tertimpa auto-generate initials nama paket).
 
     ' Isi sheet @ Evaluasi
     Dim wsEval As Worksheet
