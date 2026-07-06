@@ -52,8 +52,15 @@ def inject_pl(filepath: str):
         content = content.replace("%%SUPABASE_URL%%", sb_url)
         content = content.replace("%%SUPABASE_KEY%%", sb_key)
 
+    # Attribute VB_Name menentukan nama module hasil Import, BUKAN nama file
+    # temp. Pakai nama sementara dulu agar tidak bentrok dgn module lama yang
+    # masih ada saat proses import (baru direname ke MOD_NAME setelah module
+    # lama dihapus) -- tahan interupsi di tengah proses.
+    tmp_mod_name = f"{MOD_NAME}_NEW"
+    content_tmp = content.replace(f'Attribute VB_Name = "{MOD_NAME}"', f'Attribute VB_Name = "{tmp_mod_name}"')
+
     tmp = tempfile.NamedTemporaryFile(suffix=".bas", delete=False, mode="w", encoding="utf-8")
-    tmp.write(content)
+    tmp.write(content_tmp)
     tmp.close()
     tmp_path = tmp.name
 
@@ -69,15 +76,18 @@ def inject_pl(filepath: str):
         wb = excel.Workbooks.Open(filepath)
         vb = wb.VBProject
 
-        # Hapus module lama jika ada
+        # Import module baru DULU dengan nama sementara (tahan interupsi:
+        # kalau proses mati di sini, module lama MOD_NAME masih utuh)
+        imported = vb.VBComponents.Import(tmp_path)
+        old_comp = None
         for comp in vb.VBComponents:
             if comp.Name == MOD_NAME:
-                vb.VBComponents.Remove(comp)
-                print(f"  {MOD_NAME} lama dihapus")
+                old_comp = comp
                 break
-
-        # Import module baru (ModDraftPaketPL)
-        imported = vb.VBComponents.Import(tmp_path)
+        if old_comp:
+            vb.VBComponents.Remove(old_comp)
+            print(f"  {MOD_NAME} lama dihapus")
+        imported.Name = MOD_NAME
         print(f"  [OK] {imported.Name} imported ({imported.CodeModule.CountOfLines} baris)")
 
         # Inject Workbook_Open ke ThisWorkbook
