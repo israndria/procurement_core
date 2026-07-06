@@ -1188,10 +1188,6 @@ Public Sub CetakDokpilPlJkkPDF()
 
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
 
     On Error Resume Next
     ThisWorkbook.Save
@@ -1248,10 +1244,6 @@ Public Sub CetakReviuPlJkkPDF()
 
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
 
     On Error Resume Next
     ThisWorkbook.Save
@@ -1309,10 +1301,6 @@ Public Sub CetakBAReviuPLPDF()
 
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
 
     On Error Resume Next
     ThisWorkbook.Save
@@ -1432,10 +1420,6 @@ Public Sub CetakBAPLJKKPDF()
 
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
 
     On Error Resume Next
     ThisWorkbook.Save
@@ -1889,11 +1873,6 @@ Private Sub RunMergePL(ByVal mode As String, ByVal wordPattern As String, ByVal 
 
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
-
-    If Dir(wordPath) = "" Then
-        MsgBox "File Word tidak ditemukan:" & vbCrLf & wordPath, vbExclamation
-        Exit Sub
-    End If
 
     On Error Resume Next
     ThisWorkbook.Save
