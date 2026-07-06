@@ -265,18 +265,15 @@ Public Sub IsiDataByKodeTender(kodeTender As String)
     http.send
 
     If http.Status <> 200 Then
-        If Not m_SilentModeTender Then _
-            MsgBox "Gagal ambil data paket " & kodeTender & " dari Supabase. HTTP " & http.Status, _
-                   vbExclamation, "Isi Data Tender"
+        ' Dipanggil dari COM automation (Python) — JANGAN MsgBox, itu blocking
+        ' modal Excel invisible & bikin proses bulk macet forever. Python cukup
+        ' tau lewat _res["ok"] dari isi_master_data_tender.py.
         Exit Sub
     End If
 
     Dim json As String
     json = http.responseText
     If json = "[]" Or json = "" Then
-        If Not m_SilentModeTender Then _
-            MsgBox "Paket " & kodeTender & " tidak ditemukan di database.", _
-                   vbInformation, "Isi Data Tender"
         Exit Sub
     End If
 
@@ -340,9 +337,7 @@ Public Sub IsiDataByKodeTender(kodeTender As String)
 
     Exit Sub
 ErrHandlerIT:
-    If Not m_SilentModeTender Then _
-        MsgBox "Error IsiDataByKodeTender: " & Err.Number & " - " & Err.Description, _
-               vbCritical, "Isi Data Tender"
+    ' Jangan MsgBox — dipanggil dari COM automation, popup invisible bikin macet.
 End Sub
 
 ' ============================================================
