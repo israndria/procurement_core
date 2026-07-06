@@ -257,12 +257,12 @@ Public Sub IsiDataByKodeTender(kodeTender As String)
           "&kode_tender=eq." & kodeTender & "&limit=1"
 
     Dim http As Object
-    Set http = CreateObject("MSXML2.XMLHTTP")
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
     http.Open "GET", url, False
-    http.setRequestHeader "apikey", SB_KEY
-    http.setRequestHeader "Authorization", "Bearer " & SB_KEY
-    http.setRequestHeader "Accept", "application/json"
-    http.send
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
 
     If http.Status <> 200 Then
         ' Dipanggil dari COM automation (Python) — JANGAN MsgBox, itu blocking
