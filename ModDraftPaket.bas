@@ -312,11 +312,10 @@ Public Sub IsiDataByKodeTender(kodeTender As String)
     Dim ppkNamaBersih As String
     If komaPos > 0 Then
         ppkNamaBersih = Trim(Left(ppkNama, komaPos - 1))
-        wsMD.Cells(MD_E19, 3).Value = ppkNamaBersih
     Else
         ppkNamaBersih = ppkNama
-        wsMD.Cells(MD_E19, 3).Value = ppkNama
     End If
+    wsMD.Cells(MD_E19, 3).Value = ppkNama
 
     Dim nipPPK As String: nipPPK = Trim(CStr(item(19)))
     Dim skPPK As String:  skPPK  = Trim(CStr(item(20)))
@@ -334,6 +333,7 @@ Public Sub IsiDataByKodeTender(kodeTender As String)
 
     wsMD.Cells(MD_E33, 3).Value = CStr(item(12))  ' Sumber Anggaran
     IsiAnggotaPokjaToMaster wsMD, CStr(item(13)), CStr(item(14)), CStr(item(15))
+    SinkronHelperInputData wsMD
     SetupTanggalBAReviuPanel wsMD
     IsiTanggalBAReviuDariSupabase wsMD, CStr(item(6))
 
@@ -383,6 +383,16 @@ Public Sub RefreshDataTender()
     If Not m_SilentModeTender Then _
         MsgBox "Data Tender di-refresh dari Supabase." & vbCrLf & _
                "Kode tender: " & kode, vbInformation, "Refresh Data Tender"
+End Sub
+
+Private Sub SinkronHelperInputData(wsMD As Worksheet)
+    On Error GoTo SafeExit
+    Dim wsIn As Worksheet
+    Set wsIn = ThisWorkbook.Sheets(SHEET_INPUT)
+
+    wsIn.Range("F17").Value = UCase(Trim(CStr(wsMD.Cells(MD_E17, 3).Value)))
+    wsIn.Range("F19").Value = ""
+SafeExit:
 End Sub
 
 Private Sub SetupTanggalBAReviuPanel(wsMD As Worksheet)
@@ -525,12 +535,11 @@ Public Sub PilihDraftPaket(selectedLabel As String)
             Dim ppkNamaBersih As String
             If komaPos > 0 Then
                 ppkNamaBersih = Trim(Left(ppkNama, komaPos - 1))
-                wsMD.Cells(MD_E19, 3).Value = ppkNamaBersih
-                ws.Range("F19").Value = Trim(Mid(ppkNama, komaPos))
             Else
                 ppkNamaBersih = ppkNama
-                wsMD.Cells(MD_E19, 3).Value = ppkNama
             End If
+            wsMD.Cells(MD_E19, 3).Value = ppkNama
+            ws.Range("F19").Value = ""
             ' NIP PPK + Nomor SK: dari Supabase dulu, fallback ke sheet lokal
             Dim nipPPK As String, skPPK As String, gelarPPK As String
             nipPPK = Trim(CStr(item(19)))
