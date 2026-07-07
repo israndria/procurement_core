@@ -1471,29 +1471,7 @@ End Sub
 
 
 
-Public Sub GabungBAReviu()
-    ' Gabung BA Reviu Lengkap: scan hal 1-2 + Isi Reviu + scan hal 3
-    ' Output: 6. BA Reviu Lengkap\BA_REVIU_FULL_{nama_paket}.pdf
-    Dim folderPaket As String
-    folderPaket = ThisWorkbook.Path
-
-    Dim scriptDir As String
-    scriptDir = ScriptDirPL()
-    If scriptDir = "" Then
-        MsgBox "Python tidak ditemukan.", vbCritical
-        Exit Sub
-    End If
-
-    Dim pyExe As String
-    pyExe = scriptDir & "\python\python.exe"
-
-    Dim cmd As String
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
-    cmd = Chr(34) & pyExe & Chr(34) & " " & Chr(34) & scriptDir & "\gabung_ba_reviu.py" & Chr(34) & " " & Chr(34) & folderPaket & Chr(34)
-    wsh.Run cmd, 0, True
-    Set wsh = Nothing
-End Sub
+' GabungBAReviu dipindah ke ModWordLink.bas — hapus duplikat (penyebab "Ambiguous name detected")
 
 Public Sub GabungBAPLJKK()
     ' Gabung BA PLJKK: BA Utama + sisip BA Eval + BA Hasil Non Tender
