@@ -335,6 +335,28 @@ Public Sub IsiDataByKodeTender(kodeTender As String)
     wsMD.Cells(MD_E33, 3).Value = CStr(item(12))  ' Sumber Anggaran
     IsiAnggotaPokjaToMaster wsMD, CStr(item(13)), CStr(item(14)), CStr(item(15))
 
+    ParsaDanIsiDariPDF CStr(item(6)), CStr(item(0)), CStr(item(16)), CStr(item(1))
+
+    Dim sbuBaru As String: sbuBaru = CStr(item(17))
+    Dim sbuLama As String: sbuLama = CStr(item(18))
+    If sbuBaru <> "" Then
+        wsMD.Cells(MD_R_E6, 3).Value = sbuBaru
+        wsMD.Cells(MD_R_E6, 2).Value = "Terisi (Supabase)"
+    End If
+    If sbuLama <> "" Then
+        wsMD.Cells(MD_R_E7, 3).Value = sbuLama
+        wsMD.Cells(MD_R_E7, 2).Value = "Terisi (Supabase)"
+    End If
+    OverrideSBUdiHasilParse sbuBaru, sbuLama
+
+    Dim c39 As String: c39 = Trim(CStr(wsMD.Cells(MD_R_E20, 3).Value))
+    If Len(c39) = 5 And (Left(c39, 2) = "BS" Or Left(c39, 2) = "SI" Or Left(c39, 2) = "BG") Then
+        wsMD.Cells(MD_R_E20, 3).Value = ""
+    End If
+
+    MuatHPS CStr(item(6))
+    ModSyncDraft.DiffHighlight CStr(item(6))
+
     Exit Sub
 ErrHandlerIT:
     ' Jangan MsgBox — dipanggil dari COM automation, popup invisible bikin macet.
@@ -529,12 +551,16 @@ Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String, Optiona
                (kodePokjaFormatted <> "" And InStr(namaFilePDF, kodePokjaFormatted) > 0)
     If Not pdfCocok Then
         Dim konfirmasi As Integer
-        konfirmasi = MsgBox("Paket yang dipilih: " & kodePokja & vbCrLf & _
-                            "PDF yang ditemukan: " & namaFilePDF & vbCrLf & vbCrLf & _
-                            "PDF ini kemungkinan bukan untuk paket yang dipilih." & vbCrLf & _
-                            "Lanjutkan parse dengan PDF ini?", _
-                            vbQuestion + vbYesNo, "Konfirmasi PDF")
-        If konfirmasi = vbNo Then Exit Sub
+        If m_SilentModeTender Then
+            Exit Sub
+        Else
+            konfirmasi = MsgBox("Paket yang dipilih: " & kodePokja & vbCrLf & _
+                                "PDF yang ditemukan: " & namaFilePDF & vbCrLf & vbCrLf & _
+                                "PDF ini kemungkinan bukan untuk paket yang dipilih." & vbCrLf & _
+                                "Lanjutkan parse dengan PDF ini?", _
+                                vbQuestion + vbYesNo, "Konfirmasi PDF")
+            If konfirmasi = vbNo Then Exit Sub
+        End If
     End If
 
     ' Panggil Python parse_reviu.py
@@ -558,8 +584,9 @@ Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String, Optiona
     scriptPY  = baseDir & "\parse_reviu.py"
 
     If Not FileExists(pythonExe) Or Not FileExists(scriptPY) Then
-        MsgBox "Python atau parse_reviu.py tidak ditemukan." & vbCrLf & _
-               "Python: " & pythonExe & vbCrLf & "Script: " & scriptPY, vbExclamation
+        If Not m_SilentModeTender Then _
+            MsgBox "Python atau parse_reviu.py tidak ditemukan." & vbCrLf & _
+                   "Python: " & pythonExe & vbCrLf & "Script: " & scriptPY, vbExclamation
         Exit Sub
     End If
 
@@ -602,7 +629,8 @@ Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String, Optiona
     ret = wsh.Run(psCmd, 0, True)
 
     If Not FileExists(outJSON) Then
-        MsgBox "Parse PDF gagal. Cek apakah pdfplumber terinstall." & vbCrLf & "Kode return: " & ret, vbExclamation
+        If Not m_SilentModeTender Then _
+            MsgBox "Parse PDF gagal. Cek apakah pdfplumber terinstall." & vbCrLf & "Kode return: " & ret, vbExclamation
         Exit Sub
     End If
 
@@ -614,7 +642,8 @@ Public Sub ParsaDanIsiDariPDF(kodeTender As String, kodePokja As String, Optiona
     Dim errMsg As String
     errMsg = ExtractJSONVal(jsonTeks, "error")
     If errMsg <> "" Then
-        MsgBox "Error saat parsing PDF: " & errMsg, vbExclamation
+        If Not m_SilentModeTender Then _
+            MsgBox "Error saat parsing PDF: " & errMsg, vbExclamation
         Exit Sub
     End If
 
@@ -1090,7 +1119,7 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
         sudahTampil = (wsHP.Range("A1").Comment.Text = "SHOWN")
     End If
 
-    If Not sudahTampil Then
+    If Not sudahTampil And Not m_SilentModeTender Then
         ' Ringkasan MsgBox 1x
         Dim msg As String
         msg = "Hasil parsing Draft PDF selesai:" & vbCrLf & vbCrLf
@@ -1107,9 +1136,10 @@ Public Sub TampilkanHasilParse(jsonTeks As String, folderWb As String)
         On Error GoTo 0
     End If
 
-    ' Aktifkan sheet _HasilParse
-    wsHP.Activate
-    wsHP.Range("A1").Select
+    If Not m_SilentModeTender Then
+        wsHP.Activate
+        wsHP.Range("A1").Select
+    End If
 End Sub
 
 Private Sub TampilkanHasilParseNoPDF(folderWb As String)
@@ -1225,18 +1255,36 @@ Private Function CariDraftPDF(folder As String, kodePokja As String) As String
     found = Dir(patterns(2))
     If found <> "" Then
         CariDraftPDF = folder & "\" & found
+        Exit Function
+    End If
+
+    Dim subFolder As String
+    subFolder = folder & "\0. Draft Dokumen PPK"
+    If Dir(subFolder, vbDirectory) <> "" Then
+        Dim subFound As String
+        subFound = CariDraftPDF(subFolder, kodePokja)
+        If subFound <> "" Then
+            CariDraftPDF = subFound
+            Exit Function
+        End If
+        found = Dir(subFolder & "\Draft*.pdf")
+        If found <> "" Then CariDraftPDF = subFolder & "\" & found
     End If
 End Function
 
 Private Function CariBaseDir(folderWorkbook As String) As String
-    ' Struktur: D:\Dokumen\@ POKJA 2026\{N}. Pokja XXX\  ← folderWorkbook
-    '           D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\
-    ' Naik 1 level dari folderWorkbook → @ POKJA 2026, lalu masuk V19_Scheduler\WPy64-313110
     Dim fso As Object
     Set fso = CreateObject("Scripting.FileSystemObject")
-    Dim pokjaRoot As String
-    pokjaRoot = fso.GetParentFolderName(folderWorkbook)
-    CariBaseDir = pokjaRoot & "\V19_Scheduler\WPy64-313110"
+    Dim p As String
+    p = folderWorkbook
+    Do While p <> ""
+        If Dir(p & "\V19_Scheduler\WPy64-313110", vbDirectory) <> "" Then
+            CariBaseDir = p & "\V19_Scheduler\WPy64-313110"
+            Exit Function
+        End If
+        p = fso.GetParentFolderName(p)
+    Loop
+    CariBaseDir = fso.GetParentFolderName(folderWorkbook) & "\V19_Scheduler\WPy64-313110"
 End Function
 
 Private Function FileExists(path As String) As Boolean
