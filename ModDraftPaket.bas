@@ -334,6 +334,8 @@ Public Sub IsiDataByKodeTender(kodeTender As String)
 
     wsMD.Cells(MD_E33, 3).Value = CStr(item(12))  ' Sumber Anggaran
     IsiAnggotaPokjaToMaster wsMD, CStr(item(13)), CStr(item(14)), CStr(item(15))
+    SetupTanggalBAReviuPanel wsMD
+    IsiTanggalBAReviuDariSupabase wsMD, CStr(item(6))
 
     ParsaDanIsiDariPDF CStr(item(6)), CStr(item(0)), CStr(item(16)), CStr(item(1))
 
@@ -381,6 +383,76 @@ Public Sub RefreshDataTender()
     If Not m_SilentModeTender Then _
         MsgBox "Data Tender di-refresh dari Supabase." & vbCrLf & _
                "Kode tender: " & kode, vbInformation, "Refresh Data Tender"
+End Sub
+
+Private Sub SetupTanggalBAReviuPanel(wsMD As Worksheet)
+    On Error Resume Next
+    wsMD.Range("F14:I18").UnMerge
+    wsMD.Range("F14:I18").Interior.Pattern = xlNone
+    wsMD.Range("F14:I18").Font.Bold = False
+
+    wsMD.Range("F14:I14").Merge
+    wsMD.Range("F14").Value = "INPUT TANGGAL BA REVIU DPP"
+    wsMD.Range("F14").Font.Bold = True
+    wsMD.Range("F14").Interior.Color = RGB(189, 215, 238)
+
+    wsMD.Range("F15").Value = "Tanggal"
+    wsMD.Range("F16").Value = "Bulan"
+    wsMD.Range("F17").Value = "Tahun"
+    wsMD.Range("F18").Value = "Hari"
+
+    wsMD.Range("G15").Value = "angka 1-31"
+    wsMD.Range("G16").Value = "angka 1-12"
+    wsMD.Range("G17").Value = "tahun"
+    wsMD.Range("G18").Value = "otomatis"
+
+    If Trim(CStr(wsMD.Range("H15").Value)) = "" Then wsMD.Range("H15").Value = Day(Date)
+    If Trim(CStr(wsMD.Range("H16").Value)) = "" Then wsMD.Range("H16").Value = Month(Date)
+    If Trim(CStr(wsMD.Range("H17").Value)) = "" Then wsMD.Range("H17").Value = Year(Date)
+    wsMD.Range("I17").Formula = "=DATE(H17,H16,H15)"
+    wsMD.Range("H18").Formula = "=CHOOSE(WEEKDAY(I17),""Minggu"",""Senin"",""Selasa"",""Rabu"",""Kamis"",""Jumat"",""Sabtu"")"
+    wsMD.Range("H15:H17").Interior.Color = RGB(255, 242, 204)
+    wsMD.Range("I17").NumberFormat = "dd mmmm yyyy"
+    wsMD.Range("F14:I18").Borders.LineStyle = xlContinuous
+    On Error GoTo 0
+End Sub
+
+Private Sub IsiTanggalBAReviuDariSupabase(wsMD As Worksheet, kodeTender As String)
+    On Error GoTo SafeExit
+    If Trim(kodeTender) = "" Then Exit Sub
+
+    Dim url As String
+    url = SB_URL & "/rest/v1/" & SB_TABLE & "?select=tgl_ba_reviu_dpp,tgl_kirim_undangan_dpp" & _
+          "&kode_tender=eq." & kodeTender & "&limit=1"
+
+    Dim http As Object
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    http.Open "GET", url, False
+    http.SetRequestHeader "apikey", SB_KEY
+    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+    http.SetRequestHeader "Accept", "application/json"
+    http.Send
+    If http.Status <> 200 Then Exit Sub
+
+    Dim json As String
+    json = http.responseText
+    If json = "[]" Or json = "" Then Exit Sub
+
+    Dim tglIso As String
+    tglIso = ExtractJSONVal(json, "tgl_ba_reviu_dpp")
+    If tglIso = "" Then tglIso = ExtractJSONVal(json, "tgl_kirim_undangan_dpp")
+    If Len(tglIso) < 10 Then Exit Sub
+
+    Dim y As Integer, m As Integer, d As Integer
+    y = CInt(Left(tglIso, 4))
+    m = CInt(Mid(tglIso, 6, 2))
+    d = CInt(Mid(tglIso, 9, 2))
+    wsMD.Range("H15").Value = d
+    wsMD.Range("H16").Value = m
+    wsMD.Range("H17").Value = y
+    wsMD.Range("I17").Formula = "=DATE(H17,H16,H15)"
+    wsMD.Range("H18").Formula = "=CHOOSE(WEEKDAY(I17),""Minggu"",""Senin"",""Selasa"",""Rabu"",""Kamis"",""Jumat"",""Sabtu"")"
+SafeExit:
 End Sub
 
 
