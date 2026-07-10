@@ -362,6 +362,91 @@ def _parse_peralatan(pdf_or_path, hasil):
         hasil["reviu"][JML_CELLS[i]]["status"] = "tidak_ada"
     return True
 
+def _parse_peralatan(pdf_or_path, hasil):
+    """E9-E26: Peralatan. Handles SPSE rows with multiple newline-separated tools."""
+    alat_list = []
+    if isinstance(pdf_or_path, str):
+        if pdf_or_path.lower().endswith(".docx"):
+            tables = extract_tables_from_docx(pdf_or_path)
+        else:
+            return False
+    else:
+        tables = []
+        for page in pdf_or_path.pages:
+            t = page.extract_tables()
+            if t:
+                tables.extend(t)
+
+    for table in tables:
+        if not table or len(table) < 2:
+            continue
+        idx_nama = -1; idx_kap = -1; idx_jml = -1
+        header = [str(c or "").lower() for c in table[0]]
+        for i, c in enumerate(header):
+            if any(kw in c for kw in ["jenis", "nama", "peralatan"]): idx_nama = i
+            if any(kw in c for kw in ["kapasitas", "ukuran"]): idx_kap = i
+            if any(kw in c for kw in ["jumlah", "qty"]): idx_jml = i
+        if idx_nama == -1:
+            continue
+
+        for row in table[1:]:
+            if len(row) <= idx_nama:
+                continue
+            nama_raw = str(row[idx_nama] or "").strip()
+            if not nama_raw or nama_raw.isdigit() or len(nama_raw) < 3:
+                continue
+            if any(kw in nama_raw.lower() for kw in ["no", "jenis", "peralatan", "nama"]):
+                continue
+            kap_raw = str(row[idx_kap] or "").strip() if idx_kap != -1 else ""
+            jml_raw = str(row[idx_jml] or "").strip() if idx_jml != -1 else "1"
+            nama_parts = [v.strip() for v in nama_raw.split("\n") if v.strip()]
+            kap_parts = [v.strip() for v in kap_raw.split("\n") if v.strip()]
+            jml_parts = [v.strip() for v in jml_raw.split("\n") if v.strip()]
+            n_items = len(nama_parts) if len(nama_parts) > 1 and len(jml_parts) in (0, len(nama_parts)) and len(kap_parts) in (0, len(nama_parts)) else 1
+            for i_part in range(n_items):
+                nama_joined = nama_parts[i_part] if n_items > 1 else " ".join(nama_parts)
+                kap_joined = kap_parts[i_part] if n_items > 1 and i_part < len(kap_parts) else " ".join(kap_parts)
+                jml_joined = jml_parts[i_part] if n_items > 1 and i_part < len(jml_parts) else (" ".join(jml_parts) or "1")
+                n = bersihkan(re.sub(r"\s+", " ", nama_joined).strip())
+                if not n or n.isdigit() or any(kw in n.lower() for kw in ["no", "jenis", "peralatan", "nama"]):
+                    continue
+                k = bersihkan(re.sub(r"\s+", " ", kap_joined).strip())
+                j = bersihkan(re.sub(r"\s+", " ", jml_joined).strip())
+                if not any(c.isdigit() for c in j): j = "1 Unit"
+                elif "unit" not in j.lower() and "set" not in j.lower(): j += " Unit"
+                alat_list.append({"nama": n, "kapasitas": k, "jumlah": j})
+
+    if not alat_list:
+        return False
+    ALAT_CELLS  = ["E9","E10","E11","E12","E13","E14"]
+    KAP_CELLS   = ["E15","E16","E17","E18","E19","E20"]
+    JML_CELLS   = ["E21","E22","E23","E24","E25","E26"]
+    for i, alat in enumerate(alat_list[:6]):
+        hasil["reviu"][ALAT_CELLS[i]]["nilai"] = alat["nama"]
+        hasil["reviu"][ALAT_CELLS[i]]["status"] = "terisi"
+        hasil["reviu"][KAP_CELLS[i]]["nilai"] = alat["kapasitas"]
+        hasil["reviu"][KAP_CELLS[i]]["status"] = "terisi"
+        hasil["reviu"][JML_CELLS[i]]["nilai"] = alat["jumlah"]
+        hasil["reviu"][JML_CELLS[i]]["status"] = "terisi"
+    for i in range(len(alat_list), 6):
+        hasil["reviu"][ALAT_CELLS[i]]["status"] = "tidak_ada"
+        hasil["reviu"][KAP_CELLS[i]]["status"] = "tidak_ada"
+        hasil["reviu"][JML_CELLS[i]]["status"] = "tidak_ada"
+    return True
+
+def _fallback_sbu_dari_nama(nama_tender: str):
+    n = (nama_tender or "").lower()
+    rules = [
+        (["normalisasi", "sungai", "sei.", " sei ", "irigasi", "drainase", "saluran"], "Subklasifikasi BS010 (KBLI 2020) Konstruksi Bangunan Prasarana Sumber Daya Air", "Subklasifikasi SI001 (KBLI 2015) Jasa Pelaksana Konstruksi Saluran Air, Pelabuhan, Dam, dan Prasarana Sumber Daya Air Lainnya"),
+        (["jalan", "pengaspalan", "aspal", "hotmix", "rabat beton"], "Subklasifikasi BS001 (KBLI 2020) Konstruksi Bangunan Sipil Jalan", "Subklasifikasi SI003 (KBLI 2015) Jasa Pelaksana Konstruksi Jalan Raya (kecuali Jalan Layang), Jalan, Rel Kereta Api, dan Landas Pacu Bandara"),
+        (["jembatan", "plat duiker", "gorong"], "Subklasifikasi BS002 (KBLI 2020) Bangunan Sipil Jembatan, Jalan Layang, Fly Over, dan Underpass", "Subklasifikasi SI004 (KBLI 2015) Jasa Pelaksana Konstruksi Jembatan, Jalan Layang, Terowongan, dan Subways"),
+        (["gedung", "bangunan"], "Subklasifikasi BG009 (KBLI 2020) Konstruksi Gedung Lainnya", "Subklasifikasi BG009 (KBLI 2015) Jasa Pelaksana Konstruksi Bangunan Gedung Lainnya"),
+    ]
+    for kws, baru, lama in rules:
+        if any(k in n for k in kws):
+            return baru, lama
+    return "", ""
+
 def _parse_personil(pdf_or_path, hasil):
     """E27-E32: Personil"""
     personil_list = []
@@ -681,7 +766,7 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
                 "tujuan", "latar", "bermaksud", "menjalin", "melaksanakan", "dengan ini",
                 "pemerintah", "kami", "bahwa", "dalam rangka", "untuk menjalin",
                 "satuan kerja", "kuasa pengguna", "pengguna anggaran", "pejabat pembuat",
-                "konsultan", "kontraktor", "pengawas",
+                "konsultan", "kontraktor", "pengawas", "seksama", "dokumen tersebut", "memahami benar",
             ]
 
             # Pola 1: judul KAK/RKS — PRIORITAS UTAMA karena paling bersih
@@ -792,10 +877,10 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
         _tahun_berjalan = str(__import__("datetime").date.today().year)
         _jenis_apbd = "APBD"  # default
         txt_oneline_sd = re.sub(r"\s*\n\s*", " ", txt)
-        m_jenis = re.search(r"\b(APBDP|APBD\s*P|APBD)\b", txt_oneline_sd, re.IGNORECASE)
+        m_jenis = re.search(r"\b(APBDP|APBD\s*[- ]?\s*P|APBD\s+PERUBAHAN|APBD)\b", txt_oneline_sd, re.IGNORECASE)
         if m_jenis:
-            raw = m_jenis.group(1).upper().replace(" ", "")
-            _jenis_apbd = "APBDP" if "P" in raw else "APBD"
+            raw = m_jenis.group(1).upper()
+            _jenis_apbd = "APBDP" if ("PERUBAHAN" in raw or "APBDP" in raw or re.search(r"APBD\s*[- ]\s*P\b", raw)) else "APBD"
         hasil["input_data"]["E33"]["nilai"] = f"{_jenis_apbd} Kabupaten Tapin Tahun Anggaran {_tahun_berjalan}"
         hasil["input_data"]["E33"]["status"] = "terisi"
 
@@ -815,6 +900,15 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
 
     # 5. Normalisasi akhir: field yang masih "kosong" setelah semua proses → "tidak_ada"
     # (artinya sudah dicoba parse tapi tidak ditemukan)
+    nama_tender_arg = getattr(parse_pdf_enhanced, "_nama_tender_fallback", "")
+    if hasil["reviu"]["E6"]["status"] != "terisi" and nama_tender_arg:
+        sbu_baru, sbu_lama = _fallback_sbu_dari_nama(nama_tender_arg)
+        if sbu_baru:
+            hasil["reviu"]["E6"]["nilai"] = sbu_baru
+            hasil["reviu"]["E6"]["status"] = "terisi"
+            hasil["reviu"]["E7"]["nilai"] = sbu_lama
+            hasil["reviu"]["E7"]["status"] = "terisi"
+
     FIELD_PARSE_ONLY = [
         ("reviu", "E6"), ("reviu", "E7"),                          # SBU (dari PDF)
         ("reviu", "E27"), ("reviu", "E28"), ("reviu", "E29"),      # Personil teknis

@@ -190,9 +190,8 @@ def inject_buttons(filepath):
             ("btnREvaluasi",       "Print REvaluasi",     "PrintREvaluasiPDF",         1, 1, BLACK),
             # Baris 3
             ("btnPembuktianTimpang","Print Timpang",       "PrintPembuktianTimpangPDF",2, 0, BLACK),
-            ("btnMuatDraft",       "Muat Draft Paket",    "MuatDraftPaket",            2, 1, PURPLE),
-            ("btnParseDraft",      "Parse Draft",         "ParseDraftTerpilih",        2, 2, GREEN),
-            ("btnKodeUnik",        "Kode Unik Surat",     "GenerateKodeUnik",          2, 3, TEAL),
+            ("btnParseDraft",      "Parse Ulang Draft Lokal", "ParseDraftTerpilih",     2, 1, GREEN),
+            ("btnKodeUnik",        "Kode Unik Surat",     "GenerateKodeUnik",          2, 2, TEAL),
             # Baris 4: UpdateHPS masuk kolom 0
             ("btnUpdateHPS",       "Update HPS Saja",     "UpdateHPSSaja",             3, 0, (220, 53, 69)),
             ("btnBukaReviu",       "Buka Reviu",          "BukaReviu",                 3, 1, BLUE_WORD),
@@ -203,11 +202,7 @@ def inject_buttons(filepath):
             ("btnPrintDokpil",     "Print Dokpil",        "PrintDokpilPDF",            4, 1, BLACK),
             ("btnRelink",          "Relink Template",     "RelinkTemplate",            4, 2, (255, 140, 0)),
             # Baris 6
-            ("btnSyncDraft",       "Sync Data Draft",     "SyncDataDraft",             5, 0, (0, 112, 192)),
-            ("btnDiffHighlight",   "Diff Highlight",      "DiffHighlight",             5, 1, (255, 165, 0)),
-            # Baris 7
-            ("btnGabungBAReviu",   "Gabung BA Reviu",     "GabungBAReviu",             6, 0, (0, 128, 96)),
-            ("btnRefreshTender",   "Refresh Data Tender", "RefreshDataTender",         6, 1, (0, 112, 192)),
+            ("btnGabungBAReviu",   "Gabung BA Reviu",     "GabungBAReviu",             5, 0, (0, 128, 96)),
         ]
 
         def _add_master_btn(ws_md, name, label, macro, yi, xi, color):
