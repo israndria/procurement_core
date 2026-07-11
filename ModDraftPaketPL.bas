@@ -784,6 +784,8 @@ NextItem:
 NextPeserta:
     Next iP
 
+    ' Rapikan sheet turunan setelah seluruh data penawaran masuk.
+    FixSheetByName "7.2 Dengan Nego"
     If Not m_SilentMode Then MsgBox "Sheet '6. Penawaran' berhasil diisi.", vbInformation, "Muat Penawaran PL"
 End Sub
 
@@ -2345,6 +2347,8 @@ Public Sub MuatHPSPL()
     End With
 
     Dim itemCount As Long: itemCount = baris - 2
+    ' HPS mengubah formula sheet 7.2; rapikan ulang setelah kalkulasi selesai.
+    FixSheetByName "7.2 Dengan Nego"
     Dim msg As String
     msg = "HPS PL berhasil dimuat: " & itemCount & " baris."
     If adaSelisih Then

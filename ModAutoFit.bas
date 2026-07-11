@@ -1,108 +1,106 @@
 Attribute VB_Name = "ModAutoFit"
-' ModAutoFit - Smart auto-fit row height v3
-' Fix: pakai MAX height agar kolom N tidak override kolom B
+' ModAutoFit - Smart auto-fit row height v4
+' Ukur semua target cell per row, lalu pakai tinggi terbesar.
 
-Private Sub FixCellHeight(ws As Worksheet, cell As Range)
-    On Error Resume Next
-    
-    If IsError(cell.Value) Then Exit Sub
-    If IsEmpty(cell.Value) Then Exit Sub
-    If Len(CStr(cell.Value)) < 3 Then Exit Sub
-    
-    If cell.MergeCells Then
-        Dim mergeArea As Range
-        Set mergeArea = cell.mergeArea
-        mergeArea.WrapText = True
-        
-        Dim mergedWidth As Double
-        mergedWidth = 0
-        Dim col As Range
-        For Each col In mergeArea.Columns
-            mergedWidth = mergedWidth + col.ColumnWidth
-        Next col
-        
-        Dim tempRow As Long
-        Dim tempCol As Long
-        tempRow = 50000
-        tempCol = 100
-        
-        With ws.Cells(tempRow, tempCol)
-            .Value = mergeArea.Cells(1, 1).Value
-            .ColumnWidth = mergedWidth
-            .WrapText = True
-            .Font.Name = mergeArea.Cells(1, 1).Font.Name
-            .Font.Size = mergeArea.Cells(1, 1).Font.Size
-            .Font.Bold = mergeArea.Cells(1, 1).Font.Bold
-            .EntireRow.AutoFit
-            
-            Dim newHeight As Double
-            newHeight = .RowHeight
-            If newHeight < 15 Then newHeight = 15
-            
-            .ClearContents
-            .ColumnWidth = 8.43
-            .EntireRow.RowHeight = 15
-        End With
-        
-        ' KUNCI: pakai MAX agar tidak memperkecil row yang sudah benar
-        Dim currentHeight As Double
-        currentHeight = mergeArea.Rows(1).RowHeight
-        If newHeight > currentHeight Then
-            mergeArea.Rows(1).RowHeight = newHeight
-        End If
-    Else
-        cell.WrapText = True
-        ' Untuk non-merged, simpan height lama dulu
-        Dim oldHeight As Double
-        oldHeight = cell.EntireRow.RowHeight
-        cell.EntireRow.AutoFit
-        ' Pastikan tidak menyusut
-        If cell.EntireRow.RowHeight < oldHeight Then
-            cell.EntireRow.RowHeight = oldHeight
-        End If
-    End If
-    
-    On Error GoTo 0
-End Sub
+Private Function CellHeight(ws As Worksheet, cell As Range) As Double
+    On Error GoTo gagal
+    If IsError(cell.Value) Or IsEmpty(cell.Value) Then GoTo gagal
+    If Len(CStr(cell.Value)) < 3 Then GoTo gagal
+
+    Dim source As Range
+    Set source = cell
+    If cell.MergeCells Then Set source = cell.MergeArea
+    source.WrapText = True
+
+    Dim width As Double
+    width = 0
+    Dim col As Range
+    For Each col In source.Columns
+        width = width + col.ColumnWidth
+    Next col
+    If width <= 0 Then GoTo gagal
+
+    Dim probe As Range
+    Set probe = ws.Cells(50000, 100)
+    With probe
+        .ClearContents
+        .Value = source.Cells(1, 1).Value
+        .ColumnWidth = width
+        .WrapText = True
+        .Font.Name = source.Cells(1, 1).Font.Name
+        .Font.Size = source.Cells(1, 1).Font.Size
+        .Font.Bold = source.Cells(1, 1).Font.Bold
+        .Font.Italic = source.Cells(1, 1).Font.Italic
+        .EntireRow.RowHeight = 15
+        .EntireRow.AutoFit
+        CellHeight = .RowHeight
+        .ClearContents
+        .ColumnWidth = 8.43
+        .EntireRow.RowHeight = 15
+    End With
+    If CellHeight < 15 Then CellHeight = 15
+    Exit Function
+
+gagal:
+    CellHeight = 15
+End Function
 
 Private Sub FixSheet(ws As Worksheet)
     Dim lastRow As Long
-    lastRow = ws.Cells(ws.Rows.count, 2).End(-4162).row
+    Dim lastRowB As Long
+    lastRowB = ws.Cells(ws.Rows.count, 2).End(-4162).row
+    Dim lastRowN As Long
+    lastRowN = ws.Cells(ws.Rows.count, 14).End(-4162).row
+    If lastRowN < 50 Then lastRowN = 50
+    lastRow = IIf(lastRowB > lastRowN, lastRowB, lastRowN)
     
     Dim fixCount As Long
     fixCount = 0
     
-    ' Fix kolom B (2) - uraian pekerjaan
     Dim i As Long
     For i = 1 To lastRow
-        Dim cell As Range
-        Set cell = ws.Cells(i, 2)
-        
-        If Not IsEmpty(cell.Value) And Not IsError(cell.Value) Then
-            If Len(CStr(cell.Value)) > 5 Then
-                FixCellHeight ws, cell
-                fixCount = fixCount + 1
+        Dim requiredHeight As Double
+        requiredHeight = 15
+        Dim measuredHeight As Double
+        Dim touched As Boolean
+        touched = False
+
+        Dim cellB As Range
+        Set cellB = ws.Cells(i, 2)
+        If Not IsEmpty(cellB.Value) And Not IsError(cellB.Value) Then
+            If Len(CStr(cellB.Value)) > 5 Then
+                measuredHeight = CellHeight(ws, cellB)
+                If measuredHeight > requiredHeight Then requiredHeight = measuredHeight
+                touched = True
             End If
         End If
-    Next i
-    
-    ' Fix kolom N (14) - terbilang harga
-    Dim lastRowN As Long
-    lastRowN = ws.Cells(ws.Rows.count, 14).End(-4162).row
-    If lastRowN < 50 Then lastRowN = 50
-    
-    For i = 1 To lastRowN
-        Set cell = ws.Cells(i, 14)
-        
-        If Not IsEmpty(cell.Value) And Not IsError(cell.Value) Then
-            If Len(CStr(cell.Value)) > 5 Then
-                FixCellHeight ws, cell
-                fixCount = fixCount + 1
+
+        Dim cellN As Range
+        Set cellN = ws.Cells(i, 14)
+        If Not IsEmpty(cellN.Value) And Not IsError(cellN.Value) Then
+            If Len(CStr(cellN.Value)) > 5 Then
+                measuredHeight = CellHeight(ws, cellN)
+                If measuredHeight > requiredHeight Then requiredHeight = measuredHeight
+                touched = True
             End If
+        End If
+
+        If touched Then
+            ws.Rows(i).RowHeight = requiredHeight
+            fixCount = fixCount + 1
         End If
     Next i
     
     Application.StatusBar = ws.Name & ": " & fixCount & " cell diperbaiki"
+End Sub
+
+Public Sub FixSheetByName(sheetName As String)
+    On Error GoTo selesai
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets(sheetName)
+    FixSheet ws
+selesai:
+    Application.StatusBar = False
 End Sub
 
 Public Sub FixSemuaBaris()
