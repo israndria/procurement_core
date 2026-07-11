@@ -222,6 +222,35 @@ def _replace_merge_fields(wdDoc, data):
             pass
 
 
+def _protect_signature_layout(wdDoc):
+    """Jaga blok tanda tangan tetap utuh saat Word melakukan pagination."""
+    for i in range(1, wdDoc.Tables.Count + 1):
+        try:
+            table = wdDoc.Tables(i)
+            text = table.Range.Text.upper()
+            if "DIREKTUR/PIMPINAN" not in text:
+                continue
+
+            # Nama tenaga ahli/pimpinan bisa membuat blok ini tinggi. Jangan
+            # izinkan Word memecah baris atau mendorong label dan nama ke page
+            # berbeda; Word akan memindahkan blok utuh ke halaman berikutnya.
+            for j in range(1, table.Rows.Count + 1):
+                row = table.Rows(j)
+                try:
+                    row.AllowBreakAcrossPages = False
+                    row.HeightRule = 0  # wdRowHeightAuto
+                except Exception:
+                    pass
+
+            paragraphs = table.Range.Paragraphs
+            for j in range(1, paragraphs.Count + 1):
+                paragraph = paragraphs(j)
+                paragraph.Range.ParagraphFormat.KeepTogether = True
+                paragraph.Range.ParagraphFormat.KeepWithNext = j < paragraphs.Count
+        except Exception:
+            pass
+
+
 def _sisip_2ba_pljkk(pdf_path, folder):
     """
     Sisip 2 file BA (Evaluasi /05/ + Hasil /07/) ke dalam BA_PLJKK final.
@@ -415,6 +444,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             # re-merge field dari data Excel (satu_data) -> PDF selalu fresh
             if data:
                 _replace_merge_fields(wdDoc, data)
+                _protect_signature_layout(wdDoc)
                 wdDoc.Save()
             if mode == "pdf_bapljkk":
                 _kode_pljkk = pdf_name if pdf_name else "PL"
