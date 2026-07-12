@@ -84,6 +84,9 @@ Private Const PLR_PERSONIL_STRIDE As Integer = 3   ' 3 row per personil
 Private Const PLR_MINORANG_BASE   As Integer = 41  ' R41-R43: "Minimal Orang 1/2/3" (jumlah_orang per ahli)
 Private Const PLR_NAMA_PESERTA    As Integer = 51  ' geser dari 45 (6 personil * 3 row = 18 row, 32+18=50, +1=51)
 Private Const PLR_NPWP_PESERTA    As Integer = 52
+Private Const PLR_NOMOR_NOTA      As Integer = 61
+Private Const PLR_TANGGAL_NOTA    As Integer = 62
+Private Const PLR_NOMOR_REKOM     As Integer = 63
 
 ' Silent mode: saat True, semua MsgBox di jalur fetch/isi di-skip (untuk trigger via COM headless)
 Private m_SilentMode As Boolean
@@ -373,6 +376,21 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         If CStr(item(26)) <> "" Then
             .Cells(PLR_NPWP_PESERTA, 3).NumberFormat = "@"
             .Cells(PLR_NPWP_PESERTA, 3).Value = CStr(item(26))  ' npwp_penyedia
+        End If
+
+        ' Nomor/tanggal Nota Dinas + nomor Surat Rekomendasi.
+        ' Master Data = single source of truth; @ Evaluasi mereferensikan nilainya.
+        If CStr(item(34)) <> "" Then
+            .Cells(PLR_NOMOR_NOTA, 3).NumberFormat = "@"
+            .Cells(PLR_NOMOR_NOTA, 3).Value = CStr(item(34))
+        End If
+        If CStr(item(36)) <> "" And CStr(item(36)) <> "null" Then
+            .Cells(PLR_TANGGAL_NOTA, 3).NumberFormat = "@"
+            .Cells(PLR_TANGGAL_NOTA, 3).Value = FormatTanggalIndo(CStr(item(36)))
+        End If
+        If CStr(item(35)) <> "" Then
+            .Cells(PLR_NOMOR_REKOM, 3).NumberFormat = "@"
+            .Cells(PLR_NOMOR_REKOM, 3).Value = CStr(item(35))
         End If
 
         ' ── URAIAN SINGKAT ────────────────────────────────────────────────
@@ -975,12 +993,10 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
     wsEval.Cells(18, 3).Value = tglNego
     ' R32 Tanggal BA Hasil = tgl_penetapan (item 33)
     wsEval.Cells(32, 3).Value = FormatTanggalIndo(CStr(item(33)))
-    ' R37 Nomor Nota Dinas (item 34)
-    wsEval.Cells(37, 3).Value = CStr(item(34))
-    ' R38 Tanggal Nota Dinas = tgl_rekomendasi (item 36)
-    wsEval.Cells(38, 3).Value = FormatTanggalIndo(CStr(item(36)))
-    ' R39 Nomor Surat Rekomendasi (item 35)
-    wsEval.Cells(39, 3).Value = CStr(item(35))
+    ' R37:R39: single source of truth dari @ Master Data C61:C63.
+    wsEval.Cells(37, 3).Formula = "='@ Master Data'!C61"
+    wsEval.Cells(38, 3).Formula = "='@ Master Data'!C62"
+    wsEval.Cells(39, 3).Formula = "='@ Master Data'!C63"
     ' R40 Alamat UKPBJ
     Dim alamatUKPBJ As String: alamatUKPBJ = LookupAlamatPP("UKPBJ")
     If alamatUKPBJ <> "" And alamatUKPBJ <> "null" Then
