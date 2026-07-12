@@ -283,7 +283,6 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim hpsVal As String: hpsVal = CStr(item(4))
         If Left(hpsVal, 3) <> "Rp." Then hpsVal = "Rp. " & hpsVal
         .Cells(PLR_HPS, 3).Value = hpsVal
-        .Cells(PLR_SUMBER_DANA, 3).Value = CStr(item(13))   ' sumber_dana
         .Cells(PLR_LOKASI, 3).Value      = CStr(item(14))   ' lokasi
 
         ' Jangka waktu: extract angka pertama saja (handles "30 (Tiga Puluh) Hari Kalender")
@@ -318,6 +317,10 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             End If
         End If
         If tahun = "" Then tahun = CStr(Year(Now))
+        ' Sumber dana PL ditulis konsisten beserta tahun anggaran.
+        ' Jika data SPSE hanya berisi "APBD", tahun berjalan dipakai;
+        ' tahun depan otomatis menjadi "APBD 2027" tanpa ubah kode lagi.
+        .Cells(PLR_SUMBER_DANA, 3).Value = "APBD " & tahun
         .Cells(PLR_TAHUN_ANGGARAN, 3).Value = tahun
 
         ' Kode Rekening (MAK) — sumber: inbox PL field MAK
@@ -438,11 +441,8 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim singkatan As String: singkatan = LookupSingkatanDinas(CStr(item(2)))
         If singkatan = "" Then singkatan = "DPUPR"
 
-        ' Kode unik: hanya pakai nilai dari Supabase bila tersedia.
-        ' Jika kosong, jangan generate/overwrite; user mengisi manual dari dokpil.
-        Dim koUnik As String
-        koUnik = CStr(item(30))
-        If koUnik <> "" And koUnik <> "null" Then wsMD.Range("F2").Value = koUnik
+        ' Kode unik selalu dikelola manual pada @ Master Data!F2 berdasarkan
+        ' dokpil. Refresh Supabase tidak boleh menimpa nilai tersebut.
 
         ' Tahun: ambil dari tahun anggaran yang sudah diisi
         Dim tahunDokpil As String: tahunDokpil = CStr(wsMD.Cells(PLR_TAHUN_ANGGARAN, 3).Value)
@@ -528,8 +528,8 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         End If
     End With
 
-    ' Kode Unik (F2) hanya berasal dari Supabase atau input manual user.
-    ' Tidak ada fallback auto-generate.
+    ' Kode Unik (F2) hanya input manual user; tidak ada sumber Supabase atau
+    ' fallback auto-generate.
 
     ' Isi sheet @ Evaluasi
     Dim wsEval As Worksheet
