@@ -4,8 +4,8 @@ gabung_ba_pljkk.py — Gabung BA Utama PLJKK + Sisipan BA Evaluasi & BA Hasil No
 Logic:
 1. Deteksi file input:
    - BA Utama: BA_PLJKK_*.pdf
-   - BA Evaluasi: 5. BA Evaluasi Penawaran PL-*.pdf
-   - BA Hasil: 7. BA Hasil Non Tender PL-*.pdf
+   - BA Evaluasi: 7. Berita Acara + Summary Non Tender/5. BA Evaluasi Penawaran PL-*.pdf
+   - BA Hasil: 7. Berita Acara + Summary Non Tender/7. BA Hasil Non Tender PL-*.pdf
 2. Gunakan pdfplumber untuk mencari:
    - Teks "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI" (occurrence ke-1 & ke-2) -> page index p1 dan p2
    - Teks "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI" (occurrence ke-1 & ke-2) -> page index q1 dan q2
@@ -60,14 +60,20 @@ def deteksi_file(folder_paket: str) -> dict:
     else:
         res['kode'] = "FULL"
         
-    # 2. BA Evaluasi (5. BA Evaluasi Penawaran PL-*.pdf)
-    ba_eval_pattern = os.path.join(folder_paket, "5. BA Evaluasi Penawaran PL-*.pdf")
+    # 2. BA Evaluasi berada di subfolder output bersama BA Hasil.
+    # Jangan cari di root folder paket; struktur paket PL menyimpan keduanya
+    # di "7. Berita Acara + Summary Non Tender".
+    ba_eval_pattern = os.path.join(
+        folder_paket, SUBFOLDER, "5. BA Evaluasi Penawaran PL-*.pdf"
+    )
     ba_eval_files = glob.glob(ba_eval_pattern)
     if ba_eval_files:
         res['ba_eval'] = sorted(ba_eval_files, key=os.path.getmtime, reverse=True)[0]
         
-    # 3. BA Hasil (7. BA Hasil Non Tender PL-*.pdf)
-    ba_hasil_pattern = os.path.join(folder_paket, "7. BA Hasil Non Tender PL-*.pdf")
+    # 3. BA Hasil di subfolder yang sama.
+    ba_hasil_pattern = os.path.join(
+        folder_paket, SUBFOLDER, "7. BA Hasil Non Tender PL-*.pdf"
+    )
     ba_hasil_files = glob.glob(ba_hasil_pattern)
     if ba_hasil_files:
         res['ba_hasil'] = sorted(ba_hasil_files, key=os.path.getmtime, reverse=True)[0]
@@ -130,9 +136,9 @@ def gabung(folder_paket: str) -> dict:
     
     warning_msgs = []
     if not ba_eval:
-        warning_msgs.append("File '5. BA Evaluasi Penawaran PL-*.pdf' tidak ditemukan, skip sisipan evaluasi.")
+        warning_msgs.append("File '7. Berita Acara + Summary Non Tender/5. BA Evaluasi Penawaran PL-*.pdf' tidak ditemukan, skip sisipan evaluasi.")
     if not ba_hasil:
-        warning_msgs.append("File '7. BA Hasil Non Tender PL-*.pdf' tidak ditemukan, skip sisipan hasil non tender.")
+        warning_msgs.append("File '7. Berita Acara + Summary Non Tender/7. BA Hasil Non Tender PL-*.pdf' tidak ditemukan, skip sisipan hasil non tender.")
         
     try:
         rdr_utama = PdfReader(ba_utama)

@@ -94,36 +94,12 @@ Private m_SilentMode As Boolean
 
 
 ' ============================================================
-' AUTO KODE UNIK PL: generate dari huruf pertama tiap kata nama paket (C5)
+' KODE UNIK PL: diisi manual pada @ Master Data!F2.
+' Generator otomatis sengaja dinonaktifkan agar kode dokpil menjadi sumber acuan.
 ' ============================================================
 Public Sub AutoKodeUnikPL()
-    Dim wsMD As Worksheet
-    On Error Resume Next
-    Set wsMD = ThisWorkbook.Sheets("@ Master Data")
-    On Error GoTo 0
-    If wsMD Is Nothing Then Exit Sub
-
-    Dim namaPaket As String
-    namaPaket = Trim(CStr(wsMD.Range("C5").Value))
-    If namaPaket = "" Then Exit Sub
-
-    Dim result As String
-    Dim akJ As Long
-    Dim akC As String
-    Dim akPrev As Boolean
-    result = ""
-    akPrev = True
-    For akJ = 1 To Len(namaPaket)
-        akC = Mid(namaPaket, akJ, 1)
-        If akC = " " Then
-            akPrev = True
-        ElseIf akPrev Then
-            result = result & UCase(akC)
-            akPrev = False
-        End If
-    Next akJ
-
-    wsMD.Range("F2").Value = result
+    ' No-op legacy compatibility: kode unik wajib diisi/edit manual.
+    Exit Sub
 End Sub
 
 
@@ -462,31 +438,11 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim singkatan As String: singkatan = LookupSingkatanDinas(CStr(item(2)))
         If singkatan = "" Then singkatan = "DPUPR"
 
-        ' Kode unik: prefer Supabase item(30), fallback generate dari huruf pertama nama paket
+        ' Kode unik: hanya pakai nilai dari Supabase bila tersedia.
+        ' Jika kosong, jangan generate/overwrite; user mengisi manual dari dokpil.
         Dim koUnik As String
-        Dim kuNama As String
-        Dim kuRes As String
-        Dim kuJ As Long
-        Dim kuPrevSpace As Boolean
-        Dim kuC As String
         koUnik = CStr(item(30))
-        If koUnik = "" Or koUnik = "null" Then
-            kuNama = Trim(CStr(item(1)))
-            kuRes = ""
-            kuPrevSpace = True
-            For kuJ = 1 To Len(kuNama)
-                kuC = Mid(kuNama, kuJ, 1)
-                If kuC = " " Then
-                    kuPrevSpace = True
-                ElseIf kuPrevSpace Then
-                    kuRes = kuRes & UCase(kuC)
-                    kuPrevSpace = False
-                End If
-            Next kuJ
-            koUnik = kuRes
-        End If
-        If koUnik = "" Then koUnik = "KodeUnik"
-        wsMD.Range("F2").Value = koUnik
+        If koUnik <> "" And koUnik <> "null" Then wsMD.Range("F2").Value = koUnik
 
         ' Tahun: ambil dari tahun anggaran yang sudah diisi
         Dim tahunDokpil As String: tahunDokpil = CStr(wsMD.Cells(PLR_TAHUN_ANGGARAN, 3).Value)
@@ -572,10 +528,8 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         End If
     End With
 
-    ' Kode Unik (F2) sudah diisi di dalam With di atas (prefer Supabase,
-    ' fallback auto-generate) — AutoKodeUnikPL TIDAK dipanggil di sini lagi
-    ' karena akan overwrite F2 tanpa cek Supabase (bug: kode_unik valid
-    ' tertimpa auto-generate initials nama paket).
+    ' Kode Unik (F2) hanya berasal dari Supabase atau input manual user.
+    ' Tidak ada fallback auto-generate.
 
     ' Isi sheet @ Evaluasi
     Dim wsEval As Worksheet

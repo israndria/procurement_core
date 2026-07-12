@@ -84,6 +84,15 @@ def inject_pl(filepath: str):
             print("  [OK] Excel repair open berhasil")
         vb = wb.VBProject
 
+        # PL tidak memakai generator kode unik otomatis. Bersihkan modul/button
+        # legacy yang bisa ikut terbawa dari injector tender/umum.
+        for legacy_name in ("ModKodeUnik", "ModKodeUnikPL"):
+            for comp in list(vb.VBComponents):
+                if comp.Name == legacy_name:
+                    vb.VBComponents.Remove(comp)
+                    print(f"  {legacy_name} legacy dihapus")
+                    break
+
         # Import module baru DULU dengan nama sementara (tahan interupsi:
         # kalau proses mati di sini, module lama MOD_NAME masih utuh)
         imported = vb.VBComponents.Import(tmp_path)
@@ -124,7 +133,7 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnRefreshDataPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK", "btnGabungBAReviu", "btnGabungBAPLJKK")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnKodeUnik", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnRefreshDataPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK", "btnGabungBAReviu", "btnGabungBAPLJKK")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
