@@ -73,7 +73,15 @@ def inject_pl(filepath: str):
         excel.Visible = False
         excel.DisplayAlerts = False
 
-        wb = excel.Workbooks.Open(filepath)
+        try:
+            wb = excel.Workbooks.Open(filepath, 0, False)
+        except Exception as open_error:
+            # Workbook hasil patch manual kadang valid sebagai ZIP tetapi
+            # ditolak parser Excel. xlRepairFile=1 meminta Excel memulihkan
+            # workbook saat dibuka; tetap dipakai hanya sebagai fallback.
+            print(f"  [WARN] Open normal gagal, coba Excel repair: {open_error}")
+            wb = excel.Workbooks.Open(filepath, 0, False, None, None, None, None, None, 1)
+            print("  [OK] Excel repair open berhasil")
         vb = wb.VBProject
 
         # Import module baru DULU dengan nama sementara (tahan interupsi:
