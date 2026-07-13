@@ -9,12 +9,11 @@ Logic:
 2. Gunakan pdfplumber untuk mencari:
    - Teks "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI" (occurrence ke-1 & ke-2) -> page index p1 dan p2
    - Teks "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI" (occurrence ke-1 & ke-2) -> page index q1 dan q2
-3. Gabungkan halaman menggunakan pypdf:
-   - BA Utama 0 s/d p1 (inclusive)
-   - BA Evaluasi (semua hal)
-   - BA Utama p2 s/d q1 (inclusive)
-   - BA Hasil (semua hal)
-   - BA Utama q2 s/d akhir
+3. Gabungkan halaman menggunakan pypdf tanpa menghapus BA utama:
+   - Pertahankan blok BA Pembuktian Kualifikasi tervalidasi.
+   - Sisipkan BA Evaluasi sebelum daftar hadir pembuktian occurrence ke-2.
+   - Duplikasi halaman akhir BA Klarifikasi sebelum sheet 7.2.
+   - Sisipkan BA Hasil setelah daftar hadir klarifikasi occurrence ke-1.
 4. Output ke "7. Berita Acara + Summary Non Tender/BA_PLJKK_{kode}.pdf"
 
 Usage:
@@ -35,6 +34,7 @@ def deteksi_file(folder_paket: str) -> dict:
     """Deteksi file-file input di root folder_paket."""
     res = {
         'ba_utama': None,
+        'ba_pembuktian': None,
         'ba_eval': None,
         'ba_hasil': None,
         'kode': None,
@@ -51,6 +51,10 @@ def deteksi_file(folder_paket: str) -> dict:
     # Pilih yang terbaru jika ada lebih dari 1
     ba_utama_files_sorted = sorted(ba_utama_files, key=os.path.getmtime, reverse=True)
     res['ba_utama'] = ba_utama_files_sorted[0]
+    # Jika ada BA sebelumnya, gunakan blok Pembuktian Kualifikasi tervalidasi
+    # dari file itu. Ekspor Word terbaru tetap menjadi sumber halaman lainnya.
+    if len(ba_utama_files_sorted) > 1:
+        res['ba_pembuktian'] = ba_utama_files_sorted[1]
     
     # Ekstrak kode dari nama file (BA_PLJKK_{kode}.pdf)
     base_name = os.path.basename(res['ba_utama'])
@@ -123,6 +127,7 @@ def gabung(folder_paket: str) -> dict:
         return {'ok': False, 'output': '', 'pesan': files['err'], 'warning': None}
         
     ba_utama = files['ba_utama']
+    ba_pembuktian = files['ba_pembuktian']
     ba_eval = files['ba_eval']
     ba_hasil = files['ba_hasil']
     kode = files['kode']
@@ -143,65 +148,68 @@ def gabung(folder_paket: str) -> dict:
     try:
         rdr_utama = PdfReader(ba_utama)
         n_utama = len(rdr_utama.pages)
+        rdr_pembuktian = None
         
         # Cari penanda halaman
         p1, p2, q1, q2 = cari_halaman_sisipan(ba_utama)
+
+        # Blok pembuktian dapat berasal dari BA tervalidasi sebelumnya, hanya
+        # jika anchor-nya sama persis dengan BA utama terbaru.
+        if ba_pembuktian and p1 is not None and p2 is not None:
+            old_p1, old_p2, _, _ = cari_halaman_sisipan(ba_pembuktian)
+            if (old_p1, old_p2) == (p1, p2):
+                candidate = PdfReader(ba_pembuktian)
+                if len(candidate.pages) > p2:
+                    rdr_pembuktian = candidate
         
-        # Log/Warning jika penanda tidak lengkap
+        # Dokumen final mempertahankan seluruh BA utama. Summary hanya disisipkan:
+        # - Evaluasi sebelum daftar hadir pembuktian occurrence ke-2;
+        # - Hasil setelah daftar hadir klarifikasi occurrence ke-1.
+        # Dua halaman tidak boleh menggantikan blok BA utama.
         if ba_eval and (p1 is None or p2 is None):
             warning_msgs.append("Penanda 'DAFTAR HADIR PEMBUKTIAN KUALIFIKASI' tidak lengkap, skip sisipan evaluasi.")
             ba_eval = None
-            
         if ba_hasil and (q1 is None or q2 is None):
             warning_msgs.append("Penanda 'DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI' tidak lengkap, skip sisipan hasil.")
             ba_hasil = None
-            
+
+        # Halaman terakhir BA Klarifikasi sebelum sheet 7.2 perlu dua copy untuk
+        # arsip kedua pihak. Deteksi dari transisi portrait ke landscape, bukan nomor.
+        duplicate_after = None
+        for idx, page in enumerate(rdr_utama.pages):
+            box = page.mediabox
+            if float(box.width) > float(box.height) and idx > 0:
+                duplicate_after = idx - 1
+                break
+
+        insert_before = {}
+        insert_after = {}
+        if ba_eval:
+            insert_before[p2] = ba_eval
+        if ba_hasil:
+            insert_after[q1] = ba_hasil
+
         writer = PdfWriter()
-        
-        # Kondisi 1: Kedua sisipan aktif
-        if ba_eval and ba_hasil:
-            # 0 s/d p1 (inclusive)
-            for idx in range(0, p1 + 1):
-                writer.add_page(rdr_utama.pages[idx])
-            # Sisipkan BA Evaluasi
-            rdr_eval = PdfReader(ba_eval)
-            for page in rdr_eval.pages:
+        for idx, page in enumerate(rdr_utama.pages):
+            if idx in insert_before:
+                for summary_page in PdfReader(insert_before[idx]).pages:
+                    writer.add_page(summary_page)
+
+            # Halaman di antara dua daftar hadir Pembuktian Kualifikasi adalah
+            # blok tersertifikasi; pakai versi BA lama bila tersedia.
+            source_page = (
+                rdr_pembuktian.pages[idx]
+                if rdr_pembuktian is not None and p1 < idx < p2
+                else page
+            )
+            writer.add_page(source_page)
+
+            if idx == duplicate_after:
                 writer.add_page(page)
-            # p2 s/d q1 (inclusive)
-            for idx in range(p2, q1 + 1):
-                writer.add_page(rdr_utama.pages[idx])
-            # Sisipkan BA Hasil
-            rdr_hasil = PdfReader(ba_hasil)
-            for page in rdr_hasil.pages:
-                writer.add_page(page)
-            # q2 s/d akhir
-            for idx in range(q2, n_utama):
-                writer.add_page(rdr_utama.pages[idx])
-                
-        # Kondisi 2: Hanya BA Evaluasi aktif
-        elif ba_eval:
-            for idx in range(0, p1 + 1):
-                writer.add_page(rdr_utama.pages[idx])
-            rdr_eval = PdfReader(ba_eval)
-            for page in rdr_eval.pages:
-                writer.add_page(page)
-            for idx in range(p2, n_utama):
-                writer.add_page(rdr_utama.pages[idx])
-                
-        # Kondisi 3: Hanya BA Hasil aktif
-        elif ba_hasil:
-            for idx in range(0, q1 + 1):
-                writer.add_page(rdr_utama.pages[idx])
-            rdr_hasil = PdfReader(ba_hasil)
-            for page in rdr_hasil.pages:
-                writer.add_page(page)
-            for idx in range(q2, n_utama):
-                writer.add_page(rdr_utama.pages[idx])
-                
-        # Kondisi 4: Tanpa sisipan (output BA Utama saja)
-        else:
-            for page in rdr_utama.pages:
-                writer.add_page(page)
+
+            if idx in insert_after:
+                for summary_page in PdfReader(insert_after[idx]).pages:
+                    writer.add_page(summary_page)
                 
         # Tulis output dengan retry logic PermissionError
         path = output_path

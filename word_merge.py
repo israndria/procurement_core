@@ -21,6 +21,7 @@ import time
 import re
 import datetime
 import shutil
+import glob
 
 
 def _safe_filename(s: str, max_len: int = 80) -> str:
@@ -414,6 +415,84 @@ def _stitch_excel_at_anchor(word_pdf, anchor_excel_pairs, out_pdf):
     return _safe_write_pdf(writer, out_pdf)
 
 
+def _build_bapljkk_final_pdf(wd_doc, folder, kode):
+    """Export BA Word + 2 copy sheet 7.2 lalu sisipkan Summary SPSE."""
+    from pypdf import PdfReader, PdfWriter
+    import pdfplumber
+    import win32com.client
+
+    pdf_path = _fit_path(folder, f"BA_PLJKK_{kode}.pdf")
+    tmp_word = pdf_path + "_tmpword.pdf"
+    tmp_72 = pdf_path + "_tmp72.pdf"
+    xlsm_paths = glob.glob(os.path.join(folder, "*.xlsm"))
+    xlsm_path = os.path.normpath(xlsm_paths[0]) if xlsm_paths else None
+    has_72 = False
+
+    try:
+        start = wd_doc.Sections(3).Range.Start if wd_doc.Sections.Count >= 3 else wd_doc.Content.Start
+        wd_doc.Range(start, wd_doc.Content.End).ExportAsFixedFormat(
+            OutputFileName=tmp_word, ExportFormat=17
+        )
+
+        if xlsm_path:
+            xl_app = None
+            wb = None
+            try:
+                xl_app = win32com.client.DispatchEx("Excel.Application")
+                xl_app.Visible = False
+                wb = xl_app.Workbooks.Open(xlsm_path, ReadOnly=True)
+                wb.Sheets("7.2 Dengan Nego").ExportAsFixedFormat(
+                    Type=0, Filename=tmp_72, Quality=0,
+                    IncludeDocProperties=True, IgnorePrintAreas=False,
+                    OpenAfterPublish=False,
+                )
+                has_72 = True
+            except Exception:
+                pass
+            finally:
+                if wb:
+                    try: wb.Close(False)
+                    except Exception: pass
+                if xl_app:
+                    try: xl_app.Quit()
+                    except Exception: pass
+
+        if has_72:
+            rdr_word = PdfReader(tmp_word)
+            split_page = len(rdr_word.pages)
+            with pdfplumber.open(tmp_word) as pdf:
+                for page_index, page in enumerate(pdf.pages):
+                    if "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI" in (page.extract_text() or "").upper():
+                        split_page = page_index
+                        break
+            rdr_72 = PdfReader(tmp_72)
+            writer = PdfWriter()
+            for page_index in range(split_page):
+                writer.add_page(rdr_word.pages[page_index])
+            for _ in range(2):
+                for page in rdr_72.pages:
+                    writer.add_page(page)
+            for page_index in range(split_page, len(rdr_word.pages)):
+                writer.add_page(rdr_word.pages[page_index])
+            with open(pdf_path, "wb") as output:
+                writer.write(output)
+        else:
+            shutil.move(tmp_word, pdf_path)
+    finally:
+        for tmp_path in (tmp_word, tmp_72):
+            try: os.remove(tmp_path)
+            except Exception: pass
+
+    try:
+        from gabung_ba_pljkk import gabung as gabung_ba_pljkk
+        result = gabung_ba_pljkk(folder)
+        if result.get("ok"):
+            return result["output"]
+    except Exception:
+        pass
+    return pdf_path
+
+
 def merge_word(word_path, data, mode="buka", pdf_name=""):
     import pythoncom
     import win32com.client
@@ -547,19 +626,28 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     # Tidak ada sheet 7.2, rename tmp -> final
                     import shutil as _sh
                     _sh.move(_tmp_word, _pdf_path)
-                # Sisip 2 BA (Evaluasi /05/ + Hasil /07/) jika file-nya ada di folder
-                _sisip_2ba_pljkk(_pdf_path, _folder)
+                # Bentuk BA final sama seperti tombol "Gabung BA PLJKK".
+                # File Summary SPSE tersimpan di subfolder 7, bukan di root,
+                # sehingga helper lama tidak pernah menemukannya saat Cetak BA.
+                try:
+                    from gabung_ba_pljkk import gabung as _gabung_ba_pljkk
+                    _gabung_result = _gabung_ba_pljkk(_folder)
+                    if _gabung_result.get("ok"):
+                        _pdf_path = _gabung_result["output"]
+                except Exception:
+                    pass
                 show_success(_pdf_path)
             elif mode == "printer_bapljkk":
+                # Printer harus memakai PDF final, bukan Word mentah.
+                # Word mentah melewati Summary SPSE dan dua copy sheet 7.2.
                 _printer_name = pdf_name
-                wdApp.ActivePrinter = _printer_name
-                if wdDoc.Sections.Count >= 3:
-                    _start = wdDoc.Sections(3).Range.Start
-                else:
-                    _start = wdDoc.Content.Start
-                _rng = wdDoc.Range(_start, wdDoc.Content.End)
-                _rng.Select()
-                wdDoc.PrintOut(Background=False, Range=1)  # wdPrintSelection=1
+                _final_pdf = _build_bapljkk_final_pdf(wdDoc, _folder, "PL")
+                import win32api
+                _result = win32api.ShellExecute(
+                    0, "printto", _final_pdf, f'"{_printer_name}"', _folder, 0
+                )
+                if _result <= 32:
+                    raise RuntimeError(f"ShellExecute printto gagal ({_result})")
                 time.sleep(3)
                 show_print_success(_printer_name)
             wdDoc.Close(False)
