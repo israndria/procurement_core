@@ -49,7 +49,7 @@ Private Const ROW_HASIL_PEMBUKTIAN As Integer = 33
 ' ============================================================
 ' FUNGSI UTAMA: dipanggil dari tombol + Workbook_Open
 ' ============================================================
-Public Sub MuatInputBA()
+Public Sub MuatInputBA(Optional tampilPesan As Boolean = True)
     Dim wsInput As Worksheet, wsBA As Worksheet, wsKK As Worksheet
     On Error GoTo ErrHandler
 
@@ -86,13 +86,30 @@ Public Sub MuatInputBA()
     On Error Resume Next
     Set wsKK = ThisWorkbook.Sheets(SHEET_KK)
     If Not wsKK Is Nothing Then
-        ' SKP dari C33 (peserta 1) → isi ke "0. Input BA" DAN langsung ke sheet 6 W29
-        ' (tidak pakai formula referensi di sheet 6 karena akan circular reference)
+        ' Salin hasil KK untuk seluruh peserta (C:E), bukan hanya peserta 1.
+        ' Kolom G tetap memakai formula peserta terpilih melalui F5.
+        Dim kkCol As Integer, baCol As Integer
+        For kkCol = 3 To 5
+            baCol = kkCol
+            wsBA.Cells(ROW_SKP, baCol).Value = wsKK.Cells(33, kkCol).Value
+
+            Dim hasilMs As String
+            hasilMs = Trim(CStr(wsKK.Cells(54, kkCol).Value))
+            Select Case UCase(hasilMs)
+                Case "MS":  wsBA.Cells(ROW_HASIL_PEMBUKTIAN, baCol).Value = "Memenuhi"
+                Case "TMS": wsBA.Cells(ROW_HASIL_PEMBUKTIAN, baCol).Value = "Tidak Memenuhi"
+                Case Else:  wsBA.Cells(ROW_HASIL_PEMBUKTIAN, baCol).Value = hasilMs
+            End Select
+        Next kkCol
+
+        ' Sheet klarifikasi tetap winner-oriented, tetapi mengambil SKP dari
+        ' peserta terpilih, bukan selalu dari kolom C.
+        Dim selectedCol As Integer
+        selectedCol = Val(wsBA.Range("F5").Value) + 2
+        If selectedCol < 3 Or selectedCol > 5 Then selectedCol = 3
         Dim skpVal As String
-        skpVal = Trim(CStr(wsKK.Cells(33, 3).Value))   ' C33
+        skpVal = Trim(CStr(wsBA.Cells(ROW_SKP, selectedCol).Value))
         If skpVal <> "" And skpVal <> "0" Then
-            wsBA.Cells(ROW_SKP, 3).Value = skpVal
-            ' Ekstrak angka dari "5 SKP" → isi W29 di sheet 6 langsung
             Dim wsKlarif As Worksheet
             Set wsKlarif = Nothing
             On Error Resume Next
@@ -107,29 +124,100 @@ Public Sub MuatInputBA()
                 Else
                     skpAngka = CLng(Val(skpVal))
                 End If
-                ' W29 = jumlah pekerjaan sedang berjalan (SKP paket = 5 - W29)
-                ' Jadi W29 = 5 - skpAngka
                 wsKlarif.Unprotect
                 wsKlarif.Range("W29").Value = 5 - skpAngka
             End If
         End If
-
-        ' Hasil pembuktian dari C54 (MS/TMS → teks lengkap)
-        Dim hasilMs As String
-        hasilMs = Trim(CStr(wsKK.Cells(54, 3).Value))  ' C54
-        Select Case UCase(hasilMs)
-            Case "MS":  wsBA.Cells(ROW_HASIL_PEMBUKTIAN, 3).Value = "Memenuhi"
-            Case "TMS": wsBA.Cells(ROW_HASIL_PEMBUKTIAN, 3).Value = "Tidak Memenuhi"
-            Case Else:  wsBA.Cells(ROW_HASIL_PEMBUKTIAN, 3).Value = hasilMs
-        End Select
     End If
     On Error GoTo ErrHandler
 
-    MsgBox "Sheet '0. Input BA' berhasil diperbarui.", vbInformation
+    If tampilPesan Then MsgBox "Sheet '0. Input BA' berhasil diperbarui.", vbInformation
     Exit Sub
 
 ErrHandler:
     MsgBox "Error MuatInputBA: " & Err.Description, vbCritical
+End Sub
+
+
+' ============================================================
+' REFRESH PAKET: satu tombol untuk sinkronisasi data utama.
+' Semua operasi hanya GET/baca; penyimpanan ke Supabase tetap dilakukan
+' lebih dulu melalui Streamlit Asisten Pokja.
+' ============================================================
+Public Sub RefreshPaket()
+    Dim wsInput As Worksheet, wsMD As Worksheet
+    On Error GoTo ErrHandler
+
+    Set wsInput = ThisWorkbook.Sheets(SHEET_INPUT)
+    Set wsMD = ThisWorkbook.Sheets("@ Master Data")
+    Dim kodeTender As String
+    kodeTender = Trim(CStr(wsInput.Range(CELL_KODE).Value))
+    If kodeTender = "" Then
+        MsgBox "Kode Tender belum diisi di sheet '1. Input Data' cell E5.", vbExclamation
+        Exit Sub
+    End If
+
+    wsMD.Unprotect
+    SiapkanPanelRefresh wsMD, kodeTender, "Memulai..."
+    Application.ScreenUpdating = False
+
+    Application.StatusBar = "Refresh Paket: memuat KK Evaluasi..."
+    SiapkanPanelRefresh wsMD, kodeTender, "Memuat KK Evaluasi..."
+    MuatKKEvaluasi False
+
+    Application.StatusBar = "Refresh Paket: memuat Harga Penawaran..."
+    SiapkanPanelRefresh wsMD, kodeTender, "Memuat Harga Penawaran..."
+    MuatHargaPenawaran False
+
+    Application.StatusBar = "Refresh Paket: memuat Input BA..."
+    SiapkanPanelRefresh wsMD, kodeTender, "Memuat Input BA..."
+    MuatInputBA False
+
+    Application.StatusBar = False
+    Application.ScreenUpdating = True
+    SiapkanPanelRefresh wsMD, kodeTender, "Selesai"
+    MsgBox "Refresh paket selesai." & vbCrLf & _
+           "Data sumber tetap berasal dari Streamlit/Supabase; Excel hanya memuat ulang data terbaru.", _
+           vbInformation, "Refresh Paket"
+    Exit Sub
+
+ErrHandler:
+    Application.StatusBar = False
+    Application.ScreenUpdating = True
+    MsgBox "Error RefreshPaket: " & Err.Description, vbCritical
+End Sub
+
+
+Private Sub SiapkanPanelRefresh(wsMD As Worksheet, kodeTender As String, status As String)
+    Dim wsKK As Worksheet, wsHP As Worksheet, wsBA As Worksheet
+    On Error Resume Next
+    Set wsKK = ThisWorkbook.Sheets(SHEET_KK)
+    Set wsHP = ThisWorkbook.Sheets("6. Harga Penawaran")
+    Set wsBA = ThisWorkbook.Sheets(SHEET_BA)
+    On Error GoTo 0
+
+    With wsMD.Range("F24:I27")
+        .UnMerge
+        .ClearContents
+        .Interior.Color = RGB(242, 242, 242)
+        .Font.Bold = False
+        .Borders.LineStyle = xlContinuous
+    End With
+    With wsMD.Range("F24:I24")
+        .Merge
+        .Value = "STATUS REFRESH PAKET"
+        .Font.Bold = True
+        .Interior.Color = RGB(0, 128, 128)
+        .Font.Color = RGB(255, 255, 255)
+    End With
+    wsMD.Range("F25").Value = "Kode Tender": wsMD.Range("G25").Value = kodeTender
+    wsMD.Range("F26").Value = "KK Evaluasi": wsMD.Range("G26").Value = IIf(Not wsKK Is Nothing And Trim(CStr(wsKK.Range("C6").Value)) <> "", "OK", "Belum ada")
+    wsMD.Range("F27").Value = "Harga Penawaran": wsMD.Range("G27").Value = IIf(Not wsHP Is Nothing And Trim(CStr(wsHP.Range("A3").Value)) <> "", "OK", "Belum ada")
+    wsMD.Range("H25").Value = "HPS": wsMD.Range("I25").Value = IIf(Trim(CStr(wsMD.Range("C8").Value)) <> "", "OK", "Belum ada")
+    wsMD.Range("H26").Value = "Input BA": wsMD.Range("I26").Value = IIf(Not wsBA Is Nothing And Trim(CStr(wsBA.Range("C7").Value)) <> "", "OK", "Belum ada")
+    wsMD.Range("H27").Value = "Status": wsMD.Range("I27").Value = status & " | " & Format(Now, "dd/mm/yyyy hh:nn")
+    wsMD.Range("F25:F27,H25:H27").Font.Bold = True
+    wsMD.Range("G25:G27,I25:I27").Interior.Color = RGB(255, 255, 204)
 End Sub
 
 

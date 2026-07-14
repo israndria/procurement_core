@@ -203,6 +203,7 @@ def inject_buttons(filepath):
             ("btnRelink",          "Relink Template",     "RelinkTemplate",            4, 2, (255, 140, 0)),
             # Baris 6
             ("btnGabungBAReviu",   "Gabung BA Reviu",     "GabungBAReviu",             5, 0, (0, 128, 96)),
+            ("btnRefreshPaket",    "Refresh Paket",       "RefreshPaket",              5, 1, (0, 128, 128)),
         ]
 
         def _add_master_btn(ws_md, name, label, macro, yi, xi, color):

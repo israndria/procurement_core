@@ -78,7 +78,7 @@ Private Const ROW_HASIL_MS As Integer = 54
 ' ============================================================
 ' FUNGSI UTAMA: dipanggil dari tombol di sheet KK Evaluasi
 ' ============================================================
-Public Sub MuatKKEvaluasi()
+Public Sub MuatKKEvaluasi(Optional tampilPesan As Boolean = True)
     Dim wsInput As Worksheet, wsKK As Worksheet
     On Error GoTo ErrHandler
 
@@ -101,7 +101,7 @@ Public Sub MuatKKEvaluasi()
     ParseKKJSON json, items, itemCount
 
     If itemCount = 0 Then
-        MsgBox "Tidak ada data KK Evaluasi untuk kode tender " & kodeTender & "." & vbCrLf & _
+        If tampilPesan Then MsgBox "Tidak ada data KK Evaluasi untuk kode tender " & kodeTender & "." & vbCrLf & _
                "Jalankan 'Parse & Simpan KK Evaluasi' di Asisten Pokja terlebih dahulu.", vbInformation
         Exit Sub
     End If
@@ -314,9 +314,9 @@ Public Sub MuatKKEvaluasi()
     If warnMsg <> "" Then
         finalMsg = finalMsg & vbCrLf & vbCrLf & _
                    "⚠️ Field berikut perlu dicek manual (highlight kuning):" & vbCrLf & warnMsg
-        MsgBox finalMsg, vbExclamation, "Muat KK Evaluasi"
+        If tampilPesan Then MsgBox finalMsg, vbExclamation, "Muat KK Evaluasi"
     Else
-        MsgBox finalMsg, vbInformation, "Muat KK Evaluasi"
+        If tampilPesan Then MsgBox finalMsg, vbInformation, "Muat KK Evaluasi"
     End If
     Exit Sub
 
@@ -500,7 +500,7 @@ End Function
 ' ============================================================
 ' MUAT HARGA PENAWARAN — sheet "6. Harga Penawaran"
 ' ============================================================
-Public Sub MuatHargaPenawaran()
+Public Sub MuatHargaPenawaran(Optional tampilPesan As Boolean = True)
     Dim wsInput As Worksheet, wsHP As Worksheet
     On Error GoTo ErrHandler
 
@@ -520,7 +520,7 @@ Public Sub MuatHargaPenawaran()
     urlPeserta = SB_URL & "/rest/v1/harga_penawaran" & _
                  "?kode_tender=eq." & kodeTender & _
                  "&select=peserta_id,nama_peserta,total_penawaran" & _
-                 "&order=peserta_id.asc"
+                 "&order=peserta_id.asc&limit=3"
 
     Dim http As Object
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
@@ -564,7 +564,7 @@ Public Sub MuatHargaPenawaran()
         For si = 0 To pesertaCount - 1
             If seenIds(si) = pid Then isDup = True: Exit For
         Next si
-        If Not isDup And pid <> "" And pesertaCount < 10 Then
+        If Not isDup And pid <> "" And pesertaCount < 3 Then
             seenIds(pesertaCount) = pid
             pesertaIds(pesertaCount) = pid
             pesertaNama(pesertaCount) = ExtractJSONVal(objP, "nama_peserta")
@@ -575,127 +575,19 @@ Public Sub MuatHargaPenawaran()
     Loop
 
     If pesertaCount = 0 Then
-        MsgBox "Tidak ada data harga penawaran untuk kode tender " & kodeTender & "." & vbCrLf & _
+        If tampilPesan Then MsgBox "Tidak ada data harga penawaran untuk kode tender " & kodeTender & "." & vbCrLf & _
                "Jalankan 'Serap Harga Penawaran' di Asisten Pokja terlebih dahulu.", vbInformation
         Exit Sub
     End If
 
-    ' ── 2. Populate dropdown di J1 (B1 = header "Jenis barang/jasa", jangan disentuh) ──
+    ' ── 2. Bersihkan tiga blok, lalu isi seluruh peserta sekaligus ──
     wsHP.Unprotect
-    wsHP.Range("I1").Value = "Pilih Peserta:"
-    With wsHP.Range("J1").Validation
-        .Delete
-        Dim listStr As String: listStr = ""
-        Dim ni As Integer
-        For ni = 0 To pesertaCount - 1
-            If listStr <> "" Then listStr = listStr & ","
-            listStr = listStr & pesertaNama(ni)
-        Next ni
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:=listStr
-        .ShowInput = True
-    End With
-    ' Set J1 ke peserta pertama HANYA jika J1 kosong atau isinya bukan nama peserta valid
-    Dim curJ1 As String: curJ1 = Trim(wsHP.Range("J1").Value)
-    Dim j1Valid As Boolean: j1Valid = False
-    Dim vi As Integer
-    For vi = 0 To pesertaCount - 1
-        If pesertaNama(vi) = curJ1 Then j1Valid = True: Exit For
-    Next vi
-    If Not j1Valid Then wsHP.Range("J1").Value = pesertaNama(0)
+    wsHP.Range("A3:Z1000").ClearContents
+    wsHP.Range("A1").Value = ""
+    wsHP.Range("J1").Value = ""
+    wsHP.Range("S1").Value = ""
 
-    ' ── 3. Baca peserta yang dipilih di J1 ──
-    Dim namaDipilih As String: namaDipilih = Trim(wsHP.Range("J1").Value)
-    Dim pidDipilih As String: pidDipilih = ""
-    Dim totalDipilih As Double: totalDipilih = 0
-    Dim ki As Integer
-    For ki = 0 To pesertaCount - 1
-        If pesertaNama(ki) = namaDipilih Then
-            pidDipilih = pesertaIds(ki)
-            totalDipilih = pesertaTotal(ki)
-            Exit For
-        End If
-    Next ki
-
-    If pidDipilih = "" Then
-        MsgBox "Peserta '" & namaDipilih & "' tidak ditemukan di Supabase.", vbExclamation
-        Exit Sub
-    End If
-
-    ' ── 4. Ambil item harga penawaran peserta terpilih ──
-    Dim urlItem As String
-    urlItem = SB_URL & "/rest/v1/harga_penawaran" & _
-              "?kode_tender=eq." & kodeTender & _
-              "&peserta_id=eq." & pidDipilih & _
-              "&order=urutan.asc"
-
-    http.Open "GET", urlItem, False
-    http.SetTimeouts 5000, 5000, 10000, 10000
-    http.SetRequestHeader "apikey", SB_KEY
-    http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
-    http.SetRequestHeader "Accept", "application/json"
-    http.Send
-
-    If http.Status <> 200 Then
-        MsgBox "HTTP Error " & http.Status & " saat ambil item penawaran.", vbExclamation
-        Exit Sub
-    End If
-
-    ' ── 5. Clear data lama baris 2+ kolom A:H saja (jangan clear row 1 header + jangan clear I:J dropdown) ──
-    Dim lastRow As Long
-    lastRow = wsHP.Cells(wsHP.Rows.Count, 2).End(xlUp).Row
-    If lastRow >= 2 Then wsHP.Range("A2:H" & (lastRow + 5)).ClearContents
-
-    ' ── 6. Parse + isi data ──
-    Dim jsonI As String: jsonI = http.ResponseText
-    Dim curRow As Long: curRow = 2
-    Dim posI As Long: posI = 1
-
-    Do
-        Dim bsI As Long: bsI = InStr(posI, jsonI, "{")
-        If bsI = 0 Then Exit Do
-        Dim depI As Integer: depI = 1
-        Dim pI As Long: pI = bsI + 1
-        Do While pI <= Len(jsonI) And depI > 0
-            Dim cI As String: cI = Mid(jsonI, pI, 1)
-            If cI = "{" Then depI = depI + 1
-            If cI = "}" Then depI = depI - 1
-            pI = pI + 1
-        Loop
-        Dim objI As String: objI = Mid(jsonI, bsI, pI - bsI)
-
-        Dim isDivisi As String: isDivisi = ExtractJSONVal(objI, "is_divisi")
-        Dim jenisBj As String:  jenisBj  = ExtractJSONVal(objI, "jenis_bj")
-        Dim satuan As String:   satuan   = ExtractJSONVal(objI, "satuan")
-        Dim volStr As String:   volStr   = ExtractJSONVal(objI, "vol")
-        Dim hsStr As String:    hsStr    = ExtractJSONVal(objI, "harga_satuan")
-        Dim pajStr As String:   pajStr   = ExtractJSONVal(objI, "pajak_pct")
-        Dim totStr As String:   totStr   = ExtractJSONVal(objI, "total_stlh_pajak")
-        Dim urtStr As String:   urtStr   = ExtractJSONVal(objI, "urutan")
-
-        wsHP.Cells(curRow, 1).Value = IIf(isDivisi = "true", "", urtStr)  ' No
-        wsHP.Cells(curRow, 2).Value = jenisBj                              ' Jenis
-        If isDivisi <> "true" Then
-            wsHP.Cells(curRow, 3).Value = satuan                           ' Satuan
-            If volStr <> "" Then wsHP.Cells(curRow, 4).Value = CDbl(volStr)  ' Volume
-            If hsStr  <> "" Then wsHP.Cells(curRow, 5).Value = CDbl(hsStr)   ' Harga Satuan
-            If pajStr <> "" Then
-                wsHP.Cells(curRow, 6).Value = CDbl(pajStr)                 ' Pajak %
-                If volStr <> "" And hsStr <> "" Then
-                    ' Nilai Pajak = harga_satuan × vol × pajak/100
-                    wsHP.Cells(curRow, 7).Value = CDbl(hsStr) * CDbl(volStr) * CDbl(pajStr) / 100
-                End If
-            End If
-            If totStr <> "" Then wsHP.Cells(curRow, 8).Value = CDbl(totStr) ' Total
-        End If
-
-        curRow = curRow + 1
-        posI = pI
-    Loop
-
-    ' ── 7. Baris total + selisih ──
-    ' Ambil total HPS dari sheet "5. HPS" (arsitektur baru: HPS ditulis langsung
-    ' ke Excel oleh Streamlit, tidak lagi lewat Supabase hps_items).
-    ' Scan kolom B cari label "TOTAL NILAI (Setelah Pembulatan SPSE)" → ambil kolom G.
+    ' Ambil total HPS dari sheet "5. HPS".
     Dim totalHPS As Double: totalHPS = 0
     Dim wsHPSsrc As Worksheet
     On Error Resume Next
@@ -714,47 +606,102 @@ Public Sub MuatHargaPenawaran()
         Next rH
     End If
 
-    curRow = curRow + 1  ' satu baris kosong
+    Dim baseCols(1 To 3) As Integer
+    baseCols(1) = 1: baseCols(2) = 10: baseCols(3) = 19
+    Dim pIdx As Integer, loaded As String, warnings As String
+    For pIdx = 0 To pesertaCount - 1
+        Dim urlItem As String
+        urlItem = SB_URL & "/rest/v1/harga_penawaran" & _
+                  "?kode_tender=eq." & kodeTender & _
+                  "&peserta_id=eq." & pesertaIds(pIdx) & _
+                  "&order=urutan.asc"
+        http.Open "GET", urlItem, False
+        http.SetTimeouts 5000, 5000, 10000, 10000
+        http.SetRequestHeader "apikey", SB_KEY
+        http.SetRequestHeader "Authorization", "Bearer " & SB_KEY
+        http.SetRequestHeader "Accept", "application/json"
+        http.Send
+        If http.Status <> 200 Then
+            MsgBox "HTTP Error " & http.Status & " saat ambil item peserta " & (pIdx + 1) & ".", vbExclamation
+            Exit Sub
+        End If
+        Dim selisihPeserta As Double
+        selisihPeserta = IsiBlokHarga(wsHP, baseCols(pIdx + 1), pesertaNama(pIdx), _
+                                      http.ResponseText, pesertaTotal(pIdx), totalHPS)
+        loaded = loaded & "Peserta " & (pIdx + 1) & ": " & pesertaNama(pIdx) & _
+                 " | Selisih Rp " & Format(selisihPeserta, "#,##0") & vbCrLf
+        If totalHPS > 0 And Abs(selisihPeserta) / totalHPS > 0.05 Then
+            warnings = warnings & "Peserta " & (pIdx + 1) & " selisih > 5% HPS." & vbCrLf
+        End If
+    Next pIdx
 
-    With wsHP.Cells(curRow, 2)
-        .Value = "Total Penawaran"
-        .Font.Bold = True
-    End With
-    wsHP.Cells(curRow, 8).Value = totalDipilih
-
-    curRow = curRow + 1
-    With wsHP.Cells(curRow, 2)
-        .Value = "Total HPS"
-        .Font.Bold = True
-    End With
-    wsHP.Cells(curRow, 8).Value = totalHPS
-
-    curRow = curRow + 1
-    With wsHP.Cells(curRow, 2)
-        .Value = "Selisih (Penawaran - HPS)"
-        .Font.Bold = True
-    End With
-    Dim selisih As Double: selisih = totalDipilih - totalHPS
-    wsHP.Cells(curRow, 8).Value = selisih
-
-    ' Highlight selisih kuning jika lebih dari 5% HPS
-    If totalHPS > 0 And Abs(selisih) / totalHPS > 0.05 Then
-        wsHP.Cells(curRow, 8).Interior.Color = RGB(255, 255, 0)
-        MsgBox "Selisih penawaran vs HPS: Rp " & Format(Abs(selisih), "#,##0") & _
-               " (" & Format(Abs(selisih) / totalHPS * 100, "0.0") & "% HPS)." & vbCrLf & _
-               "Pertimbangkan klarifikasi kewajaran harga.", vbExclamation, "Muat Harga Penawaran"
-    Else
-        MsgBox "Data " & namaDipilih & " berhasil dimuat." & vbCrLf & _
-               "Total Penawaran : Rp " & Format(totalDipilih, "#,##0") & vbCrLf & _
-               "Total HPS       : Rp " & Format(totalHPS, "#,##0") & vbCrLf & _
-               "Selisih         : Rp " & Format(selisih, "#,##0"), _
-               vbInformation, "Muat Harga Penawaran"
+    If pesertaCount < 3 Then
+        wsHP.Range("S1").Value = ""
+        If pesertaCount < 2 Then wsHP.Range("J1").Value = ""
     End If
+    If warnings <> "" Then warnings = vbCrLf & "Perhatian:" & vbCrLf & warnings
+    If tampilPesan Then MsgBox "Data harga penawaran " & pesertaCount & " peserta berhasil dimuat." & vbCrLf & _
+           loaded & warnings, IIf(warnings = "", vbInformation, vbExclamation), "Muat Harga Penawaran"
     Exit Sub
 
 ErrHandler:
     MsgBox "Error " & Err.Number & ": " & Err.Description, vbCritical, "MuatHargaPenawaran"
 End Sub
+
+
+' Isi satu blok: baseCol 1=A, 10=J, 19=S.
+Private Function IsiBlokHarga(wsHP As Worksheet, baseCol As Integer, nama As String, _
+                              jsonI As String, totalPenawaran As Double, totalHPS As Double) As Double
+    wsHP.Cells(1, baseCol).Value = nama
+    wsHP.Cells(1, baseCol).Font.Bold = True
+
+    Dim curRow As Long: curRow = 3
+    Dim posI As Long: posI = 1
+    Do
+        Dim bsI As Long: bsI = InStr(posI, jsonI, "{")
+        If bsI = 0 Then Exit Do
+        Dim depI As Integer: depI = 1
+        Dim pI As Long: pI = bsI + 1
+        Do While pI <= Len(jsonI) And depI > 0
+            Dim cI As String: cI = Mid(jsonI, pI, 1)
+            If cI = "{" Then depI = depI + 1
+            If cI = "}" Then depI = depI - 1
+            pI = pI + 1
+        Loop
+        Dim objI As String: objI = Mid(jsonI, bsI, pI - bsI)
+        Dim isDivisi As String: isDivisi = ExtractJSONVal(objI, "is_divisi")
+        wsHP.Cells(curRow, baseCol).Value = IIf(isDivisi = "true", "", ExtractJSONVal(objI, "urutan"))
+        wsHP.Cells(curRow, baseCol + 1).Value = ExtractJSONVal(objI, "jenis_bj")
+        If isDivisi <> "true" Then
+            wsHP.Cells(curRow, baseCol + 2).Value = ExtractJSONVal(objI, "satuan")
+            If ExtractJSONVal(objI, "vol") <> "" Then wsHP.Cells(curRow, baseCol + 3).Value = CDbl(ExtractJSONVal(objI, "vol"))
+            If ExtractJSONVal(objI, "harga_satuan") <> "" Then wsHP.Cells(curRow, baseCol + 4).Value = CDbl(ExtractJSONVal(objI, "harga_satuan"))
+            If ExtractJSONVal(objI, "pajak_pct") <> "" Then wsHP.Cells(curRow, baseCol + 5).Value = CDbl(ExtractJSONVal(objI, "pajak_pct"))
+            If ExtractJSONVal(objI, "vol") <> "" And ExtractJSONVal(objI, "harga_satuan") <> "" And ExtractJSONVal(objI, "pajak_pct") <> "" Then
+                wsHP.Cells(curRow, baseCol + 6).Value = CDbl(ExtractJSONVal(objI, "harga_satuan")) * CDbl(ExtractJSONVal(objI, "vol")) * CDbl(ExtractJSONVal(objI, "pajak_pct")) / 100
+            End If
+            If ExtractJSONVal(objI, "total_stlh_pajak") <> "" Then wsHP.Cells(curRow, baseCol + 7).Value = CDbl(ExtractJSONVal(objI, "total_stlh_pajak"))
+        End If
+        curRow = curRow + 1
+        posI = pI
+    Loop
+
+    curRow = curRow + 1
+    wsHP.Cells(curRow, baseCol + 1).Value = "Total Penawaran"
+    wsHP.Cells(curRow, baseCol + 1).Font.Bold = True
+    wsHP.Cells(curRow, baseCol + 7).Value = totalPenawaran
+    curRow = curRow + 1
+    wsHP.Cells(curRow, baseCol + 1).Value = "Total HPS"
+    wsHP.Cells(curRow, baseCol + 1).Font.Bold = True
+    wsHP.Cells(curRow, baseCol + 7).Value = totalHPS
+    curRow = curRow + 1
+    Dim selisih As Double: selisih = totalPenawaran - totalHPS
+    wsHP.Cells(curRow, baseCol + 1).Value = "Selisih (Penawaran - HPS)"
+    wsHP.Cells(curRow, baseCol + 1).Font.Bold = True
+    wsHP.Cells(curRow, baseCol + 7).Value = selisih
+    If totalHPS > 0 And Abs(selisih) / totalHPS > 0.05 Then wsHP.Cells(curRow, baseCol + 7).Interior.Color = RGB(255, 255, 0)
+    IsiBlokHarga = selisih
+End Function
 
 
 ' ============================================================
