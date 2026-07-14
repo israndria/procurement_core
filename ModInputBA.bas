@@ -190,11 +190,25 @@ End Sub
 
 Private Sub SiapkanPanelRefresh(wsMD As Worksheet, kodeTender As String, status As String)
     Dim wsKK As Worksheet, wsHP As Worksheet, wsBA As Worksheet
+    Dim publishAt As String, priorRefresh As Variant, publishStatus As String
     On Error Resume Next
     Set wsKK = ThisWorkbook.Sheets(SHEET_KK)
     Set wsHP = ThisWorkbook.Sheets("6. Harga Penawaran")
     Set wsBA = ThisWorkbook.Sheets(SHEET_BA)
     On Error GoTo 0
+    publishAt = BacaPublishTimestamp()
+    priorRefresh = wsMD.Range("K25").Value
+    If publishAt = "" Then
+        publishStatus = "Belum publish"
+    ElseIf IsDate(priorRefresh) Then
+        If Replace(Left(publishAt, 19), "T", " ") > Format(CDate(priorRefresh), "yyyy-mm-dd hh:nn:ss") Then
+            publishStatus = "STALE - publish lebih baru"
+        Else
+            publishStatus = "OK"
+        End If
+    Else
+        publishStatus = "OK"
+    End If
 
     With wsMD.Range("F24:I27")
         .UnMerge
@@ -213,12 +227,23 @@ Private Sub SiapkanPanelRefresh(wsMD As Worksheet, kodeTender As String, status 
     wsMD.Range("F25").Value = "Kode Tender": wsMD.Range("G25").Value = kodeTender
     wsMD.Range("F26").Value = "KK Evaluasi": wsMD.Range("G26").Value = IIf(Not wsKK Is Nothing And Trim(CStr(wsKK.Range("C6").Value)) <> "", "OK", "Belum ada")
     wsMD.Range("F27").Value = "Harga Penawaran": wsMD.Range("G27").Value = IIf(Not wsHP Is Nothing And Trim(CStr(wsHP.Range("A3").Value)) <> "", "OK", "Belum ada")
-    wsMD.Range("H25").Value = "HPS": wsMD.Range("I25").Value = IIf(Trim(CStr(wsMD.Range("C8").Value)) <> "", "OK", "Belum ada")
-    wsMD.Range("H26").Value = "Input BA": wsMD.Range("I26").Value = IIf(Not wsBA Is Nothing And Trim(CStr(wsBA.Range("C7").Value)) <> "", "OK", "Belum ada")
-    wsMD.Range("H27").Value = "Status": wsMD.Range("I27").Value = status & " | " & Format(Now, "dd/mm/yyyy hh:nn")
+    wsMD.Range("H25").Value = "Last publish": wsMD.Range("I25").Value = IIf(publishAt = "", "Belum pernah", publishAt)
+    wsMD.Range("H26").Value = "BA / HPS": wsMD.Range("I26").Value = IIf(Not wsBA Is Nothing And Trim(CStr(wsBA.Range("C7").Value)) <> "", "BA OK", "BA belum ada") & " / " & IIf(Trim(CStr(wsMD.Range("C8").Value)) <> "", "HPS OK", "HPS belum ada")
+    wsMD.Range("H27").Value = "Status": wsMD.Range("I27").Value = status & " | " & publishStatus & " | " & Format(Now, "dd/mm/yyyy hh:nn")
     wsMD.Range("F25:F27,H25:H27").Font.Bold = True
     wsMD.Range("G25:G27,I25:I27").Interior.Color = RGB(255, 255, 204)
+    If status = "Selesai" Then wsMD.Range("K25").Value = Now
 End Sub
+
+
+Private Function BacaPublishTimestamp() As String
+    Dim path As String
+    path = ThisWorkbook.Path & "\_workflow_publish.json"
+    If Dir(path) = "" Then Exit Function
+    On Error Resume Next
+    BacaPublishTimestamp = ExtractVal(ReadFileBA(path), "last_published_at")
+    On Error GoTo 0
+End Function
 
 
 ' ============================================================
