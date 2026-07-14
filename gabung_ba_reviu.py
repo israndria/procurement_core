@@ -51,13 +51,25 @@ def deteksi_file(subfolder_path: str) -> dict:
 
     pdfs = [f for f in os.listdir(subfolder_path) if f.lower().endswith('.pdf')]
 
+    def _is_isi_reviu(filename: str) -> bool:
+        """Terima nama output baru maupun PDF Isi Reviu yang dicetak manual."""
+        stem = os.path.splitext(filename)[0].casefold()
+        return (
+            stem.startswith("isi_reviu_dpp_")
+            or stem.startswith("isi_reviu_")
+            or "isi reviu" in stem
+        )
+
     isi_reviu_path = None
     scan_candidates = []
 
     for f in pdfs:
         full = os.path.join(subfolder_path, f)
-        if f.startswith("Isi_Reviu_DPP_") or f.startswith("Isi_Reviu_"):
+        if _is_isi_reviu(f):
             isi_reviu_path = full
+        elif f.startswith(OUTPUT_PREFIX):
+            # Output gabungan lama bukan scan sumber untuk run berikutnya.
+            continue
         else:
             scan_candidates.append(full)
 
@@ -69,8 +81,9 @@ def deteksi_file(subfolder_path: str) -> dict:
     elif len(scan_candidates) == 1:
         scan_path = scan_candidates[0]
     else:
-        # Lebih dari 1 — ambil yang terbaru
-        scan_candidates_sorted = sorted(scan_candidates, key=os.path.getmtime, reverse=True)
+        # Utamakan file BA Reviu sebagai scan sumber; fallback file terbaru.
+        ba_reviu = [p for p in scan_candidates if "ba reviu" in os.path.basename(p).casefold()]
+        scan_candidates_sorted = sorted(ba_reviu or scan_candidates, key=os.path.getmtime, reverse=True)
         scan_path = scan_candidates_sorted[0]
         names = [os.path.basename(p) for p in scan_candidates_sorted]
         warning = f"Ada {len(scan_candidates)} file scan: {', '.join(names)}. Dipakai: {os.path.basename(scan_path)} (terbaru)."
