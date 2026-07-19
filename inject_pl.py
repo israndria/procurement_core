@@ -179,8 +179,6 @@ def inject_pl(filepath: str):
                 print(f"  [OK] {name} ({label}) -> {macro}")
 
             RED_DARK   = (180, 0, 0)
-            GREY       = (100, 100, 100)
-            GREEN_SYNC = (20, 140, 60)
 
             # Baris 0: Buka Dokpil | Relink Word
             # (Muat Paket PL + Isi Data PL dihapus — @ Master Data kini diisi otomatis
@@ -188,11 +186,9 @@ def inject_pl(filepath: str):
             add_btn("btnBukaDokpil_PL",   "Buka Dokpil",       "BukaDokpilPlJkk",         0, 0, TEAL)
             add_btn("btnRelinkPL",        "Relink Word",       "RelinkPL",                 0, 1, (128, 0, 0))
             add_btn("btnRefreshDataPL",   "Refresh Data PL",   "RefreshDataPL",            0, 2, (0, 150, 100))
-            # Baris 1: Buka BA | Buka Reviu | Sync Data Draft | Clear Highlight
+            # Baris 1: Buka BA | Buka Reviu | (kosong) | (kosong)
             add_btn("btnBukaBA_PL",       "Buka BA",           "BukaBAPlJkk",             1, 0, ORANGE)
             add_btn("btnBukaReviu_PL",    "Buka Reviu",        "BukaReviuPlJkk",          1, 1, PURPLE)
-            add_btn("btnSyncDraftPL",     "Sync Data Draft",   "SyncDataDraftPL",          1, 2, GREEN_SYNC)
-            add_btn("btnClearHighlightPL","Clear Highlight",    "ClearHighlightPL",         1, 3, GREY)
             # Baris 2: Cetak BA Reviu PL | Cetak Dokpil PDF | (kosong) | (kosong)
             add_btn("btnCetakBAReviu_PL", "Cetak BA Reviu PL", "CetakBAReviuPLPDF",       2, 0, RED_DARK)
             add_btn("btnCetakDokpil_PL",  "Cetak Dokpil PDF",  "CetakDokpilPlJkkPDF",     2, 1, (0, 100, 180))
