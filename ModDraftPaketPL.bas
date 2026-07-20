@@ -598,7 +598,7 @@ Public Sub MuatPenawaranPL()
         Exit Sub
     End If
 
-    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+    Dim pyExe As String: pyExe = PythonExePL()
     Dim pyScript As String: pyScript = asDir & "\muat_penawaran_pl.py"
     Dim outJson As String: outJson = scriptDir & "\_penawaran_pl_" & kodePaket & ".json"
 
@@ -1171,7 +1171,7 @@ Public Sub CetakDokpilPlJkkPDF()
         MsgBox "Python tidak ditemukan.", vbCritical
         Exit Sub
     End If
-    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+    Dim pyExe As String: pyExe = PythonExePL()
 
     Dim outMode As String, printerName As String
     outMode = ChooseOutputModePL(printerName)
@@ -1227,7 +1227,7 @@ Public Sub CetakReviuPlJkkPDF()
         MsgBox "Python tidak ditemukan.", vbCritical
         Exit Sub
     End If
-    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+    Dim pyExe As String: pyExe = PythonExePL()
 
     Dim outMode As String, printerName As String
     outMode = ChooseOutputModePL(printerName)
@@ -1284,7 +1284,7 @@ Public Sub CetakBAReviuPLPDF()
         MsgBox "Python tidak ditemukan.", vbCritical
         Exit Sub
     End If
-    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+    Dim pyExe As String: pyExe = PythonExePL()
 
     Dim outMode As String, printerName As String
     outMode = ChooseOutputModePL(printerName)
@@ -1403,7 +1403,7 @@ Public Sub CetakBAPLJKKPDF()
         MsgBox "Python tidak ditemukan.", vbCritical
         Exit Sub
     End If
-    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+    Dim pyExe As String: pyExe = PythonExePL()
 
     Dim outMode As String, printerName As String
     outMode = ChooseOutputModePL(printerName)
@@ -1459,7 +1459,15 @@ Public Sub GabungBAPLJKK()
     End If
 
     Dim pyExe As String
-    pyExe = scriptDir & "\python\python.exe"
+    pyExe = PythonExePL()
+    If pyExe = "" Or Dir(pyExe) = "" Then
+        MsgBox "Python runtime tidak ditemukan. Periksa POKJA_PYTHON.", vbCritical, "Buka Reviu"
+        Exit Sub
+    End If
+    If Dir(scriptDir & "\word_merge.py") = "" Then
+        MsgBox "word_merge.py tidak ditemukan di:" & vbCrLf & scriptDir, vbCritical, "Buka Reviu"
+        Exit Sub
+    End If
 
     Dim cmd As String
     Dim wsh As Object
@@ -1480,7 +1488,7 @@ Public Sub GabungReviuPL()
         MsgBox "Python tidak ditemukan.", vbCritical
         Exit Sub
     End If
-    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+    Dim pyExe As String: pyExe = PythonExePL()
     Dim folderPaket As String: folderPaket = ThisWorkbook.Path
 
     ' Deteksi nomor paket dari nama folder — ambil angka pertama di awal nama
@@ -1574,7 +1582,11 @@ Public Sub RelinkPL()
         MsgBox "Python tidak ditemukan.", vbCritical
         Exit Sub
     End If
-    Dim pyExe As String: pyExe = scriptDir & "\python\python.exe"
+    Dim pyExe As String: pyExe = PythonExePL()
+    If pyExe = "" Or Dir(pyExe) = "" Then
+        MsgBox "Python runtime tidak ditemukan. Periksa POKJA_PYTHON.", vbCritical, "Relink PL"
+        Exit Sub
+    End If
     Dim relinkScript As String: relinkScript = scriptDir & "\relink_pl.py"
 
     Dim outFile As String
@@ -1649,7 +1661,7 @@ Public Sub SyncDataDraftPL()
     payload = "{""kode_paket"":""" & kodePaket & """,""snapshot"":" & snapshot & ",""kode_unik"":""" & kodeUnik & """}"
     WriteUTF8PL inputFile, payload
 
-    Dim pyExe As String: pyExe = sd & "\python\python.exe"
+    Dim pyExe As String: pyExe = PythonExePL()
     Dim cmd As String
     cmd = """" & pyExe & """ """ & sd & "\sync_draft_pl.py"" save"
 
@@ -1839,7 +1851,7 @@ Private Sub RunMergePL(ByVal mode As String, ByVal wordPattern As String, ByVal 
     End If
 
     Dim pyExe As String
-    pyExe = scriptDir & "\python\python.exe"
+    pyExe = PythonExePL()
 
     Dim cmd As String
     cmd = Chr(34) & pyExe & Chr(34) & " " & _
@@ -1879,6 +1891,15 @@ Private Function FindWordFilePL(ByVal pattern As String) As String
 End Function
 
 Private Function ScriptDirPL() As String
+    Dim root As String
+    root = EnvValuePL("POKJA_V19_ROOT")
+    If root <> "" Then
+        If Dir(root & "\word_merge.py") <> "" Then
+            ScriptDirPL = root
+            Exit Function
+        End If
+    End If
+
     Dim folder As String
     folder = ThisWorkbook.Path
     Dim i As Integer
@@ -1891,6 +1912,37 @@ Private Function ScriptDirPL() As String
         If Len(folder) < 3 Then Exit For
     Next i
     ScriptDirPL = ""
+End Function
+
+Private Function PythonExePL() As String
+    Dim configured As String
+    configured = EnvValuePL("POKJA_PYTHON")
+    If configured <> "" Then
+        If Dir(configured) <> "" Then
+            PythonExePL = configured
+            Exit Function
+        End If
+    End If
+
+    Dim scriptDir As String
+    scriptDir = ScriptDirPL()
+    If scriptDir <> "" Then
+        If Dir(scriptDir & "\python\python.exe") <> "" Then
+            PythonExePL = scriptDir & "\python\python.exe"
+            Exit Function
+        End If
+    End If
+    PythonExePL = ""
+End Function
+
+Private Function EnvValuePL(ByVal name As String) As String
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    On Error Resume Next
+    EnvValuePL = Trim$(wsh.Environment("Process")(name))
+    If EnvValuePL = "" Then EnvValuePL = Trim$(wsh.Environment("User")(name))
+    On Error GoTo 0
+    Set wsh = Nothing
 End Function
 
 
