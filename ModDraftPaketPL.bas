@@ -595,18 +595,19 @@ Public Sub MuatPenawaranPL()
         Exit Sub
     End If
 
-    ' Tentukan path script: Asisten_Pokja sejajar V19_Scheduler
-    ' scriptDir = {root}\V19_Scheduler\WPy64-313110 → naik 2 level → {root}
+    ' Script Asisten berada di clone lokal, bukan di Google Drive.
     Dim asDir As String
-    asDir = ParentDir(ParentDir(scriptDir)) & "\Asisten_Pokja"
-    If Dir(asDir, vbDirectory) = "" Then
-        MsgBox "Folder Asisten_Pokja tidak ditemukan:" & vbCrLf & asDir, vbCritical, "Muat Penawaran PL"
+    asDir = AsistenCodeDirPL(scriptDir)
+    If asDir = "" Then
+        MsgBox "Clone lokal Asisten_Pokja tidak ditemukan." & vbCrLf & _
+               "Set POKJA_CODE_ROOT atau siapkan D:\POKJA2026-Code\Asisten_Pokja.", _
+               vbCritical, "Muat Penawaran PL"
         Exit Sub
     End If
 
     Dim pyExe As String: pyExe = PythonExePL()
     Dim pyScript As String: pyScript = asDir & "\muat_penawaran_pl.py"
-    Dim outJson As String: outJson = scriptDir & "\_penawaran_pl_" & kodePaket & ".json"
+    Dim outJson As String: outJson = Environ$("TEMP") & "\_pokja_penawaran_pl_" & kodePaket & ".json"
 
     ' Jalankan Python scraper (sync/blocking)
     Dim cmd As String
@@ -772,6 +773,39 @@ Private Function ParentDir(path As String) As String
     Dim parts() As String: parts = Split(path, "\")
     ReDim Preserve parts(UBound(parts) - 1)
     ParentDir = Join(parts, "\")
+End Function
+
+
+Private Function AsistenCodeDirPL(scriptDir As String) As String
+    Dim candidate As String
+
+    ' Konfigurasi utama per-PC.
+    candidate = Replace(Trim$(Environ$("POKJA_CODE_ROOT")), Chr(34), "")
+    If candidate <> "" And Dir(candidate & "\muat_penawaran_pl.py") <> "" Then
+        AsistenCodeDirPL = candidate
+        Exit Function
+    End If
+
+    ' Jika macro dipanggil dari launcher lokal, source Asisten adalah saudara
+    ' procurement_core; tetap aman walau POKJA_CODE_ROOT belum diteruskan.
+    candidate = Replace(Trim$(Environ$("POKJA_V19_ROOT")), Chr(34), "") & "\..\Asisten_Pokja"
+    If Dir(candidate & "\muat_penawaran_pl.py") <> "" Then
+        AsistenCodeDirPL = candidate
+        Exit Function
+    End If
+
+    ' Default laptop/PC dengan layout lokal standar.
+    Dim localRoot As Variant
+    For Each localRoot In Array("D:\POKJA2026-Code\Asisten_Pokja", "C:\POKJA2026-Code\Asisten_Pokja")
+        candidate = CStr(localRoot)
+        If Dir(candidate & "\muat_penawaran_pl.py") <> "" Then
+            AsistenCodeDirPL = candidate
+            Exit Function
+        End If
+    Next localRoot
+
+    ' Tidak fallback ke source GDrive: cegah macro menjalankan kode lama.
+    AsistenCodeDirPL = ""
 End Function
 
 
