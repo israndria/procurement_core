@@ -28,11 +28,20 @@ from googleapiclient.discovery import build
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH     = os.path.join(BASE_DIR, 'database_tender.csv')
 LOG_PATH    = os.path.join(BASE_DIR, 'sync_log.txt')
-TOKEN_PATH  = os.path.join(BASE_DIR, 'token.json')
-CRED_PATH   = os.path.join(BASE_DIR, 'credentials.json')
+SECRET_ROOT = os.path.normpath(os.environ.get(
+    'POKJA_SECRET_ROOT', os.path.join(os.path.dirname(BASE_DIR), 'Secrets')
+))
+RUNTIME_ROOT = os.path.normpath(os.environ.get(
+    'POKJA_RUNTIME_ROOT',
+    os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~/AppData/Local')), 'POKJA2026', 'Asisten_Pokja'),
+))
+TOKEN_PATH  = os.path.join(RUNTIME_ROOT, 'state', 'token.json')
+CRED_PATH   = os.path.join(SECRET_ROOT, 'credentials.json')
 
 CALENDAR_ID = 'primary'
 SCOPES      = ['https://www.googleapis.com/auth/calendar']
+# LPSE Tapin memakai WITA (UTC+8), bukan WIB/Asia-Jakarta.
+CALENDAR_TIMEZONE = 'Asia/Makassar'
 
 BULAN_MAP = {
     'Januari':'01','Februari':'02','Maret':'03','April':'04',
@@ -397,8 +406,8 @@ def insert_events(service, df: pd.DataFrame, url: str, members: str, stage_histo
         evt = {
             'summary':     f"{row['Tahap']} - {row['Nama_Paket']}",
             'description': format_desc(url, row['Perubahan'], members, diff_info=stage_diff),
-            'start':       {'dateTime': ds.isoformat(), 'timeZone': 'Asia/Jakarta'},
-            'end':         {'dateTime': de.isoformat(), 'timeZone': 'Asia/Jakarta'},
+            'start':       {'dateTime': ds.isoformat(), 'timeZone': CALENDAR_TIMEZONE},
+            'end':         {'dateTime': de.isoformat(), 'timeZone': CALENDAR_TIMEZONE},
             'reminders':   get_reminders(row['Tahap']),
         }
         try:
