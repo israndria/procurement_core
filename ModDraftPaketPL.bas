@@ -243,10 +243,16 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         .Cells(PLR_NAMA_PEKERJAAN, 3).Value = CStr(item(1)) ' nama_paket
         .Cells(PLR_NAMA_SKPD, 3).Value  = CStr(item(2))     ' satker
         .Cells(PLR_SUB_KEGIATAN, 3).Value = CStr(item(22))  ' sub_kegiatan
-        .Cells(PLR_NAMA_PPK, 3).Value   = CStr(item(8))     ' nama_ppk
-
-        ' Lookup NIP + SK dari master_kpa berdasarkan nama PPK
+        ' Lookup nama resmi (dengan gelar), NIP + SK dari master_kpa.
+        ' SPSE sering mengirim nama PPK tanpa gelar; master_kpa menjadi lookup
+        ' terpusat agar hasil Excel konsisten dengan dokumen resmi.
         Dim kpaData As String: kpaData = LookupKPA(CStr(item(8)))
+        Dim kpaNama As String: kpaNama = ExtractJSONValPL(kpaData, "nama")
+        If kpaNama <> "" Then
+            .Cells(PLR_NAMA_PPK, 3).Value = kpaNama
+        Else
+            .Cells(PLR_NAMA_PPK, 3).Value = CStr(item(8))
+        End If
         Dim kpaNip As String: kpaNip = ExtractJSONValPL(kpaData, "nip")
         Dim kpaSK As String:  kpaSK  = ExtractJSONValPL(kpaData, "nomor_sk")
         Dim kpaTglSK As String: kpaTglSK = ExtractJSONValPL(kpaData, "tanggal_sk")
@@ -283,7 +289,7 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim hpsVal As String: hpsVal = CStr(item(4))
         If Left(hpsVal, 3) <> "Rp." Then hpsVal = "Rp. " & hpsVal
         .Cells(PLR_HPS, 3).Value = hpsVal
-        .Cells(PLR_LOKASI, 3).Value      = CStr(item(14))   ' lokasi
+        .Cells(PLR_LOKASI, 3).Value      = "Kabupaten Tapin"   ' lokasi hardcode
 
         ' Jangka waktu: extract angka pertama saja (handles "30 (Tiga Puluh) Hari Kalender")
         Dim jw As String: jw = Trim(CStr(item(12)))
@@ -2055,7 +2061,7 @@ End Function
 
 
 ' ============================================================
-' Lookup KPA (NIP + nomor SK + tanggal) dari master_kpa via nama
+' Lookup nama resmi + NIP + nomor SK + tanggal dari master_kpa via nama
 ' ============================================================
 Private Function LookupKPA(namaPPK As String) As String
     LookupKPA = ""
@@ -2070,7 +2076,7 @@ Private Function LookupKPA(namaPPK As String) As String
     ' ilike *namaClean*
     Dim q As String: q = Replace(namaClean, " ", "%20")
     Dim url As String
-    url = SB_URL & "/rest/v1/master_kpa?nama=ilike.*" & q & "*&select=nip,nomor_sk,tanggal_sk&limit=1"
+    url = SB_URL & "/rest/v1/master_kpa?nama=ilike.*" & q & "*&select=nama,nip,nomor_sk,tanggal_sk&limit=1"
     http.Open "GET", url, False
     http.SetRequestHeader "apikey", SB_KEY
     http.SetRequestHeader "Authorization", "Bearer " & SB_KEY

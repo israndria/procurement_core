@@ -18,7 +18,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ─── Load env Supabase ───────────────────────────────────────────────────────
 def _load_env():
-    env_file = os.path.join(BASE_DIR, "secret_supabase.env")
+    secret_root = os.path.normpath(os.environ.get(
+        "POKJA_SECRET_ROOT", os.path.join(os.path.dirname(BASE_DIR), "Secrets")
+    ))
+    env_file = os.path.join(secret_root, "secret_supabase.env")
     if os.path.exists(env_file):
         with open(env_file, encoding="utf-8") as f:
             for line in f:
@@ -188,15 +191,16 @@ def find_files_by_keywords(directory, keywords):
     if not os.path.isdir(directory): return found
     
     all_matching = []
-    for f in os.listdir(directory):
-        ext = f.lower().split(".")[-1]
+    for root, _dirs, files in os.walk(directory):
+      for name in files:
+        ext = name.lower().split(".")[-1]
         if ext not in ["pdf", "docx", "xlsx", "xlsm"]: continue
-        if any(kw.lower() in f.lower() for kw in keywords):
+        if any(kw.lower() in name.lower() for kw in keywords):
             priority = 0
             if ext in ["xlsx", "xlsm"]: priority = 3
             elif ext == "docx": priority = 2
             elif ext == "pdf": priority = 1
-            all_matching.append((priority, os.path.join(directory, f)))
+            all_matching.append((priority, os.path.join(root, name)))
             
     # Sort berdasarkan priority DESC
     all_matching.sort(key=lambda x: x[0], reverse=True)
@@ -688,10 +692,14 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
     }
 
     base_dir = path_or_dir if os.path.isdir(path_or_dir) else os.path.dirname(path_or_dir)
+    # Draft_Pokja berada di subfolder 0. Draft Dokumen PPK; naik ke root paket
+    # agar parser dapat memakai PDF Peralatan/Personil/Kuantitas yang tersedia.
+    if os.path.basename(os.path.normpath(base_dir)).lower() == "0. draft dokumen ppk":
+        base_dir = os.path.dirname(base_dir)
     file_map = {
         "alat": find_files_by_keywords(base_dir, ["Peralatan", "Alat"]),
         "personil": find_files_by_keywords(base_dir, ["Personil", "Tenaga"]),
-        "rk3k": find_files_by_keywords(base_dir, ["RK3K", "Keselamatan", "K3"]),
+        "rk3k": find_files_by_keywords(base_dir, ["RK3K", "SMKK", "Keselamatan", "K3"]),
         "dokpil": find_files_by_keywords(base_dir, ["Kuantitas", "BoQ", "RAB"]),
         "uraian": find_files_by_keywords(base_dir, ["Uraian Singkat", "KAK", "Spek"]),
         "merged": [path_or_dir] if os.path.isfile(path_or_dir) else find_files_by_keywords(base_dir, ["Draft_Pokja"]),
@@ -727,11 +735,11 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
         return False
 
     def _t1():
-        process_file(file_map["uraian"] + file_map["rks"] + file_map["merged"], _parse_fung_bangunan, hasil)
+        process_file(file_map["uraian"] or file_map["rks"] or file_map["merged"], _parse_fung_bangunan, hasil)
     def _t2():
-        process_file(file_map["alat"] + file_map["rks"] + file_map["merged"], _parse_peralatan, hasil)
+        process_file(file_map["alat"] or file_map["rks"] or file_map["merged"], _parse_peralatan, hasil)
     def _t3():
-        process_file(file_map["personil"] + file_map["rks"] + file_map["merged"], _parse_personil, hasil)
+        process_file(file_map["personil"] or file_map["rks"] or file_map["merged"], _parse_personil, hasil)
     def _t4():
         # RK3K: hanya dari file yang namanya eksplisit mengandung RK3K/K3/Keselamatan
         # JANGAN parse dari Draft_Pokja — tabel di Draft PDF tidak reliabel untuk K3
@@ -743,15 +751,19 @@ def parse_pdf_enhanced(path_or_dir, bidang=""):
             elif ext == "docx":
                 _parse_rk3k(f, hasil)
     def _t5():
-        process_file(file_map["dokpil"] + file_map["merged"], _parse_dokpil_uraian, hasil)
+        process_file(file_map["dokpil"] or file_map["merged"], _parse_dokpil_uraian, hasil)
 
-    with _cf.ThreadPoolExecutor(max_workers=5) as _pool:
+    # pdfplumber/PDF object tidak stabil saat beberapa file dibaca paralel
+    # pada workbook paket; serial lebih lambat sedikit tetapi mencegah hang.
+    with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
         for _fut in _cf.as_completed([_pool.submit(t) for t in [_t1, _t2, _t3, _t4, _t5]]):
             _fut.result()
 
     # 3. Common Fields (Input Data) dari SEMUA file (biasanya ada di RK3K atau KAK)
     # Gunakan _get_pdf_text() — cache hasil extract agar file tidak dibuka ulang
-    all_files = file_map["uraian"] + file_map["rks"] + file_map["rk3k"] + file_map["personil"] + file_map["merged"]
+    all_files = file_map["uraian"] + file_map["rk3k"] + file_map["personil"]
+    if not all_files:
+        all_files = file_map["merged"]
     for f in all_files:
         ext = f.lower().split(".")[-1]
         if ext == "pdf":
