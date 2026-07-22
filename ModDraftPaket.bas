@@ -397,33 +397,36 @@ End Sub
 
 Private Sub SetupTanggalBAReviuPanel(wsMD As Worksheet)
     On Error Resume Next
-    wsMD.Range("F14:I18").UnMerge
-    wsMD.Range("F14:I18").Interior.Pattern = xlNone
-    wsMD.Range("F14:I18").Font.Bold = False
+    wsMD.Range("F4:I8").UnMerge
+    wsMD.Range("F4:I8").Interior.Pattern = xlNone
+    wsMD.Range("F4:I8").Font.Bold = False
 
-    wsMD.Range("F14:I14").Merge
-    wsMD.Range("F14").Value = "INPUT TANGGAL BA REVIU DPP"
-    wsMD.Range("F14").Font.Bold = True
-    wsMD.Range("F14").Interior.Color = RGB(189, 215, 238)
+    wsMD.Range("F4:I4").Merge
+    wsMD.Range("F4").Value = "INPUT TANGGAL BA REVIU DPP"
+    wsMD.Range("F4").Font.Bold = True
+    wsMD.Range("F4").Interior.Color = RGB(189, 215, 238)
 
-    wsMD.Range("F15").Value = "Tanggal"
-    wsMD.Range("F16").Value = "Bulan"
-    wsMD.Range("F17").Value = "Tahun"
-    wsMD.Range("F18").Value = "Hari"
+    wsMD.Range("F5").Value = "Tanggal"
+    wsMD.Range("F6").Value = "Bulan"
+    wsMD.Range("F7").Value = "Tahun"
+    wsMD.Range("F8").Value = "Hari"
 
-    wsMD.Range("G15").Value = "angka 1-31"
-    wsMD.Range("G16").Value = "angka 1-12"
-    wsMD.Range("G17").Value = "tahun"
-    wsMD.Range("G18").Value = "otomatis"
+    wsMD.Range("G5").Value = "angka 1-31"
+    wsMD.Range("G6").Value = "angka 1-12"
+    wsMD.Range("G7").Value = "tahun"
+    wsMD.Range("G8").Value = "otomatis"
 
-    If Trim(CStr(wsMD.Range("H15").Value)) = "" Then wsMD.Range("H15").Value = Day(Date)
-    If Trim(CStr(wsMD.Range("H16").Value)) = "" Then wsMD.Range("H16").Value = Month(Date)
-    If Trim(CStr(wsMD.Range("H17").Value)) = "" Then wsMD.Range("H17").Value = Year(Date)
-    wsMD.Range("I17").Formula = "=DATE(H17,H16,H15)"
-    wsMD.Range("H18").Formula = "=CHOOSE(WEEKDAY(I17),""Minggu"",""Senin"",""Selasa"",""Rabu"",""Kamis"",""Jumat"",""Sabtu"")"
-    wsMD.Range("H15:H17").Interior.Color = RGB(255, 242, 204)
-    wsMD.Range("I17").NumberFormat = "dd mmmm yyyy"
-    wsMD.Range("F14:I18").Borders.LineStyle = xlContinuous
+    If Trim(CStr(wsMD.Range("H5").Value)) = "" Then wsMD.Range("H5").Value = Day(Date)
+    If Trim(CStr(wsMD.Range("H6").Value)) = "" Then wsMD.Range("H6").Value = Month(Date)
+    If Trim(CStr(wsMD.Range("H7").Value)) = "" Then wsMD.Range("H7").Value = Year(Date)
+    wsMD.Range("I5").Formula = "=CONCATENATE(H5,"" "",I6,"" "",H7)"
+    wsMD.Range("I6").Formula = "=IF(H6=1,""Januari"",IF(H6=2,""Februari"",IF(H6=3,""Maret"",IF(H6=4,""April"",IF(H6=5,""Mei"",IF(H6=6,""Juni"",IF(H6=7,""Juli"",IF(H6=8,""Agustus"",IF(H6=9,""September"",IF(H6=10,""Oktober"",IF(H6=11,""November"",IF(H6=12,""Desember"",""""))))))))))))"
+    wsMD.Range("I7").Formula = "=DATE(H7,H6,H5)"
+    wsMD.Range("H8").Formula = "=CHOOSE(WEEKDAY(I7),""Minggu"",""Senin"",""Selasa"",""Rabu"",""Kamis"",""Jumat"",""Sabtu"")"
+    wsMD.Range("H5:H7").Interior.Color = RGB(255, 242, 204)
+    wsMD.Range("H5:H7").NumberFormat = "0"
+    wsMD.Range("I7").NumberFormat = "dd mmmm yyyy"
+    wsMD.Range("F4:I8").Borders.LineStyle = xlContinuous
     On Error GoTo 0
 End Sub
 
@@ -457,11 +460,13 @@ Private Sub IsiTanggalBAReviuDariSupabase(wsMD As Worksheet, kodeTender As Strin
     y = CInt(Left(tglIso, 4))
     m = CInt(Mid(tglIso, 6, 2))
     d = CInt(Mid(tglIso, 9, 2))
-    wsMD.Range("H15").Value = d
-    wsMD.Range("H16").Value = m
-    wsMD.Range("H17").Value = y
-    wsMD.Range("I17").Formula = "=DATE(H17,H16,H15)"
-    wsMD.Range("H18").Formula = "=CHOOSE(WEEKDAY(I17),""Minggu"",""Senin"",""Selasa"",""Rabu"",""Kamis"",""Jumat"",""Sabtu"")"
+    wsMD.Range("H5").Value = d
+    wsMD.Range("H6").Value = m
+    wsMD.Range("H7").Value = y
+    wsMD.Range("I5").Formula = "=CONCATENATE(H5,"" "",I6,"" "",H7)"
+    wsMD.Range("I6").Formula = "=IF(H6=1,""Januari"",IF(H6=2,""Februari"",IF(H6=3,""Maret"",IF(H6=4,""April"",IF(H6=5,""Mei"",IF(H6=6,""Juni"",IF(H6=7,""Juli"",IF(H6=8,""Agustus"",IF(H6=9,""September"",IF(H6=10,""Oktober"",IF(H6=11,""November"",IF(H6=12,""Desember"",""""))))))))))))"
+    wsMD.Range("I7").Formula = "=DATE(H7,H6,H5)"
+    wsMD.Range("H8").Formula = "=CHOOSE(WEEKDAY(I7),""Minggu"",""Senin"",""Selasa"",""Rabu"",""Kamis"",""Jumat"",""Sabtu"")"
 SafeExit:
 End Sub
 

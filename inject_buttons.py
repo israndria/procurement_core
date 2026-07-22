@@ -231,34 +231,37 @@ def inject_buttons(filepath):
             except Exception:
                 pass
             try:
-                ws_md.Range("F14:I18").UnMerge()
-                ws_md.Range("F14:I18").Interior.Pattern = 0
-                ws_md.Range("F14:I18").Font.Bold = False
-                ws_md.Range("F14:I14").Merge()
-                ws_md.Range("F14").Value = "INPUT TANGGAL BA REVIU DPP"
-                ws_md.Range("F14").Font.Bold = True
-                ws_md.Range("F14").Interior.Color = 238 + (215 * 256) + (189 * 65536)
+                ws_md.Range("F4:I8").UnMerge()
+                ws_md.Range("F4:I8").Interior.Pattern = 0
+                ws_md.Range("F4:I8").Font.Bold = False
+                ws_md.Range("F4:I4").Merge()
+                ws_md.Range("F4").Value = "INPUT TANGGAL BA REVIU DPP"
+                ws_md.Range("F4").Font.Bold = True
+                ws_md.Range("F4").Interior.Color = 238 + (215 * 256) + (189 * 65536)
                 labels = [
-                    ("F15", "Tanggal", "G15", "angka 1-31"),
-                    ("F16", "Bulan", "G16", "angka 1-12"),
-                    ("F17", "Tahun", "G17", "tahun"),
-                    ("F18", "Hari", "G18", "otomatis"),
+                    ("F5", "Tanggal", "G5", "angka 1-31"),
+                    ("F6", "Bulan", "G6", "angka 1-12"),
+                    ("F7", "Tahun", "G7", "tahun"),
+                    ("F8", "Hari", "G8", "otomatis"),
                 ]
                 for a, v, b, h in labels:
                     ws_md.Range(a).Value = v
                     ws_md.Range(b).Value = h
-                if not str(ws_md.Range("H15").Value or "").strip():
-                    ws_md.Range("H15").Value = 1
-                if not str(ws_md.Range("H16").Value or "").strip():
-                    ws_md.Range("H16").Value = 1
-                if not str(ws_md.Range("H17").Value or "").strip():
-                    ws_md.Range("H17").Value = 2026
-                ws_md.Range("I17").Formula = "=DATE(H17,H16,H15)"
-                ws_md.Range("H18").Formula = '=CHOOSE(WEEKDAY(I17),"Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu")'
-                ws_md.Range("H15:H17").Interior.Color = 204 + (242 * 256) + (255 * 65536)
-                ws_md.Range("I17").NumberFormat = "dd mmmm yyyy"
-                ws_md.Range("F14:I18").Borders.LineStyle = 1
-                print("    [OK] Panel tanggal BA Reviu DPP -> @ Master Data!F14:I18")
+                if not str(ws_md.Range("H5").Value or "").strip():
+                    ws_md.Range("H5").Value = 1
+                if not str(ws_md.Range("H6").Value or "").strip():
+                    ws_md.Range("H6").Value = 1
+                if not str(ws_md.Range("H7").Value or "").strip():
+                    ws_md.Range("H7").Value = 2026
+                ws_md.Range("I5").Formula = '=CONCATENATE(H5," ",I6," ",H7)'
+                ws_md.Range("I6").Formula = '=IF(H6=1,"Januari",IF(H6=2,"Februari",IF(H6=3,"Maret",IF(H6=4,"April",IF(H6=5,"Mei",IF(H6=6,"Juni",IF(H6=7,"Juli",IF(H6=8,"Agustus",IF(H6=9,"September",IF(H6=10,"Oktober",IF(H6=11,"November",IF(H6=12,"Desember",""))))))))))))'
+                ws_md.Range("I7").Formula = "=DATE(H7,H6,H5)"
+                ws_md.Range("H8").Formula = '=CHOOSE(WEEKDAY(I7),"Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu")'
+                ws_md.Range("H5:H7").Interior.Color = 204 + (242 * 256) + (255 * 65536)
+                ws_md.Range("H5:H7").NumberFormat = "0"
+                ws_md.Range("I7").NumberFormat = "dd mmmm yyyy"
+                ws_md.Range("F4:I8").Borders.LineStyle = 1
+                print("    [OK] Panel tanggal BA Reviu DPP -> @ Master Data!F4:I8")
             except Exception as e:
                 print(f"    [WARN] Panel tanggal BA Reviu: {e}")
             # Hapus tombol lama
