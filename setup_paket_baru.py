@@ -222,6 +222,23 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
         else:
             print(f"  [FAIL] {wf_dst}")
 
+    # Scrub data donor setelah template disalin dan mail merge terhubung.
+    # Hanya Tender PK memakai scrub ini; PL punya struktur workbook berbeda.
+    if is_tender and os.path.exists(dst_excel):
+        try:
+            from template_scrub import scrub_package_copy
+
+            scrub_log = scrub_package_copy(
+                target_dir,
+                dst_excel,
+                [item[0] for item in dst_word_map],
+            )
+            print("\n[4/4] Scrub data donor...")
+            for line in scrub_log:
+                print(f"  {line}")
+        except Exception as exc:
+            print(f"  [WARN] Scrub template gagal: {exc}")
+
     print(f"\n{'='*60}")
     print(f"  SETUP SELESAI!")
     print(f"{'='*60}")
