@@ -121,12 +121,18 @@ def setup_sheet_input_ba(filepath):
 
         print("  [OK] Layout sheet '0. Input BA' selesai")
 
+        # Slot alat kosong harus benar-benar blank. Referensi langsung ke
+        # database_reviu mengubah sel kosong menjadi 0 sehingga BA menulis
+        # "3. 0 0 (0)" dan seterusnya.
+        _update_equipment_formulas(ws)
+
         # ── 3. Update referensi di sheet BA ─────────────────────────
         _update_sheet3(wb)
         _update_sheet5(wb)
         _update_sheet6(wb)
         _update_sheet7(wb)
         _update_sheet9(wb)
+        _update_nego_rounding(wb)
 
         # Hide sheet BA (opsional — biarkan visible dulu untuk verifikasi)
         # for sn in ["3. BA Pembukaan Penawaran","5. BA Pembuktian Kualifikasi",
@@ -175,6 +181,50 @@ def _update_sheet3(wb):
         print("  [OK] Sheet 3 updated (tanggal + jumlah dok)")
     except Exception as e:
         print(f"  [WARN] Sheet 3: {e}")
+
+
+def _update_equipment_formulas(ws):
+    """Isi G17:G22 hanya jika nama/kapasitas/jumlah alat benar-benar ada."""
+    for i in range(6):
+        row = 17 + i
+        src = 9 + i
+        ws.Cells(row, 7).Formula = (
+            f'=IF(AND(OR(database_reviu!E{src}="",database_reviu!E{src}=0),'
+            f'OR(database_reviu!E{src + 6}="",database_reviu!E{src + 6}=0),'
+            f'OR(database_reviu!E{src + 12}="",database_reviu!E{src + 12}=0)),"",'
+            f'database_reviu!E{src}&", "&database_reviu!E{src + 6}&'
+            f'" ("&database_reviu!E{src + 12}&")")'
+        )
+        # Q adalah item bernomor yang dirangkai ke H17. Dasarkan keberadaan
+        # item pada G saja; kolom J berisi koma separator template sehingga
+        # pengecekan G&J lama menghasilkan "3. " untuk slot kosong.
+        ws.Cells(row, 17).Formula = (
+            f'=IF(TRIM(G{row})="","",'
+            f'SUBSTITUTE(UPPER(P{row}&". "&O{row}&G{row}&J{row}),",",""))'
+        )
+
+
+def _update_nego_rounding(wb):
+    """Pertahankan nilai nego tepat ribuan; bulatkan hanya bila perlu."""
+    try:
+        ws = wb.Sheets("7.2 Dengan Nego")
+        ws.Unprotect()
+        ws.Range("P23").Formula = (
+            "=IF(MOD(ROUND(P22,0),1000)=0,ROUND(P22,0),"
+            "ROUNDDOWN(ROUND(P22,0),-3))"
+        )
+        try:
+            ws_hs = wb.Sheets("7. BA Klarifikasi HS")
+            ws_hs.Unprotect()
+            ws_hs.Range("G59").Formula = (
+                "=IF(MOD(ROUND(G58,0),1000)=0,ROUND(G58,0),"
+                "ROUNDDOWN(ROUND(G58,0),-3))"
+            )
+        except Exception:
+            pass
+        print("  [OK] Rumus pembulatan nego diperbarui")
+    except Exception as e:
+        print(f"  [WARN] Rumus pembulatan nego: {e}")
 
 
 def _update_sheet5(wb):

@@ -317,6 +317,16 @@ def _protect_signature_layout(wdDoc):
                 paragraph = paragraphs(j)
                 paragraph.Range.ParagraphFormat.KeepTogether = True
                 paragraph.Range.ParagraphFormat.KeepWithNext = j < paragraphs.Count
+
+            # Blok tanda tangan yang ditempatkan di sisa ruang halaman sering
+            # membuat baris terakhir (biasanya anggota Pokja terakhir atau
+            # direktur) terdorong ke halaman berikutnya.  Jangan hanya
+            # mengunci baris; mulai blok pada halaman baru agar seluruh blok
+            # tetap utuh dalam satu halaman.
+            # Jangan sisipkan page break manual. Word sudah mampu memindahkan
+            # blok ke halaman berikutnya; page break tambahan dapat membuat
+            # halaman header-only. Proteksi row/paragraph di atas cukup untuk
+            # mencegah tanda tangan terbelah.
         except Exception:
             pass
 
@@ -565,6 +575,15 @@ def _build_bapljkk_final_pdf(wd_doc, folder, kode):
 def merge_word(word_path, data, mode="buka", pdf_name=""):
     import pythoncom
     import win32com.client
+    import glob as _glob_excel
+
+    # `merge_word()` juga dipanggil langsung oleh beberapa workflow, bukan
+    # hanya melalui CLI yang kebetulan memiliki variabel global excel_path.
+    # Resolve workbook dari folder Word agar export sheet BA selalu deterministik.
+    _excel_candidates = sorted(_glob_excel.glob(
+        os.path.join(os.path.dirname(os.path.abspath(word_path)), "*.xlsm")
+    ))
+    excel_path = _excel_candidates[0] if _excel_candidates else ""
 
     # Mode bapljkk: copy template -> (Merged), replace MERGEFIELD dari Excel, baru export.
     # (sebelumnya buka ReadOnly tanpa merge -> PDF tampil cached hasil merge lama/template)
@@ -765,6 +784,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
 
         _replace_merge_fields(wdDoc, data)
         _trim_blank_participant_rows(wdDoc)
+        _protect_signature_layout(wdDoc)
 
         # Cleanup blank pages untuk file BA utama (satu_data) yang multi-section.
         # File "2. Isi Reviu" & "3. Dokpil" dikecualikan (struktur beda, bisa berantakan).
