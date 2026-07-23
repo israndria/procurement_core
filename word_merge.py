@@ -176,6 +176,214 @@ def _trim_blank_participant_rows(wdDoc):
         pass
 
 
+def _dokpil_personnel_value(data, field_name, slot):
+    """Ambil field Personil N dari data list_dokpil secara toleran."""
+    base = f"{field_name}_{slot}"
+    for key in (base, normalize_field_name(base)):
+        if key in data:
+            value = data[key]
+            if value is None:
+                return ""
+            value = format_value(value)
+            return "" if value in ("", "0", "0.0", "None", "null") else value
+    return ""
+
+
+def _prepare_dokpil_personnel_table(wdDoc, data):
+    """Sesuaikan jumlah row tenaga ahli Dokpil dengan slot Personil aktif.
+
+    Template Dokpil lama hanya menyimpan row Personil 1. Fungsi ini mencari
+    tabel persyaratan teknis, meng-clone row tersebut untuk slot 2/3 yang
+    terisi, mengganti kode MERGEFIELD pada row clone, dan menghapus row
+    personel ekstra bila paket hanya memiliki satu/dua tenaga ahli.
+    """
+    try:
+        active_slots = []
+        for slot in range(1, 4):
+            fields = (
+                "Jabatan_Personil", "Pengalaman_Kerja_Personil",
+                "Sertifikat_Personil", "Minimal_Orang",
+            )
+            if any(_dokpil_personnel_value(data, name, slot) for name in fields):
+                active_slots.append(slot)
+        if not active_slots:
+            return
+        print(f"Dokpil active personnel slots: {active_slots}")
+
+        target = None
+        source_row = None
+        field_rows = {}
+        for ti in range(1, wdDoc.Tables.Count + 1):
+            table = wdDoc.Tables(ti)
+            text = table.Range.Text.upper()
+            if "JABATAN DALAM PEKERJAAN" not in text or "SERTIFIKAT KOMPETENSI" not in text:
+                continue
+            # Jangan enumerasi table.Rows: header Dokpil memakai vertically
+            # merged cells dan Word COM melempar error pada baris tertentu.
+            for fi in range(1, table.Range.Fields.Count + 1):
+                field = table.Range.Fields(fi)
+                code = field.Code.Text.upper()
+                match = re.search(r"PERSONIL_(\d+)", code)
+                if not match:
+                    continue
+                try:
+                    row_index = field.Result.Cells(1).RowIndex
+                except Exception:
+                    continue
+                field_rows.setdefault(int(match.group(1)), set()).add(row_index)
+            if 1 in field_rows:
+                target = table
+                source_row = table.Rows(next(iter(field_rows[1])))
+            if target is not None:
+                break
+        if target is None or source_row is None:
+            print("Warning dynamic Dokpil personnel row: target table/Personil 1 field tidak ditemukan")
+            return
+
+        # Hapus row tenaga ahli yang sudah ada tetapi tidak dipakai.
+        existing_slots = set(field_rows)
+        for slot in sorted(set(field_rows) - set(active_slots), reverse=True):
+            for row_index in sorted(field_rows[slot], reverse=True):
+                try:
+                    target.Rows(row_index).Delete()
+                except Exception:
+                    pass
+            existing_slots.discard(slot)
+
+        # Row sumber dapat bergeser setelah penghapusan; ambil ulang dari
+        # field Personil 1 yang masih ada.
+        for fi in range(1, target.Range.Fields.Count + 1):
+            field = target.Range.Fields(fi)
+            if "PERSONIL_1" in field.Code.Text.upper():
+                source_row = target.Rows(field.Result.Cells(1).RowIndex)
+                break
+        if source_row is None:
+            print("Warning dynamic Dokpil personnel row: source row hilang setelah cleanup")
+            return
+
+        # Clone row Personil 1 untuk setiap slot yang belum ada.
+        for slot in active_slots:
+            if slot == 1 or slot in existing_slots:
+                continue
+            source_row.Range.Copy()
+            new_row = target.Rows.Add()
+            new_row.Range.Paste()
+            for fi in range(new_row.Range.Fields.Count, 0, -1):
+                field = new_row.Range.Fields(fi)
+                code = field.Code.Text
+                if "PERSONIL_1" in code:
+                    field.Code.Text = code.replace("PERSONIL_1", f"PERSONIL_{slot}")
+            cell_rng = new_row.Cells(1).Range
+            cell_rng.End = cell_rng.End - 1  # pertahankan end-of-cell marker
+            cell_rng.Text = f"{slot}."
+            existing_slots.add(slot)
+        print(f"Dokpil personnel table ready: {len(active_slots)} row(s)")
+    except Exception as exc:
+        # Dokpil tetap boleh dicetak dengan template asli bila Word menolak
+        # operasi row/clipboard pada versi Office tertentu.
+        import traceback
+        print(f"Warning dynamic Dokpil personnel row: {exc}")
+        traceback.print_exc()
+
+
+def _prepare_dokpil_personnel_docx(docx_path, data):
+    """Clone row tenaga ahli pada XML DOCX sebelum Word membukanya.
+
+    Template Dokpil memakai vertically merged cells sehingga Word COM tidak
+    dapat mengakses ``Rows(n)`` secara konsisten. XML DOCX tetap deterministik:
+    row yang berisi MERGEFIELD Jabatan_Personil_1 dicopy untuk slot aktif 2/3.
+    Hanya file (Merged) sementara yang diubah; template asli aman.
+    """
+    import copy as _copy
+    import zipfile
+    from lxml import etree as LET
+
+    active_slots = []
+    for slot in range(1, 4):
+        if any(_dokpil_personnel_value(data, name, slot) for name in (
+            "Jabatan_Personil", "Pengalaman_Kerja_Personil",
+            "Sertifikat_Personil", "Minimal_Orang",
+        )):
+            active_slots.append(slot)
+    if len(active_slots) <= 1:
+        return
+
+    ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    with zipfile.ZipFile(docx_path, "r") as zin:
+        names = zin.namelist()
+        if "word/document.xml" not in names:
+            return
+        root = LET.fromstring(zin.read("word/document.xml"))
+
+        source = None
+        parent = None
+        # Ada outer row yang membungkus nested table header+data. Pilih row
+        # terdalam (tepat satu w:tr di dalamnya), yaitu row data sebenarnya.
+        candidates = []
+        parent_map = {child: p for p in root.iter() for child in list(p)}
+        for candidate in root.iter(ns + "tr"):
+            text = "".join(t.text or "" for t in candidate.iter() if t.tag in (ns + "t", ns + "instrText"))
+            if "JABATAN_PERSONIL_1" not in text.upper():
+                continue
+            nested_rows = list(candidate.iter(ns + "tr"))
+            candidates.append((len(nested_rows), candidate))
+        if candidates:
+            _, source = min(candidates, key=lambda item: item[0])
+            parent = parent_map.get(source)
+        if source is None or parent is None:
+            return
+
+        rows = [child for child in list(parent) if child.tag == ns + "tr"]
+        # Hapus clone personel yang tidak dipakai, bila template sudah pernah
+        # diproses sebelumnya.
+        for row in rows:
+            text = "".join(t.text or "" for t in row.iter() if t.tag in (ns + "t", ns + "instrText"))
+            match = re.search(r"PERSONIL_(\d+)", text.upper())
+            if match and int(match.group(1)) not in active_slots:
+                parent.remove(row)
+
+        # Refresh posisi source setelah penghapusan.
+        source_index = list(parent).index(source)
+        existing = set()
+        for row in list(parent):
+            if row.tag != ns + "tr":
+                continue
+            text = "".join(t.text or "" for t in row.iter() if t.tag in (ns + "t", ns + "instrText"))
+            for match in re.finditer(r"PERSONIL_(\d+)", text.upper()):
+                existing.add(int(match.group(1)))
+
+        insert_at = source_index + 1
+        for slot in active_slots:
+            if slot == 1 or slot in existing:
+                continue
+            clone = _copy.deepcopy(source)
+            for node in clone.iter():
+                if node.tag not in (ns + "t", ns + "instrText") or not node.text:
+                    continue
+                node.text = re.sub(
+                    r"(?i)(Jabatan|Pengalaman_Kerja|Sertifikat|Minimal_Orang|Personil)_1",
+                    lambda match: match.group(0)[:-1] + str(slot),
+                    node.text,
+                )
+            cells = [c for c in clone if c.tag == ns + "tc"]
+            if cells:
+                for node in cells[0].iter():
+                    if node.tag == ns + "t" and (node.text or "").strip() in ("1.", "1"):
+                        node.text = node.text.replace("1", str(slot), 1)
+                        break
+            parent.insert(insert_at, clone)
+            insert_at += 1
+            existing.add(slot)
+
+        new_xml = LET.tostring(root, encoding="UTF-8", xml_declaration=True, standalone=True)
+        tmp = docx_path + ".tmp"
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+            for name in names:
+                zout.writestr(name, new_xml if name == "word/document.xml" else zin.read(name))
+    os.replace(tmp, docx_path)
+    print(f"Dokpil personnel XML ready: {len(active_slots)} row(s)")
+
+
 def cleanup_blank_pages(doc):
     # Metode Ringan & Cepat: Shrink paragraf kosong di seluruh dokumen (tanpa batas halaman).
     try:
@@ -774,6 +982,9 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         wdApp.DisplayAlerts = 0
         wdApp.Visible = False
 
+        if mode == "pdf_dokpil":
+            _prepare_dokpil_personnel_docx(copy_path, data)
+
         wdDoc = wdApp.Documents.Open(
             FileName=copy_path,
             ConfirmConversions=False,
@@ -782,6 +993,9 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             Visible=False
         )
 
+        # Dokpil memiliki tabel personel dinamis. Bentuk row terlebih dahulu
+        # saat field masih berupa MERGEFIELD; setelah di-unlink field clone
+        # tidak lagi bisa diarahkan ke Personil 2/3.
         _replace_merge_fields(wdDoc, data)
         _trim_blank_participant_rows(wdDoc)
         _protect_signature_layout(wdDoc)
