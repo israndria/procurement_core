@@ -162,8 +162,8 @@ def inject_buttons(filepath):
 
         # --- @ Master Data: tombol di KANAN data, di bawah border "Dokumen Pemilihan" ---
         # "Dokumen Pemilihan" selalu di row 20, border selesai row 23.
-        # Tombol mulai row 26 (2 baris gap setelah border) — konsisten semua paket.
-        # Kolom J (col 10) ke kanan — area kosong di semua paket.
+        # Tombol diposisikan di area kanan panel Master Data; posisi vertikal
+        # mengikuti layout final (baris visual 248, 284, ..., 413.5).
         # Baris 1 (yi=0): BukaBA PK | Print BA Reviu | — | —
         # Baris 2 (yi=1): PrintPembuktian | REvaluasi | — | —
         # Baris 3 (yi=2): PrintTimpang | MuatDraft | ParseDraft | KodeUnik
@@ -173,11 +173,12 @@ def inject_buttons(filepath):
         # Baris 7 (yi=6): GabungBAReviu | RefreshDataTender | — | —
         _ws_md_anchor = wb.Sheets("@ Master Data")
         _AX = _ws_md_anchor.Cells(28, 6).Left + 14  # col F row 28 + 5mm kanan
-        _AY = _ws_md_anchor.Rows(28).Top + 7        # row 28 + 2.5mm bawah
+        _AY = 248.0
         _BW = 120.0    # button width
         _BH = 27.1     # button height
         _GX = 5.0      # gap horizontal antar tombol
-        _GY = 31.0     # gap vertikal antar baris
+        _GY = 31.0     # fallback gap vertikal
+        _TOPS = (248.0, 284.0, 318.0, 351.5, 382.5, 413.5)
         print(f"  Anchor: F28 Left={_AX:.1f}, row 28 Top={_AY:.1f}")
 
         master_data_btns = [
@@ -208,7 +209,7 @@ def inject_buttons(filepath):
 
         def _add_master_btn(ws_md, name, label, macro, yi, xi, color):
             left = _AX + xi * (_BW + _GX)
-            top  = _AY + yi * _GY
+            top  = _TOPS[yi] if yi < len(_TOPS) else _AY + yi * _GY
             shp  = ws_md.Shapes.AddShape(5, left, top, _BW, _BH)
             shp.Name = name
             r, g, b = color

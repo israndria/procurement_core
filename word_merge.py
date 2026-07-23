@@ -81,8 +81,13 @@ def read_excel_data(excel_path, sheet_name):
         for header, value in zip(headers, values):
             if header:
                 header = str(header).strip()
-                val = format_value(value)
                 normalized = normalize_field_name(header)
+                val = format_value(value)
+                # Formula Excel untuk slot peserta yang tidak terisi sering
+                # menghasilkan angka 0. Untuk Word, slot kosong harus benar-
+                # benar kosong agar baris peserta tidak tampil sebagai "0".
+                if (normalized.startswith("Peserta_") or normalized.startswith("Alamat_")) and val == "0":
+                    val = ""
                 # nomori per nama-ternormalisasi (sesuai perilaku Word data source):
                 # occurrence pertama = nama polos, ke-2 dst = suffix 1,2,...
                 # pakai setdefault agar occurrence PERTAMA menang (match Word base).
@@ -96,6 +101,8 @@ def read_excel_data(excel_path, sheet_name):
                     if header != normalized:
                         data.setdefault(f"{header}{n}", val)
                 seen[normalized] = n + 1
+        if sheet_name == "satu_data":
+            _augment_ba_counts(data, temp_path)
     except Exception as e:
         show_error(f"Error baca Excel:\n{e}")
         return None
@@ -107,6 +114,66 @@ def read_excel_data(excel_path, sheet_name):
             pass
 
     return data
+
+
+def _set_data_aliases(data, field_name, value):
+    """Set nama field asli + nama hasil normalisasi Word mail merge."""
+    data[field_name] = value
+    data[normalize_field_name(field_name)] = value
+
+
+def _angka_kata(n):
+    angka = {
+        0: "Nol", 1: "Satu", 2: "Dua", 3: "Tiga", 4: "Empat",
+        5: "Lima", 6: "Enam", 7: "Tujuh", 8: "Delapan", 9: "Sembilan",
+    }
+    return angka.get(int(n), str(int(n)))
+
+
+def _augment_ba_counts(data, excel_copy_path):
+    """Ambil hitungan BA dari Sheet 0 Input BA, bukan cache satu_data."""
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(excel_copy_path, read_only=True, data_only=True, keep_links=False)
+        if "0. Input BA" not in wb.sheetnames:
+            wb.close()
+            return
+        ws = wb["0. Input BA"]
+        total = int(ws["C25"].value or 0)
+        openable = int(ws["C26"].value or 0)
+        incomplete = int(ws["C28"].value or 0)
+        unreadable = int(ws["C29"].value or 0)
+        complete = max(total - incomplete, 0)
+        values = {
+            "Ket 1": f"Terdapat jumlah dokumen penawaran keseluruhan sebanyak {total} ({_angka_kata(total)}) buah;",
+            "Ket 2 a": f"Jumlah dokumen penawaran yang lengkap sebanyak {complete} ({_angka_kata(complete)}) buah;",
+            "Ket 2 b": f"Jumlah dokumen penawaran yang tidak lengkap sebanyak {incomplete} ({_angka_kata(incomplete)}) buah;",
+            "Ket 3 a": f"Jumlah dokumen penawaran yang dapat dibuka sebanyak {openable} ({_angka_kata(openable)}) buah;",
+            "Ket 3 b": f"Jumlah dokumen penawaran yang tidak dapat dibuka sebanyak {unreadable} ({_angka_kata(unreadable)}) buah;",
+        }
+        for key, value in values.items():
+            _set_data_aliases(data, key, value)
+        wb.close()
+    except Exception:
+        pass
+
+
+def _trim_blank_participant_rows(wdDoc):
+    """Hapus baris peserta kosong dari tabel ringkasan BA Pembuktian."""
+    try:
+        for i in range(1, wdDoc.Tables.Count + 1):
+            table = wdDoc.Tables(i)
+            table_text = table.Range.Text.upper()
+            if "NAMA PESERTA" not in table_text or "KETERANGAN" not in table_text:
+                continue
+            for r in range(table.Rows.Count, 1, -1):
+                row = table.Rows(r)
+                first = row.Cells(1).Range.Text.replace("\r", "").replace("\a", "").strip()
+                second = row.Cells(2).Range.Text.replace("\r", "").replace("\a", "").strip()
+                if re.fullmatch(r"[23]\.?", first) and (not second or second == "0"):
+                    row.Delete()
+    except Exception:
+        pass
 
 
 def cleanup_blank_pages(doc):
@@ -229,7 +296,9 @@ def _protect_signature_layout(wdDoc):
         try:
             table = wdDoc.Tables(i)
             text = table.Range.Text.upper()
-            if "DIREKTUR/PIMPINAN" not in text:
+            if not any(marker in text for marker in (
+                "DIREKTUR/PIMPINAN", "KELOMPOK KERJA PEMILIHAN"
+            )):
                 continue
 
             # Nama tenaga ahli/pimpinan bisa membuat blok ini tinggi. Jangan
@@ -523,6 +592,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             # re-merge field dari data Excel (satu_data) -> PDF selalu fresh
             if data:
                 _replace_merge_fields(wdDoc, data)
+                _trim_blank_participant_rows(wdDoc)
                 _protect_signature_layout(wdDoc)
                 wdDoc.Save()
             if mode == "pdf_bapljkk":
@@ -694,6 +764,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         )
 
         _replace_merge_fields(wdDoc, data)
+        _trim_blank_participant_rows(wdDoc)
 
         # Cleanup blank pages untuk file BA utama (satu_data) yang multi-section.
         # File "2. Isi Reviu" & "3. Dokpil" dikecualikan (struktur beda, bisa berantakan).

@@ -98,9 +98,9 @@ Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, stat
     If wordFile = "" Then Exit Sub
 
     ' Tentukan apakah mode ini mendukung printer langsung
-    ' Mode kompleks (pembuktian) hanya PDF karena butuh stitching multi-source
+    ' Pembuktian juga boleh dikirim ke printer; word_merge menangani stitching multi-source.
     Dim supportsPrinter As Boolean
-    supportsPrinter = (mode <> "pdf_pembuktian" And mode <> "pdf_pembuktian_timpang")
+    supportsPrinter = (mode <> "pdf_pembuktian_timpang")
 
     ' Tanya user: PDF atau Printer?
     Dim outputMode As String
