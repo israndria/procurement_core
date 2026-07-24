@@ -374,7 +374,6 @@ Private Function ScriptDir() As String
         If pos <= 3 Then Exit For
         folder = Left(folder, pos - 1)
     Next i
-
     Dim localRoot As Variant
     For Each localRoot In Array("D:\POKJA2026-Code\procurement_core", "C:\POKJA2026-Code\procurement_core")
         If Dir(CStr(localRoot) & "\word_merge.py") <> "" Then
@@ -384,6 +383,8 @@ Private Function ScriptDir() As String
     Next localRoot
     MsgBox "Source procurement_core lokal tidak ditemukan." & vbCrLf & _
            "Set POKJA_V19_ROOT ke clone kode di luar Google Drive.", vbCritical
+    MsgBox "Source Python/procurement_core lokal tidak ditemukan." & vbCrLf & _
+           "Periksa POKJA_V19_ROOT, POKJA_PYTHON, atau folder clone lokal.", vbCritical
     ScriptDir = ""
 End Function
 
