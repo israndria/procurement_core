@@ -348,14 +348,26 @@ Private Function FindWordFile(pattern As String) As String
 End Function
 
 Private Function ScriptDir() As String
-    ' Naik folder sampai ketemu V19_Scheduler (support subfolder dalam berapa pun)
+    ' Source/runtime lokal per-PC. Workbook tetap berada di Google Drive.
+    Dim configuredRoot As String
+    configuredRoot = EnvValueWordLink("POKJA_V19_ROOT")
+    If configuredRoot <> "" Then
+        If Dir(configuredRoot & "\word_merge.py") <> "" Then
+            ScriptDir = configuredRoot
+            Exit Function
+        End If
+    End If
+
+    ' Fallback kompatibilitas setup lama: cari V19 di folder paket/induk.
     Dim folder As String
     folder = ThisWorkbook.Path
     Dim i As Integer
     For i = 1 To 10
         If Dir(folder & "\V19_Scheduler\WPy64-313110\python\python.exe") <> "" Then
-            ScriptDir = folder & "\V19_Scheduler\WPy64-313110"
-            Exit Function
+            If Dir(folder & "\V19_Scheduler\WPy64-313110\word_merge.py") <> "" Then
+                ScriptDir = folder & "\V19_Scheduler\WPy64-313110"
+                Exit Function
+            End If
         End If
         ' Naik 1 level
         Dim pos As Long
@@ -363,12 +375,44 @@ Private Function ScriptDir() As String
         If pos <= 3 Then Exit For
         folder = Left(folder, pos - 1)
     Next i
-    MsgBox "Python tidak ditemukan!" & vbCrLf & "Pastikan folder V19_Scheduler ada di dalam @ POKJA 2026", vbCritical
+    MsgBox "Source Python tidak ditemukan!" & vbCrLf & _
+           "Periksa POKJA_V19_ROOT atau folder V19_Scheduler.", vbCritical
     ScriptDir = ""
 End Function
 
 Private Function PyExe() As String
-    PyExe = ScriptDir() & "\python\pythonw.exe"
+    Dim configured As String
+    configured = EnvValueWordLink("POKJA_PYTHON")
+    If configured <> "" Then
+        If Dir(configured) <> "" Then
+            PyExe = configured
+            Exit Function
+        End If
+    End If
+
+    Dim resolvedDir As String
+    resolvedDir = ScriptDir()
+    If resolvedDir <> "" Then
+        If Dir(resolvedDir & "\python\python.exe") <> "" Then
+            PyExe = resolvedDir & "\python\python.exe"
+            Exit Function
+        End If
+        If Dir(resolvedDir & "\python\pythonw.exe") <> "" Then
+            PyExe = resolvedDir & "\python\pythonw.exe"
+            Exit Function
+        End If
+    End If
+    PyExe = ""
+End Function
+
+Private Function EnvValueWordLink(ByVal name As String) As String
+    Dim wsh As Object
+    Set wsh = CreateObject("WScript.Shell")
+    On Error Resume Next
+    EnvValueWordLink = Trim$(wsh.Environment("Process")(name))
+    If EnvValueWordLink = "" Then EnvValueWordLink = Trim$(wsh.Environment("User")(name))
+    On Error GoTo 0
+    Set wsh = Nothing
 End Function
 
 ' Public wrapper agar Workbook_Open bisa akses ScriptDir
