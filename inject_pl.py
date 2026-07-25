@@ -42,7 +42,9 @@ def inject_pl(filepath: str):
     content = BAS_FILE.read_text(encoding="utf-8")
     if "%%SUPABASE_URL%%" in content or "%%SUPABASE_KEY%%" in content:
         from dotenv import load_dotenv
-        env_path = SCRIPT_DIR / "secret_supabase.env"
+        env_path = Path(os.environ.get(
+            "POKJA_SECRET_ROOT", str(SCRIPT_DIR.parent / "Secrets")
+        )) / "secret_supabase.env"
         load_dotenv(env_path)
         sb_url = os.environ.get("SUPABASE_URL", "").strip('"')
         sb_key = os.environ.get("SUPABASE_KEY", "").strip('"')
@@ -150,20 +152,55 @@ def inject_pl(filepath: str):
             PURPLE  = (102, 51, 153)
             TEAL    = (0, 128, 128)
 
-            # Posisi absolut — diukur dari layout paket 1 (@ Master Data) setelah user rapikan
-            # Baris 0 (Top=181.4): BukaDokpil | RelinkWord | RefreshDataPL | (kosong)
-            # Baris 1 (Top=212.4): BukaBA | BukaReviu | SyncDraft | ClearHighlight
-            # Baris 2 (Top=243.0): CetakBAReviu | CetakDokpil | (kosong) | (kosong)
-            # Baris 3 (Top=274.9): CetakIsiReviu | GabungReviu | MuatHPS | IsiEvaluasiPL
-            # Baris 4 (Top=305.4): CetakBAPLJKK (col 0)
-            _X = [641.8, 776.9, 911.3, 1046.4]           # Left per kolom 0-3
-            _W = [130.1, 129.9, 130.1, 130.4]             # Width per kolom 0-3
-            _Y = [181.4, 212.4, 243.0, 274.9, 305.4]      # Top per baris 0-4
-            _BTN_H = 27.4
+            # Layout tombol disimpan eksplisit agar injector tidak mengembalikan
+            # tombol ke layout JKK saat workbook PLPK di-inject ulang.
+            # Deteksi berdasarkan struktur @ Master Data, bukan nama file/folder.
+            is_pk = str(ws.Cells(76, 1).Value or '').strip() == '5. DATA PESERTA'
+            if is_pk:
+                # Baseline manual PLPK (diaudit 2026-07-25 dari template user).
+                # Setiap tuple: (Left, Top, Width, Height).
+                button_geometry = {
+                    'btnBukaDokpil_PL':   (655.2, 260.0, 130.2, 40.0),
+                    'btnRelinkPL':         (790.5, 260.0, 129.9, 40.0),
+                    'btnRefreshDataPL':   (924.9, 260.0, 130.1, 40.0),
+                    'btnBukaBA_PL':       (655.2, 303.5, 130.2, 27.4),
+                    'btnBukaReviu_PL':    (790.5, 303.5, 129.9, 27.4),
+                    'btnIsiEvaluasiPL':   (925.0, 303.6, 129.9, 27.4),
+                    'btnCetakBAReviu_PL': (655.2, 333.9, 130.2, 27.5),
+                    'btnCetakDokpil_PL':  (790.5, 333.9, 129.9, 27.5),
+                    'btnMuatHPS_PL':      (926.3, 335.2, 130.1, 28.0),
+                    'btnCetakReviu_PL':   (655.2, 366.1, 130.2, 28.3),
+                    'btnGabungReviu_PL':  (790.5, 366.1, 129.9, 28.3),
+                    'btnCetakBAPLJKK':    (655.2, 397.5, 130.2, 27.8),
+                    'btnGabungBAPLJKK':  (790.5, 397.5, 129.9, 27.8),
+                }
+                print('  Layout tombol: PLPK (baseline manual)')
+            else:
+                # Layout baku PLJKK.
+                _X = [641.8, 776.9, 911.3, 1046.4]
+                _W = [130.1, 129.9, 130.1, 130.4]
+                _Y = [181.4, 212.4, 243.0, 274.9, 305.4]
+                _BTN_H = 27.4
+                button_geometry = {
+                    'btnBukaDokpil_PL':   (_X[0], _Y[0], _W[0], _BTN_H),
+                    'btnRelinkPL':         (_X[1], _Y[0], _W[1], _BTN_H),
+                    'btnRefreshDataPL':   (_X[2], _Y[0], _W[2], _BTN_H),
+                    'btnBukaBA_PL':       (_X[0], _Y[1], _W[0], _BTN_H),
+                    'btnBukaReviu_PL':    (_X[1], _Y[1], _W[1], _BTN_H),
+                    'btnCetakBAReviu_PL': (_X[0], _Y[2], _W[0], _BTN_H),
+                    'btnCetakDokpil_PL':  (_X[1], _Y[2], _W[1], _BTN_H),
+                    'btnCetakReviu_PL':   (_X[0], _Y[3], _W[0], _BTN_H),
+                    'btnGabungReviu_PL':  (_X[1], _Y[3], _W[1], _BTN_H),
+                    'btnMuatHPS_PL':      (_X[2], _Y[3], _W[2], _BTN_H),
+                    'btnIsiEvaluasiPL':   (_X[3], _Y[3], _W[3], _BTN_H),
+                    'btnCetakBAPLJKK':    (_X[0], _Y[4], _W[0], _BTN_H),
+                    'btnGabungBAPLJKK':  (_X[1], _Y[4], _W[1], _BTN_H),
+                }
+                print('  Layout tombol: PLJKK')
 
-            def add_btn(name, label, macro, yi, xi, rgb):
-                """yi=indeks baris (0-4), xi=indeks kolom (0-3)"""
-                shp = ws.Shapes.AddShape(5, _X[xi], _Y[yi], _W[xi], _BTN_H)
+            def add_btn(name, label, macro, rgb):
+                left, top, width, height = button_geometry[name]
+                shp = ws.Shapes.AddShape(5, left, top, width, height)
                 shp.Name = name
                 r, g, b = rgb
                 shp.Fill.ForeColor.RGB = r + (g * 256) + (b * 65536)
@@ -183,23 +220,23 @@ def inject_pl(filepath: str):
             # Baris 0: Buka Dokpil | Relink Word
             # (Muat Paket PL + Isi Data PL dihapus — @ Master Data kini diisi otomatis
             #  via COM saat buat folder di Streamlit, lihat isi_master_data_pl.py)
-            add_btn("btnBukaDokpil_PL",   "Buka Dokpil",       "BukaDokpilPlJkk",         0, 0, TEAL)
-            add_btn("btnRelinkPL",        "Relink Word",       "RelinkPL",                 0, 1, (128, 0, 0))
-            add_btn("btnRefreshDataPL",   "Refresh Data PL",   "RefreshDataPL",            0, 2, (0, 150, 100))
+            add_btn("btnBukaDokpil_PL",   "Buka Dokpil",       "BukaDokpilPlJkk",         TEAL)
+            add_btn("btnRelinkPL",        "Relink Word",       "RelinkPL",                 (128, 0, 0))
+            add_btn("btnRefreshDataPL",   "Refresh Data PL",   "RefreshDataPL",            (0, 150, 100))
             # Baris 1: Buka BA | Buka Reviu | (kosong) | (kosong)
-            add_btn("btnBukaBA_PL",       "Buka BA",           "BukaBAPlJkk",             1, 0, ORANGE)
-            add_btn("btnBukaReviu_PL",    "Buka Reviu",        "BukaReviuPlJkk",          1, 1, PURPLE)
+            add_btn("btnBukaBA_PL",       "Buka BA",           "BukaBAPlJkk",             ORANGE)
+            add_btn("btnBukaReviu_PL",    "Buka Reviu",        "BukaReviuPlJkk",          PURPLE)
             # Baris 2: Cetak BA Reviu PL | Cetak Dokpil PDF | (kosong) | (kosong)
-            add_btn("btnCetakBAReviu_PL", "Cetak BA Reviu PL", "CetakBAReviuPLPDF",       2, 0, RED_DARK)
-            add_btn("btnCetakDokpil_PL",  "Cetak Dokpil PDF",  "CetakDokpilPlJkkPDF",     2, 1, (0, 100, 180))
+            add_btn("btnCetakBAReviu_PL", "Cetak BA Reviu PL", "CetakBAReviuPLPDF",       RED_DARK)
+            add_btn("btnCetakDokpil_PL",  "Cetak Dokpil PDF",  "CetakDokpilPlJkkPDF",     (0, 100, 180))
             # Baris 3: Cetak Isi Reviu (kolom 0) | Gabung Reviu (kolom 1) | Muat HPS (kolom 2) | Isi Evaluasi PL (kolom 3)
-            add_btn("btnCetakReviu_PL",   "Cetak Isi Reviu",   "CetakReviuPlJkkPDF",          3, 0, (0, 120, 80))
-            add_btn("btnGabungReviu_PL",  "Gabung BA Reviu",   "GabungBAReviu",               3, 1, (0, 128, 96))
-            add_btn("btnMuatHPS_PL",      "Muat HPS",          "MuatHPSPL",                  3, 2, (200, 100, 0))
-            add_btn("btnIsiEvaluasiPL",   "Isi Evaluasi PL",   "IsiEvaluasiPLStandalone",     3, 3, (160, 60, 0))
+            add_btn("btnCetakReviu_PL",   "Cetak Isi Reviu",   "CetakReviuPlJkkPDF",       (0, 120, 80))
+            add_btn("btnGabungReviu_PL",  "Gabung BA Reviu",   "GabungBAReviu",             (0, 128, 96))
+            add_btn("btnMuatHPS_PL",      "Muat HPS",          "MuatHPSPL",                 (200, 100, 0))
+            add_btn("btnIsiEvaluasiPL",   "Isi Evaluasi PL",   "IsiEvaluasiPLStandalone",   (160, 60, 0))
             # Baris 4: Cetak BA PLJKK (col 0) | Gabung BA PLJKK (col 1)
-            add_btn("btnCetakBAPLJKK",    "Cetak BA PLJKK",    "CetakBAPLJKKPDF",             4, 0, (140, 20, 20))
-            add_btn("btnGabungBAPLJKK",   "Gabung BA PLJKK",   "GabungBAPLJKK",               4, 1, (100, 20, 80))
+            add_btn("btnCetakBAPLJKK",    "Cetak BA PLJKK",    "CetakBAPLJKKPDF",           (140, 20, 20))
+            add_btn("btnGabungBAPLJKK",   "Gabung BA PLJKK",   "GabungBAPLJKK",             (100, 20, 80))
 
             # Sengaja TIDAK re-protect @ Master Data — user butuh edit bebas
             # (Aturan PL: sheet @ Master Data harus selalu unprotected)
