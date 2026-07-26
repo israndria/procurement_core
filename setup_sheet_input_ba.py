@@ -200,7 +200,9 @@ def _update_equipment_formulas(ws):
         # pengecekan G&J lama menghasilkan "3. " untuk slot kosong.
         ws.Cells(row, 17).Formula = (
             f'=IF(TRIM(G{row})="","",'
-            f'SUBSTITUTE(UPPER(P{row}&". "&O{row}&G{row}&J{row}),",",""))'
+            # Hapus koma pemisah sebelum "MIN." saja. Jangan menghapus
+            # seluruh koma karena koma desimal (mis. 0,45) harus tetap ada.
+            f'SUBSTITUTE(SUBSTITUTE(UPPER(P{row}&". "&O{row}&G{row}),", MIN."," MIN."),", 0"," 0"))'
         )
 
 
