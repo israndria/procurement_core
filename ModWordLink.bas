@@ -143,6 +143,18 @@ Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, stat
     End If
 
     wsh.Run cmd, 0, False
+    If outputMode = "printer" Then
+        Application.StatusBar = "Perintah print sedang diproses ke: " & printerName
+        MsgBox "Perintah print sudah dikirim ke proses printer." & vbCrLf & vbCrLf & _
+               "Printer: " & printerName & vbCrLf & _
+               "Pemberitahuan hasil akan muncul setelah proses selesai.", _
+               vbInformation, "Print Dimulai"
+    Else
+        Application.StatusBar = "Export PDF sedang diproses..."
+        MsgBox "Perintah export PDF sudah dimulai." & vbCrLf & vbCrLf & _
+               "Pemberitahuan dan file PDF akan muncul setelah proses selesai.", _
+               vbInformation, "Export PDF Dimulai"
+    End If
     Set wsh = Nothing
 End Sub
 
