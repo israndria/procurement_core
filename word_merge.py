@@ -88,6 +88,13 @@ def read_excel_data(excel_path, sheet_name):
                 # benar kosong agar baris peserta tidak tampil sebagai "0".
                 if (normalized.startswith("Peserta_") or normalized.startswith("Alamat_")) and val == "0":
                     val = ""
+                # Formula TRANSPOSE di sheet KK Evaluasi mengubah sel pemilik
+                # kosong menjadi 0 pada sheet `satu_data`. Nilai itu bukan
+                # data pemilik yang sah dan tidak boleh masuk ke Revaluasi.
+                # Filter berdasarkan field spesifik agar angka 0 yang valid
+                # pada evaluasi lain tetap dipertahankan.
+                if normalized in {"Eva_K_43", "Eva_K_44", "Eva_K_45"} and val == "0":
+                    val = ""
                 # nomori per nama-ternormalisasi (sesuai perilaku Word data source):
                 # occurrence pertama = nama polos, ke-2 dst = suffix 1,2,...
                 # pakai setdefault agar occurrence PERTAMA menang (match Word base).
