@@ -42,9 +42,10 @@ def inject_pl(filepath: str):
     content = BAS_FILE.read_text(encoding="utf-8")
     if "%%SUPABASE_URL%%" in content or "%%SUPABASE_KEY%%" in content:
         from dotenv import load_dotenv
-        env_path = Path(os.environ.get(
-            "POKJA_SECRET_ROOT", str(SCRIPT_DIR.parent / "Secrets")
-        )) / "secret_supabase.env"
+        canonical_env = SCRIPT_DIR.parent / "Secrets" / "secret_supabase.env"
+        configured_root = os.environ.get("POKJA_SECRET_ROOT", "").strip()
+        configured_env = Path(configured_root) / "secret_supabase.env" if configured_root else None
+        env_path = canonical_env if canonical_env.exists() else (configured_env or canonical_env)
         load_dotenv(env_path)
         sb_url = os.environ.get("SUPABASE_URL", "").strip('"')
         sb_key = os.environ.get("SUPABASE_KEY", "").strip('"')

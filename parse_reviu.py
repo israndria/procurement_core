@@ -18,10 +18,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ─── Load env Supabase ───────────────────────────────────────────────────────
 def _load_env():
-    secret_root = os.path.normpath(os.environ.get(
-        "POKJA_SECRET_ROOT", os.path.join(os.path.dirname(BASE_DIR), "Secrets")
-    ))
-    env_file = os.path.join(secret_root, "secret_supabase.env")
+    canonical_env = os.path.join(os.path.dirname(BASE_DIR), "Secrets", "secret_supabase.env")
+    configured_env = os.path.join(
+        os.path.normpath(os.environ.get("POKJA_SECRET_ROOT", "")),
+        "secret_supabase.env",
+    ) if os.environ.get("POKJA_SECRET_ROOT") else ""
+    env_file = canonical_env if os.path.exists(canonical_env) else configured_env
     if os.path.exists(env_file):
         with open(env_file, encoding="utf-8") as f:
             for line in f:

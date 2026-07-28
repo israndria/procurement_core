@@ -28,9 +28,13 @@ from googleapiclient.discovery import build
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH     = os.path.join(BASE_DIR, 'database_tender.csv')
 LOG_PATH    = os.path.join(BASE_DIR, 'sync_log.txt')
-SECRET_ROOT = os.path.normpath(os.environ.get(
-    'POKJA_SECRET_ROOT', os.path.join(os.path.dirname(BASE_DIR), 'Secrets')
-))
+_CANONICAL_SECRET_ROOT = os.path.join(os.path.dirname(BASE_DIR), 'Secrets')
+_CONFIGURED_SECRET_ROOT = os.path.normpath(os.environ.get('POKJA_SECRET_ROOT', '')) if os.environ.get('POKJA_SECRET_ROOT') else ''
+SECRET_ROOT = (
+    _CANONICAL_SECRET_ROOT
+    if os.path.exists(os.path.join(_CANONICAL_SECRET_ROOT, 'secret_supabase.env'))
+    else (_CONFIGURED_SECRET_ROOT or _CANONICAL_SECRET_ROOT)
+)
 RUNTIME_ROOT = os.path.normpath(os.environ.get(
     'POKJA_RUNTIME_ROOT',
     os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~/AppData/Local')), 'POKJA2026', 'Asisten_Pokja'),
