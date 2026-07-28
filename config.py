@@ -11,12 +11,41 @@ from urllib.parse import quote
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Template folder (relatif terhadap BASE_DIR → naik 1 level ke @ POKJA 2026)
-POKJA_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))  # @ POKJA 2026
+def _is_pokja_root(path):
+    """True jika path terlihat sebagai root dokumen POKJA yang tersync Drive."""
+    return bool(path) and any(
+        os.path.isdir(os.path.join(path, marker))
+        for marker in ("@ Tender 2026", "@ Pejabat Pengadaan 2026", "memory")
+    )
+
+
+def _discover_pokja_root():
+    """Cari root dokumen per-PC; source code tidak lagi berada di Google Drive."""
+    configured = os.environ.get("POKJA_DRIVE_ROOT", "").strip().strip('"')
+    candidates = [
+        configured,
+        r"D:\Dokumen\@ POKJA 2026",
+        r"G:\Other computers\My Laptop\@ POKJA 2026",
+        r"C:\POKJA2026",
+        os.path.dirname(BASE_DIR),
+    ]
+    for candidate in candidates:
+        if _is_pokja_root(candidate):
+            return os.path.normpath(candidate)
+    raise RuntimeError(
+        "Root dokumen POKJA tidak ditemukan. Set POKJA_DRIVE_ROOT ke folder "
+        "'@ POKJA 2026' di Google Drive."
+    )
+
+
+POKJA_ROOT = _discover_pokja_root()
 TEMPLATE_DIR = os.path.join(POKJA_ROOT, "Paket Experiment")
 
 # Python exe (portable WinPython)
-PYTHON_EXE = os.path.join(BASE_DIR, "python", "python.exe")
-PYTHONW_EXE = os.path.join(BASE_DIR, "python", "pythonw.exe")
+PYTHON_EXE = os.path.normpath(
+    os.environ.get("POKJA_PYTHON", os.path.join(BASE_DIR, "python", "python.exe"))
+)
+PYTHONW_EXE = os.path.join(os.path.dirname(PYTHON_EXE), "pythonw.exe")
 
 # ===== EXCEL TEMPLATE =====
 EXCEL_TEMPLATE = "0. BAPK - Template.xlsm"

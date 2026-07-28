@@ -187,10 +187,12 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     # 1. Excel — rename "Template" → suffix
     excel_name_dst = excel_template.replace("Template", pokja_suffix) if pokja_suffix else excel_template
     dst_excel = os.path.join(target_dir, excel_name_dst)
+    excel_created = False
 
     print("\n[2/3] Copy & Rename template files...")
     if not os.path.exists(dst_excel):
         shutil.copy2(os.path.join(template_dir, excel_template), dst_excel)
+        excel_created = True
         print(f"  [OK] {excel_template} -> {excel_name_dst}")
     else:
         print(f"  [SKIP] {excel_name_dst} (sudah ada)")
@@ -224,7 +226,7 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
 
     # Scrub data donor setelah template disalin dan mail merge terhubung.
     # Hanya Tender PK memakai scrub ini; PL punya struktur workbook berbeda.
-    if is_tender and os.path.exists(dst_excel):
+    if is_tender and excel_created:
         try:
             from template_scrub import scrub_package_copy
 
@@ -238,6 +240,8 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
                 print(f"  {line}")
         except Exception as exc:
             print(f"  [WARN] Scrub template gagal: {exc}")
+    elif is_tender:
+        print("\n[4/4] Scrub data donor dilewati — workbook existing dipertahankan.")
 
     print(f"\n{'='*60}")
     print(f"  SETUP SELESAI!")
