@@ -257,11 +257,11 @@ Public Sub MuatKKEvaluasi(Optional tampilPesan As Boolean = True)
         Dim aktaPNomor As String: aktaPNomor = GetF(it, "akta_p_nomor")
         Dim aktaKNomor As String: aktaKNomor = GetF(it, "akta_k_nomor")
         wsKK.Cells(ROW_AKTA_P_KESIMPULAN, col).Value = IIf(aktaPNomor <> "", "Memenuhi", "-")
-        wsKK.Cells(ROW_AKTA_P_NOMOR, col).Value = aktaPNomor
+        wsKK.Cells(ROW_AKTA_P_NOMOR, col).Value = CleanAktaNomor(aktaPNomor)
         wsKK.Cells(ROW_AKTA_P_TANGGAL, col).Value = GetF(it, "akta_p_tanggal")
         wsKK.Cells(ROW_AKTA_P_NOTARIS, col).Value = GetF(it, "akta_p_notaris")
         wsKK.Cells(ROW_AKTA_K_KESIMPULAN, col).Value = IIf(aktaKNomor <> "", "Memenuhi", "-")
-        wsKK.Cells(ROW_AKTA_K_NOMOR, col).Value = aktaKNomor
+        wsKK.Cells(ROW_AKTA_K_NOMOR, col).Value = CleanAktaNomor(aktaKNomor)
         ' Force text agar tanggal tidak diformat ulang Excel
         wsKK.Cells(ROW_AKTA_K_TANGGAL, col).NumberFormat = "@"
         wsKK.Cells(ROW_AKTA_K_TANGGAL, col).Value = GetF(it, "akta_k_tanggal")
@@ -277,7 +277,7 @@ Public Sub MuatKKEvaluasi(Optional tampilPesan As Boolean = True)
         Dim kinerjaVal As String: kinerjaVal = GetF(it, "kinerja_nilai")
         If kinerjaAda = "true" Then
             wsKK.Cells(ROW_KINERJA_ADA, col).Value = "ADA"
-            wsKK.Cells(ROW_KINERJA_NILAI, col).Value = kinerjaVal
+            wsKK.Cells(ROW_KINERJA_NILAI, col).Value = CleanKinerjaValue(kinerjaVal, GetF(it, "kinerja_kategori"))
             ' Highlight jika kinerja ada tapi nilai tidak terdeteksi
             If kinerjaVal = "" Then
                 wsKK.Cells(ROW_KINERJA_NILAI, col).Interior.Color = RGB(255, 255, 0)
@@ -446,6 +446,30 @@ End Sub
 ' ============================================================
 ' Helper: Ambil nilai field dari array parsed
 ' ============================================================
+Private Function CleanAktaNomor(ByVal raw As String) As String
+    Dim s As String
+    s = Trim(raw)
+    Do While Len(s) > 0 And Right$(s, 1) = "."
+        s = Trim(Left$(s, Len(s) - 1))
+    Loop
+    CleanAktaNomor = s
+End Function
+
+Private Function CleanKinerjaValue(ByVal raw As String, ByVal kategori As String) As String
+    Dim s As String, k As String
+    s = Trim(raw)
+    Do While Right$(s, 2) = "()"
+        s = Trim(Left$(s, Len(s) - 2))
+    Loop
+    k = Trim(kategori)
+    If k <> "" And k <> "-" And k <> "()" Then
+        If InStr(1, UCase$(s), "(" & UCase$(k) & ")", vbTextCompare) = 0 Then
+            If s <> "" Then s = s & " (" & k & ")" Else s = k
+        End If
+    End If
+    CleanKinerjaValue = s
+End Function
+
 Private Function GetF(fields As Variant, fieldName As String) As String
     Select Case fieldName
         Case "kode_tender":       GetF = fields(0)

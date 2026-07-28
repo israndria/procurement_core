@@ -51,6 +51,51 @@ def normalize_field_name(name):
     return s
 
 
+def _parse_currency_text(value):
+    """Parse nilai rupiah hasil formula TEXT Excel menjadi float."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw or raw in {"-", "0"}:
+        return None
+    raw = re.sub(r"[^0-9,.-]", "", raw)
+    if not raw:
+        return None
+    try:
+        return float(raw.replace(".", "").replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _normalize_revaluasi_data(data):
+    """Samakan field Revaluasi dengan harga final yang dipakai ringkasan."""
+    # Halaman awal memakai Harga_Penawaran/Harga_Terkoreksi dari BA klarifikasi
+    # (harga final), sedangkan field H1/HPT1 lama menunjuk 4. Evaluasi Harga
+    # (harga awal). Gunakan satu sumber final agar satu PDF tidak kontradiktif.
+    final_offer = data.get("Harga_Penawaran", "")
+    final_corrected = data.get("Harga_Terkoreksi", "")
+    if final_offer:
+        data["H1"] = final_offer
+    if final_corrected:
+        data["HPT1"] = final_corrected
+
+    hps = _parse_currency_text(data.get("HPS"))
+    corrected = _parse_currency_text(final_corrected)
+    if hps and corrected is not None:
+        ratio = corrected / hps
+        data["persentase_HPS1"] = f"{ratio * 100:.2f}%".replace(".", ",")
+        wajar = 0.80 <= ratio <= 1.00
+        data["Kewajaran_Harga"] = "WAJAR" if wajar else "TIDAK WAJAR"
+        data["Kesimpulan"] = "MEMENUHI" if wajar else "TIDAK MEMENUHI"
+
+    # Bersihkan artefak data lama dari parser/workbook.
+    for key in ("Eva_K_34", "Eva_K_38"):
+        if data.get(key):
+            data[key] = re.sub(r"[.]+$", "", str(data[key]).strip())
+    if data.get("Eva_K_47"):
+        data["Eva_K_47"] = re.sub(r"\s*\(\s*\)\s*$", "", str(data["Eva_K_47"]).strip())
+
+
 def read_excel_data(excel_path, sheet_name):
     """Baca data Excel via openpyxl (copy ke temp dulu karena file mungkin terkunci oleh Excel)."""
     import tempfile
@@ -110,6 +155,7 @@ def read_excel_data(excel_path, sheet_name):
                 seen[normalized] = n + 1
         if sheet_name == "satu_data":
             _augment_ba_counts(data, temp_path)
+            _normalize_revaluasi_data(data)
     except Exception as e:
         show_error(f"Error baca Excel:\n{e}")
         return None
