@@ -176,6 +176,128 @@ def _trim_blank_participant_rows(wdDoc):
         pass
 
 
+def _blank_empty_participant_rows(wdDoc, data=None):
+    """Kosongkan seluruh isi baris peserta 2/3 bila nama pesertanya kosong.
+
+    Template ringkasan evaluasi selalu menyediakan tiga slot peserta. Formula
+    Excel mengisi slot yang tidak dipakai dengan 0/MS, sehingga mengosongkan
+    field nama saja masih meninggalkan angka dan status palsu di kolom lain.
+    Baris dan border dipertahankan; hanya teks tiap sel yang dibersihkan.
+    """
+    def _cell_text(cell):
+        return cell.Range.Text.replace("\r", "").replace("\a", "").strip()
+
+    try:
+        for i in range(1, wdDoc.Tables.Count + 1):
+            table = wdDoc.Tables(i)
+            table_text = table.Range.Text.upper()
+            if "PESERTA" not in table_text or "SYARAT KUALIFIKASI" in table_text:
+                continue
+            if table.Rows.Count < 2:
+                continue
+            for r in range(2, table.Rows.Count + 1):
+                row = table.Rows(r)
+                first = _cell_text(row.Cells(1))
+                if not re.fullmatch(r"[23]\.?", first):
+                    continue
+                if row.Cells.Count < 2:
+                    continue
+                slot = first.rstrip(".")
+                expected = data.get(f"Peserta_{slot}") if data else None
+                participant = _cell_text(row.Cells(2))
+                data_empty = expected is not None and str(expected).strip() in (
+                    "", "0", "0.0", "None", "null"
+                )
+                cell_empty = participant in ("", "0", "0.0", "None", "null")
+                if not data_empty and not cell_empty:
+                    continue
+                for cell in row.Cells:
+                    rng = cell.Range.Duplicate
+                    rng.End = max(rng.Start, rng.End - 1)
+                    rng.Text = ""
+    except Exception:
+        pass
+
+
+def _blank_empty_participant_rows_xml(docx_path, data):
+    """Bersihkan row peserta kosong langsung pada XML salinan DOCX.
+
+    Sebagian tabel ringkasan berada pada struktur Word yang tidak selalu masuk
+    ke koleksi COM ``Document.Tables``. XML menjadi lapisan deterministik
+    sebelum DOCX dibuka Word; format tabel tetap, isi row saja yang kosong.
+    """
+    if not data:
+        return
+    import tempfile
+    import zipfile
+    tmp_path = docx_path + ".xmltmp"
+    changed = False
+    try:
+        with zipfile.ZipFile(docx_path, "r") as zin:
+            document_xml = zin.read("word/document.xml").decode("utf-8")
+            def text_from_xml(fragment):
+                return "".join(re.findall(r"<w:t\b[^>]*>(.*?)</w:t>", fragment, re.S))
+
+            def clear_cell(match):
+                cell = match.group(0)
+                props = re.search(r"<w:tcPr\b[^>]*>.*?</w:tcPr\s*>", cell, re.S)
+                prefix = props.group(0) if props else ""
+                return re.sub(
+                    r"(<w:tc\b[^>]*>).*?(</w:tc\s*>)",
+                    lambda m: m.group(1) + prefix + "<w:p/>" + m.group(2),
+                    cell, count=1, flags=re.S,
+                )
+
+            def process_table(table_match):
+                nonlocal changed
+                table = table_match.group(0)
+                upper = text_from_xml(table).upper()
+                if "PESERTA" not in upper or "SYARAT KUALIFIKASI" in upper:
+                    return table
+                rows = re.compile(r"<w:tr\b[^>]*>.*?</w:tr\s*>", re.S)
+
+                def process_row(row_match):
+                    nonlocal changed
+                    row = row_match.group(0)
+                    cells = re.findall(r"<w:tc\b[^>]*>.*?</w:tc\s*>", row, re.S)
+                    if len(cells) < 2:
+                        return row
+                    first = text_from_xml(cells[0]).strip()
+                    if not re.fullmatch(r"[23]\.?", first):
+                        return row
+                    slot = first.rstrip(".")
+                    expected = str(data.get(f"Peserta_{slot}") or "").strip()
+                    if expected not in ("", "0", "0.0", "None", "null"):
+                        return row
+                    new_row = re.sub(
+                        r"<w:tc\b[^>]*>.*?</w:tc\s*>",
+                        clear_cell, row, flags=re.S,
+                    )
+                    changed |= new_row != row
+                    return new_row
+
+                return rows.sub(process_row, table)
+
+            tables = re.compile(r"<w:tbl\b[^>]*>.*?</w:tbl\s*>", re.S)
+            new_xml = tables.sub(process_table, document_xml)
+            if not changed:
+                return
+            with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout:
+                for item in zin.infolist():
+                    payload = (
+                        new_xml.encode("utf-8")
+                        if item.filename == "word/document.xml"
+                        else zin.read(item.filename)
+                    )
+                    zout.writestr(item, payload)
+        os.replace(tmp_path, docx_path)
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+
 def _dokpil_personnel_value(data, field_name, slot):
     """Ambil field Personil N dari data list_dokpil secara toleran."""
     base = f"{field_name}_{slot}"
@@ -803,6 +925,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             _ext_b = ".docx"
         _merged_b = _fit_path(_folder, f"{_base_b[:60].rstrip()} (Merged){_ext_b}")
         shutil.copy2(_word_path_win, _merged_b)
+        _blank_empty_participant_rows_xml(_merged_b, data)
         _strip_mailmerge_datasource(_merged_b)
         pythoncom.CoInitialize()
         wdApp = win32com.client.DispatchEx("Word.Application")
@@ -820,6 +943,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             if data:
                 _replace_merge_fields(wdDoc, data)
                 _trim_blank_participant_rows(wdDoc)
+                _blank_empty_participant_rows(wdDoc, data)
                 _protect_signature_layout(wdDoc)
                 wdDoc.Save()
             if mode == "pdf_bapljkk":
@@ -969,6 +1093,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
 
     # Copy template ke (Merged) - template asli tidak diubah
     shutil.copy2(word_path, copy_path)
+    _blank_empty_participant_rows_xml(copy_path, data)
     _strip_mailmerge_datasource(copy_path)
 
     pythoncom.CoInitialize()
@@ -998,6 +1123,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         # tidak lagi bisa diarahkan ke Personil 2/3.
         _replace_merge_fields(wdDoc, data)
         _trim_blank_participant_rows(wdDoc)
+        _blank_empty_participant_rows(wdDoc, data)
         _protect_signature_layout(wdDoc)
 
         # Cleanup blank pages untuk file BA utama (satu_data) yang multi-section.
