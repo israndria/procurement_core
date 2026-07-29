@@ -46,8 +46,9 @@ Private Const MD_SHEET As String = "@ Master Data"
 '        19=jabatan_k3, 20=skk_k3, 21=dpa_nomor, 22=sub_kegiatan, 23=nama_file_uraian,
 '        24=mak, 25=nama_penyedia, 26=npwp_penyedia, 27=personil_json, 28=tgl_dokpil, 29=nomor_dokpil, 30=kode_unik
 '        31=tgl_evaluasi, 32=tgl_negosiasi, 33=tgl_penetapan, 34=nomor_nota_dinas, 35=nomor_rekomendasi, 36=tgl_rekomendasi
-'        37=tgl_pembukaan, 38=tahap_spse, 39=masa_berlaku, 40=uraian_singkat, 41=nomor_urut
-Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan,tahap_spse,masa_berlaku,uraian_singkat,nomor_urut"
+'        37=tanggal pembukaan (tgl_buka_penawaran, fallback tgl_pembukaan), 38=tahap_spse,
+'        39=masa_berlaku, 40=uraian_singkat, 41=nomor_urut
+Private Const SB_SELECT As String = "kode_paket,nama_paket,satker,kode_rup,nilai_hps,jenis_pl,jenis_kontrak,status,nama_ppk,nip_ppk,no_sk_ppk,nilai_pagu,jangka_waktu,sumber_anggaran,lokasi,sbu_baru,sbu_lama,jabatan_teknis,skk_teknis,jabatan_k3,skk_k3,dpa_nomor,sub_kegiatan,nama_file_uraian,mak,nama_penyedia,npwp_penyedia,personil_json,tgl_dokpil,nomor_dokpil,kode_unik,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,tgl_pembukaan,tahap_spse,masa_berlaku,uraian_singkat,nomor_urut,tgl_buka_penawaran"
 
 ' Row constants di @ Master Data (kolom C = nilai)
 Private Const PLR_KODE_PAKET      As Integer = 3
@@ -898,7 +899,7 @@ Public Sub IsiEvaluasiPLStandalone()
     Dim url As String
     url = SB_URL & "/rest/v1/draft_paket_pl" & _
           "?kode_paket=eq." & kodePaket & _
-          "&select=tgl_pembukaan,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,nomor_dokpil,jenis_kontrak,nama_penyedia,personil_json"
+          "&select=tgl_buka_penawaran,tgl_pembukaan,tgl_evaluasi,tgl_negosiasi,tgl_penetapan,nomor_nota_dinas,nomor_rekomendasi,tgl_rekomendasi,nomor_dokpil,jenis_kontrak,nama_penyedia,personil_json"
 
     Dim http As Object
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
@@ -936,7 +937,10 @@ Public Sub IsiEvaluasiPLStandalone()
     item(34) = ExtractJSONValPL(json, "nomor_nota_dinas")
     item(35) = ExtractJSONValPL(json, "nomor_rekomendasi")
     item(36) = ExtractJSONValPL(json, "tgl_rekomendasi")
-    item(37) = ExtractJSONValPL(json, "tgl_pembukaan")
+    item(37) = ExtractJSONValPL(json, "tgl_buka_penawaran")
+    If Trim(CStr(item(37))) = "" Or LCase(Trim(CStr(item(37)))) = "null" Then
+        item(37) = ExtractJSONValPL(json, "tgl_pembukaan")
+    End If
 
     ' Cek sheet @ Evaluasi
     Dim wsEval As Worksheet
@@ -977,9 +981,10 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
     wsEval.Cells(31, 3).Formula = "=SUBSTITUTE(" & mdRef & "," & Chr(34) & "/01/" & Chr(34) & "," & Chr(34) & "/08/" & Chr(34) & ")"
     wsEval.Cells(42, 3).Formula = "=SUBSTITUTE(" & mdRef & "," & Chr(34) & "/01/" & Chr(34) & "," & Chr(34) & "/09/" & Chr(34) & ")"
 
-    ' R4  Tanggal Pembukaan Penawaran = tgl_pembukaan (item 37)
+    ' R4 Tanggal Pembukaan Penawaran. Selalu overwrite agar nilai workbook
+    ' donor tidak bertahan ketika sumber paket baru memang belum tersedia.
     Dim tglPembukaan As String: tglPembukaan = FormatTanggalIndo(CStr(item(37)))
-    If tglPembukaan <> "" Then wsEval.Cells(4, 3).Value = tglPembukaan
+    wsEval.Cells(4, 3).Value = tglPembukaan
     ' R10 Tanggal Pembuktian Kualifikasi = tgl_negosiasi (item 32)
     Dim tglNego As String: tglNego = FormatTanggalIndo(CStr(item(32)))
     wsEval.Cells(11, 3).Value = tglNego
@@ -1163,7 +1168,10 @@ Private Function ParsePLJSON(json As String) As Collection
         item(34) = ExtractJSONValPL(obj, "nomor_nota_dinas")
         item(35) = ExtractJSONValPL(obj, "nomor_rekomendasi")
         item(36) = ExtractJSONValPL(obj, "tgl_rekomendasi")
-        item(37) = ExtractJSONValPL(obj, "tgl_pembukaan")
+        item(37) = ExtractJSONValPL(obj, "tgl_buka_penawaran")
+        If Trim(CStr(item(37))) = "" Or LCase(Trim(CStr(item(37)))) = "null" Then
+            item(37) = ExtractJSONValPL(obj, "tgl_pembukaan")
+        End If
         item(38) = ExtractJSONValPL(obj, "tahap_spse")
         item(39) = ExtractJSONValPL(obj, "masa_berlaku")
         item(40) = ExtractJSONValPL(obj, "uraian_singkat")
