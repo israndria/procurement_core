@@ -978,6 +978,14 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             _ext_b = ".docx"
         _merged_b = _fit_path(_folder, f"{_base_b[:60].rstrip()} (Merged){_ext_b}")
         shutil.copy2(_word_path_win, _merged_b)
+        # Header resmi dipilih dari profil instansi, hanya pada copy sementara.
+        # Template donor tidak pernah diubah.
+        try:
+            from config import POKJA_ROOT as _pokja_root_header
+            from document_profiles import apply_header_to_copy
+            apply_header_to_copy(_merged_b, _pokja_root_header, data)
+        except Exception as _header_err:
+            raise RuntimeError(f"Gagal menerapkan header profil: {_header_err}")
         _blank_empty_participant_rows_xml(_merged_b, data)
         _strip_mailmerge_datasource(_merged_b)
         pythoncom.CoInitialize()
@@ -1146,6 +1154,13 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
 
     # Copy template ke (Merged) - template asli tidak diubah
     shutil.copy2(word_path, copy_path)
+    # Header resmi dipilih dari profil instansi, hanya pada copy sementara.
+    try:
+        from config import POKJA_ROOT as _pokja_root_header
+        from document_profiles import apply_header_to_copy
+        apply_header_to_copy(copy_path, _pokja_root_header, data)
+    except Exception as _header_err:
+        raise RuntimeError(f"Gagal menerapkan header profil: {_header_err}")
     _blank_empty_participant_rows_xml(copy_path, data)
     _strip_mailmerge_datasource(copy_path)
 

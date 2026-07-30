@@ -107,6 +107,92 @@ WORD_SHEET_MAP_PL = [
     ("5. BA PLJKK - Template.docx",               SHEET_BA_PL),
 ]
 
+# ===== PL WORKFLOW V2 =====
+# Donor lama tetap dipertahankan. Registry ini hanya menjadi kontrak untuk
+# paket baru: satu workbook per subjenis, isi Word per domain, header dipilih
+# saat output dibuat. Folder donor boleh diganti user tanpa mengubah kode.
+PL_WORKFLOW_REGISTRY = {
+    "PL_PERENCANAAN": {
+        "jenis_pl": "JKK",
+        "label": "PL Konsultansi Perencanaan",
+        "folder_name": "Perencanaan",
+        "excel_template": "0. BAPLJKK - Template Perencanaan.xlsm",
+        "word_map": [
+            ("1. BA Reviu DPP PLJKK - Template Perencanaan.docx", SHEET_REVIU_PL),
+            ("2. Isi Reviu PLJKK - Template Perencanaan.docm", SHEET_REVIU_PL),
+            ("3. Dokpil Full PLJKK - Template Perencanaan.docx", SHEET_DOKPIL_PL),
+            ("5. BA PLJKK - Template Perencanaan.docx", SHEET_BA_PL),
+        ],
+    },
+    "PL_PENGAWASAN": {
+        "jenis_pl": "JKK",
+        "label": "PL Konsultansi Pengawasan",
+        "folder_name": "Pengawasan",
+        "excel_template": "0. BAPLJKK - Template Pengawasan.xlsm",
+        "word_map": [
+            ("1. BA Reviu DPP PLJKK - Template Pengawasan.docx", SHEET_REVIU_PL),
+            ("2. Isi Reviu PLJKK - Template Pengawasan.docm", SHEET_REVIU_PL),
+            ("3. Dokpil Full PLJKK - Template Pengawasan.docx", SHEET_DOKPIL_PL),
+            ("5. BA PLJKK - Template Pengawasan.docx", SHEET_BA_PL),
+        ],
+    },
+    "PL_KONSTRUKSI": {
+        "jenis_pl": "PK",
+        "label": "PL Pekerjaan Konstruksi",
+        "folder_name": "Konstruksi",
+        "excel_template": "0. BAPLPK- Template.xlsm",
+        "word_map": [
+            ("1. Full Dokumen BA PLPK - Template.docx", SHEET_BA_PL),
+            ("2. Isi Reviu PLPK - Template.docm", SHEET_REVIU_PL),
+            ("3. Dokpil Full PK - Template.docx", SHEET_DOKPIL_PL),
+            ("5. BA PLPK - Template.docx", SHEET_BA_PL),
+            ("5. Berita Acara Utama PLPK - Template.docx", SHEET_BA_PL),
+            ("7. BA Dengan Timpang PLPK - Template.docx", SHEET_BA_PL),
+        ],
+    },
+}
+
+
+def detect_pl_workflow(row=None, jenis_pl=None):
+    """Deteksi subjenis PL dari metadata paket tanpa input manual tambahan."""
+    row = row or {}
+    text = " ".join(str(row.get(k) or "") for k in (
+        "nama_paket", "uraian_pekerjaan", "metode_pengadaan", "jenis_pekerjaan",
+    )).lower()
+    jenis = str(jenis_pl or row.get("jenis_pl") or "").upper().strip()
+    # jenis_pl dari SPSE adalah sumber utama. Paket JKK bisa menyebut
+    # "konstruksi" di nama pekerjaan (mis. pengawasan konstruksi), tetapi
+    # workbook-nya tetap JKK, bukan PLPK.
+    if jenis in {"PK", "PLPK"}:
+        return "PL_KONSTRUKSI"
+    if jenis in {"JKK", "PLJKK"}:
+        if any(k in text for k in ("pengawasan", "supervisi", "manajemen konstruksi", "mk ")):
+            return "PL_PENGAWASAN"
+        return "PL_PERENCANAAN"
+    # Fallback hanya untuk row lama yang belum memiliki jenis_pl.
+    if any(k in text for k in ("konstruksi", "pembangunan", "pagar", "paving", "gapura", "los ", "pengurugan", "normalisasi")):
+        return "PL_KONSTRUKSI"
+    if any(k in text for k in ("pengawasan", "supervisi", "manajemen konstruksi", "mk ")):
+        return "PL_PENGAWASAN"
+    return "PL_PERENCANAAN"
+
+
+def pl_workflow_config(workflow):
+    key = str(workflow or "").upper()
+    if key not in PL_WORKFLOW_REGISTRY:
+        raise KeyError(f"Workflow PL tidak dikenal: {workflow}")
+    return PL_WORKFLOW_REGISTRY[key]
+
+
+def pl_workflow_template_dir(workflow, root=None):
+    """Resolve donor V2; fallback ke donor lama bila V2 belum dibuat."""
+    root = root or os.path.join(POKJA_ROOT, "Paket Experiment - Pengadaan Langsung")
+    cfg = pl_workflow_config(workflow)
+    v2 = os.path.join(root, "V2 - Template PL", cfg["folder_name"])
+    return v2 if os.path.isdir(v2) else (
+        TEMPLATE_DIR_PL_PK if cfg["jenis_pl"] == "PK" else TEMPLATE_DIR_PL
+    )
+
 # Output folder per jenis PL (folder tujuan buat folder baru)
 OUTPUT_DIR_PL_JKK = os.path.join(
     POKJA_ROOT,

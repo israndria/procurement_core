@@ -16,11 +16,14 @@ import shutil
 import sys
 import zipfile
 import re
+import json
+from datetime import datetime
 
 from config import (
     POKJA_ROOT, TEMPLATE_DIR, EXCEL_TEMPLATE, WORD_SHEET_MAP,
     TEMPLATE_DIR_PL, EXCEL_TEMPLATE_PL, WORD_SHEET_MAP_PL,
     OUTPUT_DIR_PL_JKK, OUTPUT_DIR_PL_PK,
+    detect_pl_workflow, pl_workflow_config,
     excel_to_file_uri,
 )
 
@@ -113,7 +116,21 @@ def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
         return False
 
 
-def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, output_base=None):
+def _nama_output_template(nama_template, suffix):
+    """Ganti label Template + domain dengan nama paket tanpa duplikasi."""
+    if not suffix or "Template" not in nama_template:
+        return nama_template
+    # V2: ``Template Perencanaan/Pengawasan`` menjadi suffix paket saja.
+    return re.sub(
+        r"Template(?:\s+(?:Perencanaan|Pengawasan|Konstruksi))?",
+        suffix,
+        nama_template,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+
+
+def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, output_base=None, workflow=None):
     """Inti setup: copy template + auto-link mail merge ke folder baru."""
     print("=" * 60)
     print("  SETUP PAKET BARU")
@@ -167,6 +184,21 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     for _sub in _subfolders:
         os.makedirs(os.path.join(target_dir, _sub), exist_ok=True)
 
+    # Metadata ringan untuk audit/refresh otomatis; user tidak perlu mengisi.
+    try:
+        meta_path = os.path.join(target_dir, ".template-meta.json")
+        if not os.path.exists(meta_path):
+            with open(meta_path, "w", encoding="utf-8") as _mf:
+                json.dump({
+                    "schema": 1,
+                    "workflow": workflow or "legacy",
+                    "template_dir": os.path.abspath(template_dir),
+                    "dynamic_header": True,
+                    "created_at": datetime.now().isoformat(timespec="seconds"),
+                }, _mf, ensure_ascii=False, indent=2)
+    except Exception as _meta_e:
+        print(f"  [WARN] Metadata template gagal: {_meta_e}")
+
 
     # Extract suffix untuk rename Excel
     # Tender:  "Pokja 086" → "086"
@@ -185,7 +217,7 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     print(f"\n[1/3] Folder: {target_dir}")
 
     # 1. Excel — rename "Template" → suffix
-    excel_name_dst = excel_template.replace("Template", pokja_suffix) if pokja_suffix else excel_template
+    excel_name_dst = _nama_output_template(excel_template, pokja_suffix)
     dst_excel = os.path.join(target_dir, excel_name_dst)
     excel_created = False
 
@@ -201,7 +233,7 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     dst_word_map = []
     for wf_tpl, sheet_name in word_sheet_map:
         if pokja_suffix and "Template" in wf_tpl:
-            wf_dst = wf_tpl.replace("Template", pokja_suffix)
+            wf_dst = _nama_output_template(wf_tpl, pokja_suffix)
         else:
             wf_dst = wf_tpl
         dst_path = os.path.join(target_dir, wf_dst)
@@ -259,7 +291,7 @@ def setup_paket_baru(folder_name=None, output_base=None):
     _setup_folder(folder_name, TEMPLATE_DIR, EXCEL_TEMPLATE, WORD_SHEET_MAP, output_base=output_base)
 
 
-def setup_paket_baru_pl(folder_name=None, output_base=None, template_dir=None):
+def setup_paket_baru_pl(folder_name=None, output_base=None, template_dir=None, workflow=None):
     """Setup paket baru mode Pengadaan Langsung (PL): copy template BAPLJKK + auto-link.
     output_base: override folder tujuan (default: deteksi dari nama PLJKK/PLPK).
     """
@@ -267,14 +299,40 @@ def setup_paket_baru_pl(folder_name=None, output_base=None, template_dir=None):
         print("\nContoh: '1. PLJKK - Perencanaan Pembangunan Jalan ...'")
         folder_name = input("Nama folder paket PL: ").strip()
 
+    workflow = workflow or detect_pl_workflow({"nama_paket": folder_name})
+    workflow_cfg = pl_workflow_config(workflow)
+
+    # Prefix folder adalah kontrak family dari UI. Jangan pernah membuat
+    # workbook PLPK di folder PLJKK, atau sebaliknya.
+    _folder_upper = folder_name.upper()
+    _folder_family = "PK" if re.search(r"\bPLPK\b", _folder_upper) else (
+        "JKK" if re.search(r"\bPLJKK\b", _folder_upper) else workflow_cfg["jenis_pl"]
+    )
+    if workflow_cfg["jenis_pl"] != _folder_family:
+        raise ValueError(
+            f"Workflow {workflow} ({workflow_cfg['jenis_pl']}) tidak cocok "
+            f"dengan family folder {_folder_family}. Proses dibatalkan sebelum copy."
+        )
+
     if output_base is None:
         # Deteksi dari nama folder: PLPK → PK dir, default → JKK dir
-        if "PLPK" in folder_name.upper():
+        if workflow_cfg["jenis_pl"] == "PK":
             output_base = OUTPUT_DIR_PL_PK
         else:
             output_base = OUTPUT_DIR_PL_JKK
 
-    _setup_folder(folder_name, template_dir or TEMPLATE_DIR_PL, EXCEL_TEMPLATE_PL, WORD_SHEET_MAP_PL, output_base)
+    resolved_template_dir = template_dir
+    if not resolved_template_dir:
+        from config import pl_workflow_template_dir
+        resolved_template_dir = pl_workflow_template_dir(workflow)
+    _setup_folder(
+        folder_name,
+        resolved_template_dir,
+        workflow_cfg["excel_template"],
+        workflow_cfg["word_map"],
+        output_base,
+        workflow=workflow,
+    )
 
 
 if __name__ == "__main__":
@@ -294,10 +352,16 @@ if __name__ == "__main__":
         template_dir = args[idx + 1]
         args = args[:idx] + args[idx + 2:]
 
+    workflow = None
+    if "--workflow" in args:
+        idx = args.index("--workflow")
+        workflow = args[idx + 1]
+        args = args[:idx] + args[idx + 2:]
+
     name_args = [a for a in args if not a.startswith("--") and a != "pl"]
     folder_name = " ".join(name_args).strip() or None
 
     if mode_pl:
-        setup_paket_baru_pl(folder_name, output_base=output_dir, template_dir=template_dir)
+        setup_paket_baru_pl(folder_name, output_base=output_dir, template_dir=template_dir, workflow=workflow)
     else:
         setup_paket_baru(folder_name, output_base=output_dir)

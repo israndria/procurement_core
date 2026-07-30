@@ -9,21 +9,137 @@ Usage:
 import win32com.client
 import pythoncom
 import os
+import hashlib
+import shutil
 import sys
 import tempfile
 import glob
+from datetime import datetime
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 BAS_FILE = SCRIPT_DIR / "ModDraftPaketPL.bas"
 MOD_NAME = "ModDraftPaketPL"
 
-# Workbook_Open untuk BAPLJKK — hanya auto-relink Word template
+# Event workbook untuk BAPLJKK — relink tetap manual, input tanggal dipermudah.
 WORKBOOK_OPEN_CODE = (
     "Private Sub Workbook_Open()\n"
     "    ' Workbook_Open dimatikan — relink manual lewat tombol Relink Word\n"
     "End Sub\n"
+    "\n"
+    "Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)\n"
+    "    On Error GoTo SafeExit\n"
+    "    If Sh.Name <> \"@ Master Data\" And Sh.Name <> \"@ Evaluasi\" Then Exit Sub\n"
+    "    If Target.CountLarge <> 1 Or Target.Column <> 3 Then Exit Sub\n"
+    "    If InStr(1, CStr(Sh.Cells(Target.Row, 2).Value), \"tanggal\", vbTextCompare) = 0 Then Exit Sub\n"
+    "\n"
+    "    Dim raw As String\n"
+    "    raw = Trim$(CStr(Target.Value2))\n"
+    "    If raw = \"\" Then Exit Sub\n"
+    "\n"
+    "    Dim hasil As String\n"
+    "    hasil = ParseTanggalPL(raw)\n"
+    "    If hasil = \"\" Or hasil = raw Then Exit Sub\n"
+    "\n"
+    "    Application.EnableEvents = False\n"
+    "    Target.NumberFormat = \"@\"\n"
+    "    Target.Value = hasil\n"
+    "\n"
+    "SafeExit:\n"
+    "    Application.EnableEvents = True\n"
+    "End Sub\n"
+    "\n"
+    "Private Function ParseTanggalPL(ByVal raw As String) As String\n"
+    "    Dim bulanArr As Variant\n"
+    "    bulanArr = Array(\"Januari\", \"Februari\", \"Maret\", \"April\", \"Mei\", \"Juni\", _\n"
+    "                     \"Juli\", \"Agustus\", \"September\", \"Oktober\", \"November\", \"Desember\")\n"
+    "    ParseTanggalPL = raw\n"
+    "\n"
+    "    Dim s As String: s = Trim$(raw)\n"
+    "    Dim tgl As Long, bln As Long, thn As Long\n"
+    "    Dim sep As String, parts() As String\n"
+    "    If InStr(s, \"/\") > 0 Then sep = \"/\"\n"
+    "    If InStr(s, \"-\") > 0 Then sep = \"-\"\n"
+    "    If InStr(s, \".\") > 0 Then sep = \".\"\n"
+    "    If sep = \"\" And InStr(s, \" \" ) > 0 Then sep = \" \"\n"
+    "\n"
+    "    On Error GoTo InvalidDate\n"
+    "    If sep <> \"\" Then\n"
+    "        parts = Split(s, sep)\n"
+    "        If UBound(parts) < 2 Then GoTo InvalidDate\n"
+    "        tgl = CLng(Trim$(parts(0)))\n"
+    "        bln = CLng(Trim$(parts(1)))\n"
+    "        thn = CLng(Trim$(parts(2)))\n"
+    "    Else\n"
+    "        If Not IsNumeric(s) Then GoTo InvalidDate\n"
+    "        If Len(s) < 5 Then GoTo InvalidDate\n"
+    "        thn = CLng(Right$(s, 4))\n"
+    "        s = Left$(s, Len(s) - 4)\n"
+    "        If Len(s) = 3 Then\n"
+    "            tgl = CLng(Left$(s, 2))\n"
+    "            bln = CLng(Right$(s, 1))\n"
+    "        ElseIf Len(s) = 4 Then\n"
+    "            tgl = CLng(Left$(s, 2))\n"
+    "            bln = CLng(Right$(s, 2))\n"
+    "        Else\n"
+    "            GoTo InvalidDate\n"
+    "        End If\n"
+    "    End If\n"
+    "\n"
+    "    If tgl < 1 Or tgl > 31 Or bln < 1 Or bln > 12 Or thn < 2000 Or thn > 2099 Then GoTo InvalidDate\n"
+    "    Dim dt As Date\n"
+    "    dt = DateSerial(thn, bln, tgl)\n"
+    "    If Day(dt) <> tgl Or Month(dt) <> bln Or Year(dt) <> thn Then GoTo InvalidDate\n"
+    "    ParseTanggalPL = CStr(tgl) & \" \" & CStr(bulanArr(bln - 1)) & \" \" & CStr(thn)\n"
+    "    Exit Function\n"
+    "\n"
+    "InvalidDate:\n"
+    "    ParseTanggalPL = raw\n"
+    "End Function\n"
 )
+
+
+def _validate_vba_source(content: str) -> None:
+    """Tolak source BAS rusak sebelum menyentuh workbook."""
+    if f'Attribute VB_Name = "{MOD_NAME}"' not in content:
+        raise ValueError(f"Attribute VB_Name {MOD_NAME} tidak ditemukan")
+    if "%%SUPABASE_URL%%" in content or "%%SUPABASE_KEY%%" in content:
+        raise ValueError("Placeholder secret VBA belum tersubstitusi")
+
+    malformed_formula = [
+        (line_no, line)
+        for line_no, line in enumerate(content.splitlines(), 1)
+        if (".Formula" in line or ".FormulaLocal" in line) and '\\"' in line
+    ]
+    if malformed_formula:
+        line_no, _ = malformed_formula[0]
+        raise ValueError(
+            f"VBA formula memakai escape Python/JSON (\\\\\\\") di baris {line_no}"
+        )
+
+
+def _create_backup(filepath: str) -> Path:
+    """Backup unik dan recoverable sebelum VBA workbook diubah."""
+    source = Path(filepath)
+    backup_dir = source.parent / ".vba-backup"
+    if len(str(backup_dir / source.name)) >= 248:
+        configured_root = os.environ.get("POKJA_DRIVE_ROOT", "").strip()
+        pokja_root = Path(configured_root) if configured_root else None
+        if not pokja_root or not pokja_root.exists():
+            pokja_root = next(
+                (parent for parent in source.parents if parent.name == "@ POKJA 2026"),
+                SCRIPT_DIR,
+            )
+        backup_dir = pokja_root / ".vba-backup"
+    backup_dir.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    source_id = hashlib.sha1(str(source).encode("utf-8")).hexdigest()[:10]
+    safe_stem = source.stem[:80].rstrip(" .")
+    backup = backup_dir / (
+        f"{safe_stem}.{source_id}.before-{MOD_NAME}-{stamp}{source.suffix}"
+    )
+    shutil.copy2(source, backup)
+    return backup
 
 
 def inject_pl(filepath: str):
@@ -55,6 +171,12 @@ def inject_pl(filepath: str):
         content = content.replace("%%SUPABASE_URL%%", sb_url)
         content = content.replace("%%SUPABASE_KEY%%", sb_key)
 
+    try:
+        _validate_vba_source(content)
+    except ValueError as exc:
+        print(f"  [ERROR] Preflight VBA gagal: {exc}")
+        return False
+
     # Attribute VB_Name menentukan nama module hasil Import, BUKAN nama file
     # temp. Pakai nama sementara dulu agar tidak bentrok dgn module lama yang
     # masih ada saat proses import (baru direname ke MOD_NAME setelah module
@@ -70,11 +192,16 @@ def inject_pl(filepath: str):
     pythoncom.CoInitialize()
     excel = None
     wb = None
+    backup_path = None
 
     try:
+        backup_path = _create_backup(filepath)
+        print(f"  [BACKUP] {backup_path}")
+
         excel = win32com.client.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
+        excel.EnableEvents = False
 
         try:
             wb = excel.Workbooks.Open(filepath, 0, False)
@@ -109,6 +236,28 @@ def inject_pl(filepath: str):
             print(f"  {MOD_NAME} lama dihapus")
         imported.Name = MOD_NAME
         print(f"  [OK] {imported.Name} imported ({imported.CodeModule.CountOfLines} baris)")
+
+        imported_text = imported.CodeModule.Lines(1, imported.CodeModule.CountOfLines)
+        # VBE menormalkan kapitalisasi identifier dan inline-comment mengikuti
+        # symbol table workbook. Karena itu validasi identitas byte-per-byte
+        # tidak stabil; pastikan jumlah baris + entry point utama utuh.
+        expected_lines = len(content.splitlines()) - 1  # Attribute VB_Name
+        if imported.CodeModule.CountOfLines != expected_lines:
+            raise ValueError(
+                f"Jumlah baris {MOD_NAME} berubah setelah import: "
+                f"{imported.CodeModule.CountOfLines} != {expected_lines}"
+            )
+        for marker in (
+            "Public Sub IsiDataPLByKode(",
+            "Public Sub RefreshDataPL()",
+            "Public Sub IsiEvaluasiPLStandalone()",
+        ):
+            if marker.casefold() not in imported_text.casefold():
+                raise ValueError(f"Entry point VBA hilang setelah import: {marker}")
+        _validate_vba_source(
+            f'Attribute VB_Name = "{MOD_NAME}"\n{imported_text}'
+        )
+        print(f"  [OK] {MOD_NAME} lolos verifikasi source pasca-import")
 
         # Inject Workbook_Open ke ThisWorkbook
         this_wb_comp = None
@@ -178,24 +327,26 @@ def inject_pl(filepath: str):
                 print('  Layout tombol: PLPK (baseline manual)')
             else:
                 # Layout baku PLJKK.
-                _X = [641.8, 776.9, 911.3, 1046.4]
-                _W = [130.1, 129.9, 130.1, 130.4]
-                _Y = [181.4, 212.4, 243.0, 274.9, 305.4]
-                _BTN_H = 27.4
+                # Baseline manual PLJKK — disamakan dengan layout template
+                # yang sudah dirapikan user (diverifikasi via Excel COM).
+                _X = [661.4, 796.5, 930.9, 1065.0]
+                _W = [130.1, 129.8, 130.2, 130.5]
+                _Y = [180.0, 210.9, 241.1, 272.5, 302.9]
+                _H = [27.3, 26.8, 27.6, 27.3, 26.3]
                 button_geometry = {
-                    'btnBukaDokpil_PL':   (_X[0], _Y[0], _W[0], _BTN_H),
-                    'btnRelinkPL':         (_X[1], _Y[0], _W[1], _BTN_H),
-                    'btnRefreshDataPL':   (_X[2], _Y[0], _W[2], _BTN_H),
-                    'btnBukaBA_PL':       (_X[0], _Y[1], _W[0], _BTN_H),
-                    'btnBukaReviu_PL':    (_X[1], _Y[1], _W[1], _BTN_H),
-                    'btnCetakBAReviu_PL': (_X[0], _Y[2], _W[0], _BTN_H),
-                    'btnCetakDokpil_PL':  (_X[1], _Y[2], _W[1], _BTN_H),
-                    'btnCetakReviu_PL':   (_X[0], _Y[3], _W[0], _BTN_H),
-                    'btnGabungReviu_PL':  (_X[1], _Y[3], _W[1], _BTN_H),
-                    'btnMuatHPS_PL':      (_X[2], _Y[3], _W[2], _BTN_H),
-                    'btnIsiEvaluasiPL':   (_X[3], _Y[3], _W[3], _BTN_H),
-                    'btnCetakBAPLJKK':    (_X[0], _Y[4], _W[0], _BTN_H),
-                    'btnGabungBAPLJKK':  (_X[1], _Y[4], _W[1], _BTN_H),
+                    'btnBukaDokpil_PL':   (_X[0], _Y[0], _W[0], _H[0]),
+                    'btnRelinkPL':        (_X[1], _Y[0], _W[1], _H[0]),
+                    'btnRefreshDataPL':   (_X[2], _Y[0], _W[2], _H[0]),
+                    'btnBukaBA_PL':       (_X[0], _Y[1], _W[0], _H[1]),
+                    'btnBukaReviu_PL':    (_X[1], _Y[1], _W[1], _H[1]),
+                    'btnCetakBAReviu_PL': (_X[0], _Y[2], _W[0], _H[2]),
+                    'btnCetakDokpil_PL':  (_X[1], _Y[2], _W[1], _H[2]),
+                    'btnCetakReviu_PL':   (_X[0], _Y[3], _W[0], _H[3]),
+                    'btnGabungReviu_PL':  (_X[1], _Y[3], _W[1], _H[3]),
+                    'btnMuatHPS_PL':      (930.9, 242.5, 130.2, 27.8),
+                    'btnIsiEvaluasiPL':   (931.0, 211.5, 130.5, 27.3),
+                    'btnCetakBAPLJKK':    (_X[0], _Y[4], _W[0], _H[4]),
+                    'btnGabungBAPLJKK':  (_X[1], _Y[4], _W[1], _H[4]),
                 }
                 print('  Layout tombol: PLJKK')
 
@@ -278,7 +429,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         # File spesifik dari argumen
         target = sys.argv[1]
-        inject_pl(target)
+        sys.exit(0 if inject_pl(target) else 1)
     else:
         # Auto-scan POKJA root
         pokja_root = str(SCRIPT_DIR.parent.parent)

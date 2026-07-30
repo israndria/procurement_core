@@ -711,3 +711,41 @@
 [2026-06-04 07:10:02] 
 📊 Selesai — Updated: 2 | Unchanged: 2 | Failed: 0
 [2026-06-04 07:10:02] ============================================================
+[2026-07-28 23:11:38] ============================================================
+[2026-07-28 23:11:38] 🚀 Mulai sync jadwal tender...
+[2026-07-28 23:11:38] 
+🔍 [1/9] Pembangunan Villa Wisata di Tahura Mandiangin/Bukit Batu
+[2026-07-28 23:11:38]   ✅ Tidak ada perubahan.
+[2026-07-28 23:11:38] 
+🔍 [2/9] Belanja Modal Asrama
+[2026-07-28 23:11:38]   ✅ Tidak ada perubahan.
+[2026-07-28 23:11:38] 
+🔍 [3/9] Belanja Modal Bangunan Kesehatan (Pembangunan Cytotoxic)
+[2026-07-28 23:11:38]   ✅ Tidak ada perubahan.
+[2026-07-28 23:11:38] 
+🔍 [4/9] Belanja Pemeliharaan Bangunan Gedung-Bangunan Gedung Tempat Kerja-Bangunan Kesehatan (Rehab Plafon/Pasad)
+[2026-07-28 23:11:39]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-07-28 23:11:53]   📅 12 event berhasil dimasukkan.
+[2026-07-28 23:11:53] 
+🔍 [5/9] Lanjutan Sei. Cempaka Kec. Binuang
+[2026-07-28 23:11:53]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-07-28 23:12:07]   📅 12 event berhasil dimasukkan.
+[2026-07-28 23:12:07] 
+🔍 [6/9] Normalisasi Sungai Jarau Ds. Marampiau RT.05 RW.002 Kec. Candi Laras Selatan
+[2026-07-28 23:12:07]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-07-28 23:12:21]   📅 12 event berhasil dimasukkan.
+[2026-07-28 23:12:21] 
+🔍 [7/9] Pembangunan Gedung Baru Poltek Syekh Salman Al-Farisi Rantau
+[2026-07-28 23:12:21]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-07-28 23:12:35]   📅 12 event berhasil dimasukkan.
+[2026-07-28 23:12:35] 
+🔍 [8/9] NORMALISASI RAY IPIN DAN RAY LULUK DESA MASTA
+[2026-07-28 23:12:35]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-07-28 23:12:42]   📅 12 event berhasil dimasukkan.
+[2026-07-28 23:12:42] 
+🔍 [9/9] Pengerukkan Sungai Bubur Ds. Pematang Karangan Kec. Tapin Tengah
+[2026-07-28 23:12:42]   🔄 Perubahan terdeteksi! Update Google Calendar...
+[2026-07-28 23:12:50]   📅 12 event berhasil dimasukkan.
+[2026-07-28 23:12:50] 
+📊 Selesai — Updated: 6 | Unchanged: 3 | Failed: 0
+[2026-07-28 23:12:50] ============================================================
