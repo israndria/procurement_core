@@ -1591,9 +1591,16 @@ def run_merge_mode_pl(folder_path: str, excel_path: str) -> list:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1].lower() == "personil":
+        if len(sys.argv) != 5:
+            print("Usage: python word_merge.py personil <template.docx> <excel.xlsm> <output.docx>")
+            sys.exit(1)
+        from merge_list_personil import merge_list_personil
+        merge_list_personil(sys.argv[2], sys.argv[3], sys.argv[4])
+        sys.exit(0)
     if len(sys.argv) < 5:
         print("Usage: python word_merge.py <mode> <word_path> <excel_path> <sheet_name>")
-        print("  mode: buka | print | pdf | pdf_bareviu | pdf_bareviu_pl")
+        print("  mode: buka | print | pdf | pdf_bareviu | pdf_bareviu_pl | personil")
         sys.exit(1)
 
     mode = sys.argv[1]
