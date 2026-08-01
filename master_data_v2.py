@@ -135,10 +135,18 @@ def build_snapshot(excel_path: str | os.PathLike[str]) -> dict[str, Any]:
     """Bangun snapshot V2 sambil mempertahankan field flat legacy."""
     common = read_master_data(excel_path)
     domain = read_domain_data(excel_path)
+    stage = str(common.get("Tahap Dokumen", "UPLOAD AWAL") or "UPLOAD AWAL").strip().upper()
+    if stage in {"SPPBJ FINAL", "SPK FINAL", "SPMK FINAL"}:
+        stage = "BERKONTRAK"
+    if stage not in {"UPLOAD AWAL", "BERKONTRAK"}:
+        stage = "UPLOAD AWAL"
+    category = "Dokumen Kontrak - Informasi Awal" if stage == "UPLOAD AWAL" else "Dokumen Kontrak - Final"
     snapshot = dict(common)
     snapshot.update(
         {
             "_schema_version": SNAPSHOT_VERSION,
+            "document_stage": stage,
+            "document_category": category,
             "master_data": copy.deepcopy(common),
             "data_jkk": {"personil": domain["jkk_personil"]},
             "data_pk": {
@@ -160,6 +168,8 @@ def normalize_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any]:
     pk = raw.get("data_pk") if isinstance(raw.get("data_pk"), dict) else {}
     return {
         "_schema_version": int(raw.get("_schema_version", 1) or 1),
+        "document_stage": str(raw.get("document_stage", common.get("Tahap Dokumen", "UPLOAD AWAL")) or "UPLOAD AWAL"),
+        "document_category": str(raw.get("document_category", "Dokumen Kontrak - Informasi Awal") or "Dokumen Kontrak - Informasi Awal"),
         "master_data": common,
         "data_jkk": {"personil": jkk.get("personil", []) if isinstance(jkk, dict) else []},
         "data_pk": {
