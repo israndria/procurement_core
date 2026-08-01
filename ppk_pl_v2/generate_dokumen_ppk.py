@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # generate_dokumen_ppk.py — Generate dokumen PPK PL dari Master Data Excel
 # Mode: generate | pdf | paket_baru | multi | commit-paket | nomor-baru | test-terbilang
-import sys, os, shutil, re as _re, zipfile, argparse
+import sys, os, shutil, re as _re, zipfile, argparse, json
 from datetime import date, datetime, timedelta
 
 W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
@@ -226,6 +226,16 @@ DOCUMENT_STAGE_LABELS = {
     "BERKONTRAK": "BERKONTRAK",
 }
 
+# Output PPK dipisahkan per tahap agar hasil Upload Awal tidak pernah tertimpa
+# oleh generate Berkontrak. Folder package lama tetap dibiarkan sebagai legacy
+# dan hanya dipakai sebagai fallback saat mode ``pdf`` membaca docx lama.
+DOCUMENT_OUTPUT_ROOT = "0. Draft Dokumen PPK"
+DOCUMENT_STAGE_MARKER = "._ppk_stage.txt"
+DOCUMENT_STAGE_DIRS = {
+    "UPLOAD AWAL": "01. Upload Awal",
+    "BERKONTRAK": "02. Berkontrak",
+}
+
 CONTRACT_FIELD_KEYS = {
     "Tanggal SPPBJ", "Nomor SPPBJ", "Tanggal SPK", "Nomor SPK",
     "Tanggal SPMK", "Nomor SPMK", "Tanggal Mulai Kerja",
@@ -246,6 +256,77 @@ def normalize_document_stage(value: object) -> str:
     stage = str(value or "UPLOAD AWAL").strip().upper()
     stage = LEGACY_FINAL_STAGES.get(stage, stage)
     return stage if stage in DOCUMENT_STAGES else "UPLOAD AWAL"
+
+
+def _package_folder_name(excel_data: dict) -> str:
+    """Nama folder paket yang konsisten untuk generate, multi, dan print-all."""
+    full_name = str(excel_data.get("Nama Paket (Lengkap)", "") or "").strip()
+    number = str(excel_data.get("Nomor Urut Paket", "") or "").strip()
+    strip_prefixes = [
+        "Belanja Jasa Konsultansi Perencanaan Arsitektur-Jasa Arsitektur Lainnya ",
+        "Belanja Jasa Konsultansi Perencanaan Arsitektur-Jasa Arsitektur ",
+        "Belanja Jasa Konsultansi Perencanaan Rekayasa-Jasa Desain Rekayasa untuk Konstruksi ",
+        "Belanja Jasa Konsultansi Perencanaan ",
+        "Belanja Jasa Konsultansi ",
+        "Belanja Jasa ",
+    ]
+    short_name = full_name
+    for prefix in strip_prefixes:
+        if short_name.startswith(prefix):
+            short_name = short_name[len(prefix):]
+            break
+    folder_name = f"{number}. {short_name}" if number and number != "None" else short_name
+    return _re.sub(r'[\\/:*?"<>|]', '', folder_name).strip()
+
+
+def document_package_dir(excel_data: dict, base_dir: str = BASE_DIR) -> str:
+    package_name = _package_folder_name(excel_data)
+    return os.path.join(base_dir, package_name or "OUTPUT_UNNAMED")
+
+
+def document_output_dir(excel_data: dict, base_dir: str = BASE_DIR,
+                        mode: str = "generate") -> str:
+    """Resolve output folder berdasarkan satu-satunya kontrol ``Tahap Dokumen``.
+
+    Semua mode tulis memakai folder fase. ``pdf`` boleh membaca folder paket
+    legacy bila folder fase belum pernah dibuat, sehingga paket lama tetap bisa
+    dicetak tanpa migrasi manual.
+    """
+    package_dir = document_package_dir(excel_data, base_dir)
+    stage = normalize_document_stage(excel_data.get("Tahap Dokumen"))
+    phase_dir = os.path.join(
+        package_dir, DOCUMENT_OUTPUT_ROOT, DOCUMENT_STAGE_DIRS[stage]
+    )
+    if mode == "pdf" and not os.path.isdir(phase_dir) and os.path.isdir(package_dir):
+        return package_dir
+    return phase_dir
+
+
+def write_document_stage_marker(excel_data: dict, base_dir: str = BASE_DIR) -> str:
+    """Tulis tahap aktif sebagai metadata ringan untuk resolver Streamlit."""
+    package_dir = document_package_dir(excel_data, base_dir)
+    os.makedirs(package_dir, exist_ok=True)
+    marker = os.path.join(package_dir, DOCUMENT_STAGE_MARKER)
+    with open(marker, "w", encoding="utf-8") as handle:
+        handle.write(normalize_document_stage(excel_data.get("Tahap Dokumen")) + "\n")
+    return marker
+
+
+def archive_existing_output(output_dir: str) -> str | None:
+    """Pindahkan output fase sebelumnya ke arsip timestamp, tanpa menghapusnya."""
+    if not os.path.isdir(output_dir):
+        return None
+    files = [entry for entry in os.scandir(output_dir) if entry.is_file()]
+    if not files:
+        return None
+    archive_dir = os.path.join(
+        output_dir, "_Arsip",
+        datetime.now().strftime("%Y%m%d_%H%M%S_%f"),
+    )
+    os.makedirs(archive_dir, exist_ok=True)
+    for entry in files:
+        shutil.move(entry.path, os.path.join(archive_dir, entry.name))
+    return archive_dir
 
 
 def contract_doc_kind(filename: str) -> str | None:
@@ -361,7 +442,10 @@ def _source_funds_detail(excel_data: dict) -> str:
     dipa = str(excel_data.get("Nomor DIPA/DPA", "") or "").strip()
     year = str(excel_data.get("Tahun Anggaran", "") or "").strip()
     mak = str(excel_data.get("Kode Rekening (MAK)", "") or "").strip()
-    parts = [source] if source else []
+    # Sumber pendanaan pada dokumen PPK cukup menunjuk DIPA/DPA dan mata
+    # anggaran. Label umum seperti "APBD" tidak diulang sebelum kalimat
+    # "dibebankan ..." karena template sudah menyediakan konteks pagu.
+    parts = []
     if skpd:
         parts.append(f"dibebankan atas DIPA/DPA {skpd}")
     elif dipa:
@@ -372,7 +456,7 @@ def _source_funds_detail(excel_data: dict) -> str:
     mata_anggaran = dipa or mak
     if mata_anggaran:
         parts.append(f"untuk mata anggaran kegiatan {mata_anggaran}")
-    return ", ".join(parts)
+    return ", ".join(parts) or source
 
 
 def validate_document_stage(excel_data: dict) -> list[str]:
@@ -720,6 +804,8 @@ def replace_in_paragraph(para, replacements):
     full_text = ''.join(run.text for run in para.runs)
     changed   = False
     for old, new in replacements.items():
+        if not isinstance(old, str) or not isinstance(new, str):
+            continue
         if old in full_text:
             full_text = full_text.replace(old, new)
             changed   = True
@@ -728,6 +814,181 @@ def replace_in_paragraph(para, replacements):
         for run in para.runs[1:]:
             run.text = ''
     return changed
+
+
+_PK_PERSONNEL_TABLE_KEY = "__PK_PERSONNEL_ROWS__"
+_PK_EQUIPMENT_TABLE_KEY = "__PK_EQUIPMENT_ROWS__"
+
+
+def _process_dynamic_pk_tables(path, personnel_rows=None, equipment_rows=None):
+    """Replace KAK markers with real Word tables driven by Data PK."""
+    from copy import deepcopy
+    from lxml import etree
+
+    ns = {"w": W_NS}
+    xml_ns = "http://www.w3.org/XML/1998/namespace"
+    personnel_rows = list(personnel_rows or [])
+    equipment_rows = list(equipment_rows or [])
+
+    def qn(local):
+        return f"{{{W_NS}}}{local}"
+
+    def value(raw):
+        return "" if raw is None else str(raw)
+
+    def donor_rpr(cell):
+        nodes = cell.xpath(".//w:rPr", namespaces=ns)
+        return deepcopy(nodes[0]) if nodes else None
+
+    def make_run(raw, base_rpr=None, bold=False):
+        run = etree.Element(qn("r"))
+        if base_rpr is None:
+            rpr = etree.SubElement(run, qn("rPr"))
+            fonts = etree.SubElement(rpr, qn("rFonts"))
+            for attr in ("ascii", "hAnsi", "cs"):
+                fonts.set(qn(attr), "Footlight MT Light")
+            size = etree.SubElement(rpr, qn("sz"))
+            size.set(qn("val"), "24")
+        else:
+            rpr = deepcopy(base_rpr)
+            run.append(rpr)
+        if bold and rpr.find(qn("b")) is None:
+            etree.SubElement(rpr, qn("b"))
+        text_node = etree.SubElement(run, qn("t"))
+        text = value(raw)
+        if text[:1].isspace() or text[-1:].isspace():
+            text_node.set(f"{{{xml_ns}}}space", "preserve")
+        text_node.text = text
+        return run
+
+    def make_cell(raw, width, base_rpr, bold=False, centered=False):
+        cell = etree.Element(qn("tc"))
+        tcpr = etree.SubElement(cell, qn("tcPr"))
+        tcw = etree.SubElement(tcpr, qn("tcW"))
+        tcw.set(qn("w"), str(width))
+        tcw.set(qn("type"), "pct")
+        valign = etree.SubElement(tcpr, qn("vAlign"))
+        valign.set(qn("val"), "center")
+        paragraph = etree.SubElement(cell, qn("p"))
+        ppr = etree.SubElement(paragraph, qn("pPr"))
+        spacing = etree.SubElement(ppr, qn("spacing"))
+        spacing.set(qn("after"), "0")
+        if centered:
+            jc = etree.SubElement(ppr, qn("jc"))
+            jc.set(qn("val"), "center")
+        paragraph.append(make_run(raw, base_rpr, bold=bold))
+        return cell
+
+    def make_table(headers, rows, fields, widths, base_rpr):
+        table = etree.Element(qn("tbl"))
+        tblpr = etree.SubElement(table, qn("tblPr"))
+        tblw = etree.SubElement(tblpr, qn("tblW"))
+        tblw.set(qn("w"), "5000")
+        tblw.set(qn("type"), "pct")
+        layout = etree.SubElement(tblpr, qn("tblLayout"))
+        layout.set(qn("type"), "fixed")
+        borders = etree.SubElement(tblpr, qn("tblBorders"))
+        for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            border = etree.SubElement(borders, qn(side))
+            border.set(qn("val"), "single")
+            border.set(qn("sz"), "4")
+            border.set(qn("space"), "0")
+            border.set(qn("color"), "auto")
+        margins = etree.SubElement(tblpr, qn("tblCellMar"))
+        for side in ("top", "left", "bottom", "right"):
+            margin = etree.SubElement(margins, qn(side))
+            margin.set(qn("w"), "40" if side in ("top", "bottom") else "60")
+            margin.set(qn("type"), "dxa")
+        look = etree.SubElement(tblpr, qn("tblLook"))
+        look.set(qn("val"), "01E0")
+        look.set(qn("firstRow"), "1")
+        grid = etree.SubElement(table, qn("tblGrid"))
+        for width in widths:
+            column = etree.SubElement(grid, qn("gridCol"))
+            column.set(qn("w"), str(width))
+
+        header_row = etree.SubElement(table, qn("tr"))
+        header_pr = etree.SubElement(header_row, qn("trPr"))
+        etree.SubElement(header_pr, qn("tblHeader"))
+        etree.SubElement(header_pr, qn("cantSplit"))
+        for index, header in enumerate(headers):
+            header_row.append(make_cell(header, widths[index], base_rpr, bold=True, centered=True))
+
+        if not rows:
+            rows = [{fields[0]: "", fields[1]: "Belum diisi; mengikuti kebutuhan dan dokumen teknis paket."}]
+        for row_index, row_data in enumerate(rows, 1):
+            row = etree.SubElement(table, qn("tr"))
+            row_pr = etree.SubElement(row, qn("trPr"))
+            etree.SubElement(row_pr, qn("cantSplit"))
+            for index, field in enumerate(fields):
+                raw = row_data.get(field, "")
+                if field == "No" and not raw:
+                    raw = row_index
+                row.append(make_cell(raw, widths[index], base_rpr, centered=index == 0))
+        return table
+
+    def replace_marker(root, marker, rows, headers, fields, widths):
+        for paragraph in root.xpath(".//w:p", namespaces=ns):
+            text_nodes = paragraph.xpath(".//w:t", namespaces=ns)
+            full_text = "".join(node.text or "" for node in text_nodes)
+            if marker not in full_text:
+                continue
+            cell_nodes = paragraph.xpath("ancestor::w:tc[1]", namespaces=ns)
+            if not cell_nodes:
+                continue
+            cell = cell_nodes[0]
+            base_rpr = donor_rpr(cell)
+            new_text = full_text.replace(marker, "").rstrip("\r\n")
+            if text_nodes:
+                text_nodes[0].text = new_text
+                if new_text[:1].isspace() or new_text[-1:].isspace():
+                    text_nodes[0].set(f"{{{xml_ns}}}space", "preserve")
+                for node in text_nodes[1:]:
+                    node.text = ""
+            for old_table in cell.xpath("./w:tbl", namespaces=ns):
+                cell.remove(old_table)
+            table = make_table(headers, rows, fields, widths, base_rpr)
+            insert_at = cell.index(paragraph)
+            if new_text.strip():
+                insert_at += 1
+            else:
+                cell.remove(paragraph)
+            cell.insert(insert_at, table)
+            trailing = etree.SubElement(cell, qn("p"))
+            trailing_pr = etree.SubElement(trailing, qn("pPr"))
+            trailing_spacing = etree.SubElement(trailing_pr, qn("spacing"))
+            trailing_spacing.set(qn("after"), "0")
+            return 1
+        return 0
+
+    with zipfile.ZipFile(path, "r") as source:
+        root = etree.fromstring(source.read("word/document.xml"))
+        count = 0
+        count += replace_marker(
+            root,
+            "\u00abTABEL_PERSONEL_PK\u00bb",
+            personnel_rows,
+            ("No.", "Jabatan", "Sertifikat", "Pengalaman Kerja"),
+            ("No", "Jabatan", "Sertifikat", "Pengalaman Kerja"),
+            (350, 1600, 1800, 1250),
+        )
+        count += replace_marker(
+            root,
+            "\u00abTABEL_PERALATAN_PK\u00bb",
+            equipment_rows,
+            ("No.", "Jenis Alat", "Kapasitas (Minimal)", "Jumlah"),
+            ("No", "Jenis Alat", "Kapasitas (Minimal)", "Jumlah"),
+            (350, 1750, 1750, 1150),
+        )
+        if not count:
+            return 0
+        temp_path = f"{path}.dynamic-tables.tmp"
+        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as target:
+            payload = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+            for item in source.infolist():
+                target.writestr(item, payload if item.filename == "word/document.xml" else source.read(item.filename))
+    os.replace(temp_path, path)
+    return count
 
 
 def _process_table(table, replacements):
@@ -798,6 +1059,14 @@ def _process_header_footer_markers(path, replacements):
                 full_text = ''.join(node.text or '' for node in nodes)
                 new_text = full_text
                 for old, new in replacements.items():
+                    if not isinstance(old, str) or not isinstance(new, str):
+                        continue
+                    if old in {
+                        "\u00abKABUPATEN_KOTA\u00bb",
+                        "\u00abNAMA_SKPD_SINGKAT\u00bb",
+                        "\u00abALAMAT_SKPD\u00bb",
+                    }:
+                        new = new.upper()
                     new_text = new_text.replace(old, new)
                 if new_text == full_text:
                     continue
@@ -826,15 +1095,24 @@ def _process_header_footer_markers(path, replacements):
 def process_docx(path, replacements):
     from docx import Document
     doc   = Document(path)
+    text_replacements = {
+        key: value for key, value in replacements.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
     count = 0
     for para in doc.paragraphs:
-        if replace_in_paragraph(para, replacements):
+        if replace_in_paragraph(para, text_replacements):
             count += 1
     for table in doc.tables:
-        count += _process_table(table, replacements)
+        count += _process_table(table, text_replacements)
     doc.save(path)
-    count += _process_textbox_markers(path, replacements)
-    count += _process_header_footer_markers(path, replacements)
+    count += _process_dynamic_pk_tables(
+        path,
+        replacements.get(_PK_PERSONNEL_TABLE_KEY),
+        replacements.get(_PK_EQUIPMENT_TABLE_KEY),
+    )
+    count += _process_textbox_markers(path, text_replacements)
+    count += _process_header_footer_markers(path, text_replacements)
     return count
 
 
@@ -1420,8 +1698,11 @@ def build_replacements(
         excel_data.get("Lingkup Pekerjaan", "")
     )
     if str(excel_data.get("Kode Jenis Paket", "") or "").strip().upper() == "PK":
-        repl["\u00abTABEL_PERSONEL_PK\u00bb"] = _format_pk_personil_summary(source_excel_path, "PK")
-        repl["\u00abTABEL_PERALATAN_PK\u00bb"] = _format_pk_equipment_summary(source_excel_path)
+        repl[_PK_PERSONNEL_TABLE_KEY] = _personil_rows(source_excel_path, "PK")
+        repl[_PK_EQUIPMENT_TABLE_KEY] = _equipment_rows(source_excel_path)
+    else:
+        repl[_PK_PERSONNEL_TABLE_KEY] = []
+        repl[_PK_EQUIPMENT_TABLE_KEY] = []
     for key in ("Nomor SK PPK", "Tanggal SK PPK", "Uraian SK PPK"):
         repl[FIELD_MAP[key]] = str(excel_data.get(key, "") or "")
     return repl
@@ -1632,6 +1913,15 @@ def generate_multi(xlsm_path: str) -> None:
             print(f"  SKIP baris {row_idx}: sudah di-generate.")
             continue
         excel_data = dict(base_data)
+        # Snapshot kolom 11 menyimpan Tahap Dokumen per paket. Pakai sebagai
+        # overlay sebelum field ringkas Daftar Paket agar multi-generate tidak
+        # memaksa semua paket mengikuti tahap workbook aktif.
+        try:
+            snapshot = json.loads(str(row_vals[10])) if len(row_vals) > 10 and row_vals[10] else {}
+            if isinstance(snapshot, dict):
+                excel_data.update(snapshot)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
         for col_idx, field_name in COL_FIELD.items():
             val = row_vals[col_idx - 1]  # row_vals is 0-indexed
             excel_data[field_name] = str(val) if val is not None else ''
@@ -1659,11 +1949,13 @@ def generate_multi(xlsm_path: str) -> None:
 
         for row_idx, excel_data in paket_list:
             excel_data = auto_terbilang(excel_data)
-            _nf = excel_data.get('Nama Paket (Lengkap)', '').strip()
-            safe_nama = _re.sub(r'[\\/:*?"<>|]', '', _nf).strip()
             _base_lp = '\\\\?\\' + BASE_DIR
-            out_dir = os.path.join(_base_lp, safe_nama or f'OUTPUT_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+            out_dir = document_output_dir(excel_data, _base_lp, mode='generate')
+            write_document_stage_marker(excel_data, _base_lp)
+            archive_dir = archive_existing_output(out_dir)
             os.makedirs(out_dir, exist_ok=True)
+            if archive_dir:
+                print(f"  Arsip {_package_folder_name(excel_data)}: {archive_dir}")
             _kode_template, _folder_template = _template_profile(excel_data)
             word_files = template_files_for_data(BASE_DIR, excel_data)
             filled = 0
@@ -1680,7 +1972,7 @@ def generate_multi(xlsm_path: str) -> None:
                 filled += process_docx(dst, repl)
             status_str = f'SUKSES ({filled} replace) — {datetime.now().strftime("%Y-%m-%d %H:%M")}'
             ws_com.Cells(row_idx, 10).Value = status_str
-            print(f"  Baris {row_idx}: [{safe_nama}] -> {filled} replace")
+            print(f"  Baris {row_idx}: [{_package_folder_name(excel_data)}] -> {filled} replace")
 
         wb.Save()
         wb.Close(SaveChanges=False)
@@ -2067,6 +2359,12 @@ def main():
             if not _rv[3]:  # Kode RUP kosong = baris kosong
                 continue
             _ed = dict(base_data)
+            try:
+                _snapshot = json.loads(str(_rv[10])) if len(_rv) > 10 and _rv[10] else {}
+                if isinstance(_snapshot, dict):
+                    _ed.update(_snapshot)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
             for _ci, _fn in COL_FIELD.items():
                 _v = _rv[_ci - 1]
                 _ed[_fn] = str(_v) if _v is not None else ''
@@ -2106,33 +2404,13 @@ def main():
                 _ed = auto_terbilang(_ed)
                 _kode_template, _folder_template = _template_profile(_ed)
                 word_files = template_files_for_data(BASE_DIR, _ed)
-                _nf  = _ed.get('Nama Paket (Lengkap)', '').strip()
-                _nu  = _ed.get('Nomor Urut Paket', '').strip()
-                # Strip prefix generik (sama seperti mode generate)
-                _STRIP_PA = [
-                    'Belanja Jasa Konsultansi Perencanaan Arsitektur-Jasa Arsitektur Lainnya ',
-                    'Belanja Jasa Konsultansi Perencanaan Arsitektur-Jasa Arsitektur ',
-                    'Belanja Jasa Konsultansi Perencanaan Rekayasa-Jasa Desain Rekayasa untuk Konstruksi ',
-                    'Belanja Jasa Konsultansi Perencanaan ',
-                    'Belanja Jasa Konsultansi ',
-                    'Belanja Jasa ',
-                ]
-                _np = _nf
-                for _pfx in _STRIP_PA:
-                    if _np.startswith(_pfx):
-                        _np = _np[len(_pfx):]
-                        break
-                _nf_folder = f"{_nu}. {_np}" if _nu and _nu != 'None' else _np
-                safe_f = _re.sub(r'[\\/:*?"<>|]', '', _nf_folder).strip()
-                out_dir_pa = os.path.join(_base_pa, safe_f or f'OUTPUT_{_i}')
-
-                # Overwrite: hapus isi folder lama jika ada
-                out_dir_real = os.path.join(BASE_DIR, safe_f or f'OUTPUT_{_i}')
-                if os.path.isdir(out_dir_real):
-                    for _f in os.listdir(out_dir_real):
-                        try: os.remove(os.path.join(out_dir_real, _f))
-                        except: pass
+                _stage = normalize_document_stage(_ed.get('Tahap Dokumen'))
+                out_dir_pa = document_output_dir(_ed, _base_pa, mode='generate')
+                write_document_stage_marker(_ed, _base_pa)
+                archive_dir = archive_existing_output(out_dir_pa)
                 os.makedirs(out_dir_pa, exist_ok=True)
+                if archive_dir:
+                    print(f"  Arsip {_package_folder_name(_ed)}: {archive_dir}")
 
                 # Copy + proses Word
                 for src_fname, out_prefix in word_files:
@@ -2158,7 +2436,8 @@ def main():
                     except Exception as _ex:
                         print(f"    [WARN] PDF gagal ({_df}): {_ex}")
                 total_pdf += n_ok
-                print(f"  OK: {safe_f}/ — {n_ok} PDF")
+                print(f"  OK: {_package_folder_name(_ed)}/{DOCUMENT_OUTPUT_ROOT}/"
+                      f"{DOCUMENT_STAGE_DIRS[_stage]} — {n_ok} PDF")
 
         finally:
             if word:
@@ -2262,29 +2541,10 @@ def main():
     # 2. Auto-terbilang
     excel_data = auto_terbilang(excel_data)
 
-    # 3. Tentukan folder output — strip prefix generik agar nama folder pendek + unik
-    nama_lengkap = excel_data.get('Nama Paket (Lengkap)', '').strip()
-    nomor_urut   = excel_data.get('Nomor Urut Paket', '').strip()
-    # Hapus prefix panjang yang selalu sama agar nama folder tetap di bawah ~200 char
-    _STRIP_PREFIX = [
-        'Belanja Jasa Konsultansi Perencanaan Arsitektur-Jasa Arsitektur Lainnya ',
-        'Belanja Jasa Konsultansi Perencanaan Arsitektur-Jasa Arsitektur ',
-        'Belanja Jasa Konsultansi Perencanaan Rekayasa-Jasa Desain Rekayasa untuk Konstruksi ',
-        'Belanja Jasa Konsultansi Perencanaan ',
-        'Belanja Jasa Konsultansi ',
-        'Belanja Jasa ',
-    ]
-    nama_pendek = nama_lengkap
-    for _pfx in _STRIP_PREFIX:
-        if nama_pendek.startswith(_pfx):
-            nama_pendek = nama_pendek[len(_pfx):]
-            break
-    nama_folder  = f"{nomor_urut}. {nama_pendek}" if nomor_urut and nomor_urut != 'None' else nama_pendek
-    safe_nama    = _re.sub(r'[\\/:*?"<>|]', '', nama_pendek).strip() if nama_pendek else ''
-    safe_folder  = _re.sub(r'[\\/:*?"<>|]', '', nama_folder).strip() if nama_folder else safe_nama
-    _base        = '\\\\?\\' + BASE_DIR
-    out_dir      = os.path.join(_base, safe_folder) if safe_folder \
-                   else os.path.join(_base, f'OUTPUT_{datetime.now().strftime("%Y%m%d_%H%M")}')
+    # 3. Tentukan folder output dari Tahap Dokumen. Semua output baru masuk
+    # folder fase aktif; hasil fase lain tetap utuh.
+    _base = '\\\\?\\' + BASE_DIR
+    out_dir = document_output_dir(excel_data, _base, mode=mode)
 
     # ── Mode PDF (konversi docx existing) ────────────────────────────────────
     if mode == 'pdf':
@@ -2353,9 +2613,14 @@ def main():
             print("ERROR: Tidak ada template yang cocok dengan filter --files.")
             sys.exit(1)
 
-    # 7. Buat folder output
+    # 7. Buat folder output. Bila generate ulang pada fase yang sama, hasil
+    # lama diarsipkan agar tidak hilang dan tidak bercampur dengan batch baru.
+    write_document_stage_marker(excel_data, _base)
+    archive_dir = archive_existing_output(out_dir)
     os.makedirs(out_dir, exist_ok=True)
-    print(f"  Folder: {os.path.basename(out_dir)}/")
+    if archive_dir:
+        print(f"  Arsip output lama: {archive_dir}")
+    print(f"  Folder: {out_dir}/")
 
     # 8. Copy + process .docx
     filled    = 0
@@ -2368,7 +2633,7 @@ def main():
         if not os.path.exists(src):
             print(f"  SKIP (tidak ada): {src_fname}")
             continue
-        repl = build_replacements(excel_data, src_fname)
+        repl = build_replacements(excel_data, src_fname, EXCEL_PATH)
         dst_fname = f"{out_prefix}.docx" if out_prefix else os.path.basename(src_fname)
         dst       = os.path.join(out_dir, dst_fname)
         _rows, _resource_tables = prepare_template_output(

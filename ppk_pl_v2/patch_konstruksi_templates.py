@@ -111,7 +111,12 @@ def find_row(table, label: str):
 
 
 def set_row(table, label: str, value: str, new_label: str | None = None) -> None:
-    row = find_row(table, label)
+    try:
+        row = find_row(table, label)
+    except ValueError:
+        if not new_label:
+            raise
+        row = find_row(table, new_label)
     cells = row.xpath("./w:tc", namespaces=NS)
     if len(cells) < 2:
         raise ValueError(f"Baris KAK bukan dua kolom: {label}")
@@ -120,6 +125,12 @@ def set_row(table, label: str, value: str, new_label: str | None = None) -> None
 
 
 def insert_row_after(table, anchor_label: str, label: str, value: str) -> None:
+    existing = next((row for row in rows(table) if row_label(row) == label), None)
+    if existing is not None:
+        cells = existing.xpath("./w:tc", namespaces=NS)
+        set_text(cells[0], label)
+        set_text(cells[1], value)
+        return
     anchor = find_row(table, anchor_label)
     new_row = copy.deepcopy(anchor)
     cells = new_row.xpath("./w:tc", namespaces=NS)
@@ -130,6 +141,12 @@ def insert_row_after(table, anchor_label: str, label: str, value: str) -> None:
 
 def insert_content_row_after_heading(table, heading_label: str, label: str, value: str) -> None:
     """Insert a normal two-column row after a one-cell section heading."""
+    existing = next((row for row in rows(table) if row_label(row) == label), None)
+    if existing is not None:
+        cells = existing.xpath("./w:tc", namespaces=NS)
+        set_text(cells[0], label)
+        set_text(cells[1], value)
+        return
     heading = find_row(table, heading_label)
     candidates = [row for row in rows(table) if len(row.xpath("./w:tc", namespaces=NS)) >= 2]
     if not candidates:
@@ -175,7 +192,7 @@ def patch_kak(root) -> None:
     set_row(
         table,
         "Sumber Pendanaan",
-        "Pagu anggaran pekerjaan sebesar Rp. «PAGU_ANGKA_FORMAT» ( «PAGU_TERBILANG» ), dan «SUMBER_DANA_DETAIL».",
+        "Pagu anggaran pekerjaan sebesar Rp. «PAGU_ANGKA_FORMAT» ( «PAGU_TERBILANG» ), «SUMBER_DANA_DETAIL».",
     )
     set_row(
         table,
@@ -317,8 +334,8 @@ def patch_uraian_singkat(root) -> None:
     )
     replace_paragraph_start(
         root,
-        "Berdasarkan hasil analisis",
-        "Keluaran pekerjaan berupa hasil fisik, hasil pemeriksaan/pengujian, dokumentasi, dan dokumen serah terima yang dipersyaratkan. Jangka waktu pelaksanaan adalah «JANGKA_WAKTU_HARI» («JANGKA_WAKTU_TERBILANG») hari kalender dengan masa pemeliharaan «MASA_PEMELIHARAAN_HARI» hari kalender sesuai ketentuan kontrak.",
+        "Keluaran pekerjaan",
+        "Keluaran pekerjaan berupa hasil fisik, hasil pemeriksaan/pengujian, dokumentasi, dan dokumen serah terima yang dipersyaratkan. Jangka waktu pelaksanaan adalah «JANGKA_WAKTU_HARI» («JANGKA_WAKTU_TERBILANG») hari kalender. Masa pemeliharaan pekerjaan adalah «MASA_PEMELIHARAAN_HARI» hari kalender sesuai ketentuan kontrak.",
     )
 
     table = root.xpath(".//w:tbl", namespaces=NS)[0]
@@ -331,9 +348,8 @@ def patch_uraian_singkat(root) -> None:
         ("LOKASI", "«LOKASI_PEKERJAAN», «KABUPATEN_KOTA»"),
         ("SUMBER DANA", "«SUMBER_DANA_DETAIL»"),
         ("TAHUN ANGGARAN", "«TAHUN_ANGGARAN»"),
-        ("PAGU", "Rp. «PAGU_ANGKA_FORMAT»"),
+        ("PAGU", "Rp. «PAGU_ANGKA_FORMAT» («PAGU_TERBILANG»)"),
         ("JANGKA WAKTU", "«JANGKA_WAKTU_HARI» («JANGKA_WAKTU_TERBILANG») hari kalender"),
-        ("MASA PEMELIHARAAN", "«MASA_PEMELIHARAAN_HARI» hari kalender"),
     ]
     existing = rows(table)
     while len(existing) < len(desired):
