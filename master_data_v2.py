@@ -102,7 +102,16 @@ def read_domain_data(excel_path: str | os.PathLike[str]) -> dict[str, list[dict[
     """Baca tabel domain JKK/PK. Hanya data aktif yang dikembalikan."""
     wb, temp_dir = _read_workbook(excel_path)
     try:
-        jkk = _read_table(wb[JKK_SHEET], "tblJKKPersonil") if JKK_SHEET in wb.sheetnames else []
+        # V2 terbaru menyatukan tabel JKK ke Data PK. Data JKK lama tetap
+        # dibaca sebagai fallback compatibility.
+        if PK_SHEET in wb.sheetnames and "tblJKKPersonil" in wb[PK_SHEET].tables:
+            jkk = _read_table(wb[PK_SHEET], "tblJKKPersonil")
+        elif JKK_SHEET in wb.sheetnames and "tblJKKPersonil_Legacy" in wb[JKK_SHEET].tables:
+            jkk = _read_table(wb[JKK_SHEET], "tblJKKPersonil_Legacy")
+        elif JKK_SHEET in wb.sheetnames:
+            jkk = _read_table(wb[JKK_SHEET], "tblJKKPersonil")
+        else:
+            jkk = []
         pk_personil = _read_table(wb[PK_SHEET], "tblPKPersonil") if PK_SHEET in wb.sheetnames else []
         pk_alat = _read_table(wb[PK_SHEET], "tblPKPeralatan") if PK_SHEET in wb.sheetnames else []
 
@@ -252,7 +261,13 @@ def restore_snapshot(excel_path: str | os.PathLike[str], snapshot: dict[str, Any
             if label in labels:
                 ws.Cells(labels[label], 2).Value = value
 
-        _restore_table(wb.Worksheets(JKK_SHEET), "tblJKKPersonil", normalized["data_jkk"]["personil"])
+        try:
+            jkk_ws = _com_sheet_with_table(wb, "tblJKKPersonil", [PK_SHEET])
+            jkk_name = "tblJKKPersonil"
+        except ValueError:
+            jkk_ws = _com_sheet_with_table(wb, "tblJKKPersonil_Legacy", [JKK_SHEET])
+            jkk_name = "tblJKKPersonil_Legacy"
+        _restore_table(jkk_ws, jkk_name, normalized["data_jkk"]["personil"])
         _restore_table(wb.Worksheets(PK_SHEET), "tblPKPersonil", normalized["data_pk"]["personil"])
         _restore_table(wb.Worksheets(PK_SHEET), "tblPKPeralatan", normalized["data_pk"]["peralatan"])
         wb.Save()
@@ -272,3 +287,15 @@ def _restore_table(ws: Any, table_name: str, rows: list[dict[str, Any]]) -> None
         values = rows[offset] if offset < len(rows) else {}
         for col, header in enumerate(headers, 1):
             ws.Cells(excel_row, col).Value = values.get(header, "")
+
+
+def _com_sheet_with_table(wb: Any, table_name: str, preferred: list[str]) -> Any:
+    """Cari sheet pemilik ListObject; preferred pertama menjadi source of truth."""
+    for sheet_name in preferred:
+        try:
+            ws = wb.Worksheets(sheet_name)
+            ws.ListObjects(table_name)
+            return ws
+        except Exception:
+            continue
+    raise ValueError(f"Tabel {table_name!r} tidak ditemukan")
