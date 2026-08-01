@@ -4,6 +4,8 @@
 import sys, os, shutil, re as _re, zipfile, argparse
 from datetime import date, datetime, timedelta
 
+W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+
 RUNTIME_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -558,7 +560,14 @@ def template_files_for_data(base_dir: str, excel_data: dict):
     pagu = _numeric_value(excel_data.get('Pagu Anggaran (Angka)'))
     result = []
     for name in sorted(os.listdir(scan_dir), key=lambda n: (int(_re.match(r'^\d+', n).group()) if _re.match(r'^\d+', n) else 9999, n)):
-        if not name.lower().endswith('.docx') or name.startswith('~$') or '.bak' in name.lower():
+        lower_name = name.lower()
+        if (
+            not lower_name.endswith('.docx')
+            or name.startswith('~$')
+            or '.bak' in lower_name
+            or '.before-' in lower_name
+            or lower_name.endswith('.tmp.docx')
+        ):
             continue
         # Konstruksi memiliki dua varian SPPBJ; pilih sesuai Pagu Anggaran.
         if code == 'PK' and name.lower().startswith('3. sppbj - sampai dengan 200 juta') and pagu > 200_000_000:
@@ -646,6 +655,64 @@ def merge_personil_template(template_path: str, excel_path: str, output_path: st
     return len(people)
 
 
+def _equipment_rows(excel_path: str):
+    """Baca tabel peralatan sederhana PK dari kolom F:I sheet Data PK."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(excel_path, read_only=True, data_only=True, keep_links=False)
+    try:
+        ws = wb['Data PK']
+        rows = []
+        for values in ws.iter_rows(min_row=5, max_row=19, min_col=6, max_col=9, values_only=True):
+            if not any(v not in (None, '') for v in values[1:]):
+                continue
+            rows.append({
+                'No': values[0],
+                'Jenis Alat': values[1] or '',
+                'Kapasitas (Minimal)': values[2] or '',
+                'Jumlah': values[3] or '',
+            })
+        return rows
+    finally:
+        wb.close()
+
+
+def _format_pk_personil_summary(excel_path: str, code: str = 'PK') -> str:
+    rows = _personil_rows(excel_path, code)
+    if not rows:
+        return 'Belum diisi; mengikuti kebutuhan dan dokumen teknis paket.'
+    return '\n'.join(
+        f"{row.get('No') or index}. {row.get('Jabatan', '')}; "
+        f"Sertifikat: {row.get('Sertifikat', '')}; "
+        f"Pengalaman: {row.get('Pengalaman Kerja', '')}"
+        for index, row in enumerate(rows, 1)
+    )
+
+
+def _format_pk_equipment_summary(excel_path: str) -> str:
+    rows = _equipment_rows(excel_path)
+    if not rows:
+        return 'Belum diisi; mengikuti kebutuhan dan dokumen teknis paket.'
+    return '\n'.join(
+        f"{row.get('No') or index}. {row.get('Jenis Alat', '')}; "
+        f"Kapasitas minimal: {row.get('Kapasitas (Minimal)', '')}; "
+        f"Jumlah: {row.get('Jumlah', '')}"
+        for index, row in enumerate(rows, 1)
+    )
+
+
+def prepare_template_output(src: str, dst: str, excel_path: str, code: str) -> tuple[int, int]:
+    """Copy a template and apply the Excel-driven personil table hook."""
+    if os.path.basename(src).lower() == '9. list_personil.docx':
+        personil_rows = merge_personil_template(src, excel_path, dst, code)
+    else:
+        shutil.copy2(src, dst)
+        personil_rows = 0
+    # KAK uses text markers for the compact resource summary. The authoritative
+    # personil table remains the dedicated 9. List_Personil.docx template.
+    return personil_rows, 0
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # WORD REPLACEMENT
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -709,6 +776,53 @@ def _process_textbox_markers(path, replacements):
     return count
 
 
+def _process_header_footer_markers(path, replacements):
+    """Replace placeholders in Word headers/footers, which python-docx skips."""
+    from lxml import etree
+
+    changed_parts = {}
+    count = 0
+    with zipfile.ZipFile(path, 'r') as source:
+        for item in source.infolist():
+            if not (
+                item.filename.startswith('word/header')
+                or item.filename.startswith('word/footer')
+            ) or not item.filename.endswith('.xml'):
+                continue
+            root = etree.fromstring(source.read(item.filename))
+            part_count = 0
+            for paragraph in root.xpath('.//w:p', namespaces={'w': W_NS}):
+                nodes = paragraph.xpath('.//w:t', namespaces={'w': W_NS})
+                if not nodes:
+                    continue
+                full_text = ''.join(node.text or '' for node in nodes)
+                new_text = full_text
+                for old, new in replacements.items():
+                    new_text = new_text.replace(old, new)
+                if new_text == full_text:
+                    continue
+                nodes[0].text = new_text
+                for node in nodes[1:]:
+                    node.text = ''
+                part_count += 1
+            if part_count:
+                changed_parts[item.filename] = etree.tostring(
+                    root, xml_declaration=True, encoding='UTF-8', standalone=True
+                )
+                count += part_count
+        if not changed_parts:
+            return 0
+        temp_path = f'{path}.header-footer.tmp'
+        with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as target:
+            for item in source.infolist():
+                target.writestr(
+                    item,
+                    changed_parts.get(item.filename, source.read(item.filename)),
+                )
+    os.replace(temp_path, path)
+    return count
+
+
 def process_docx(path, replacements):
     from docx import Document
     doc   = Document(path)
@@ -720,6 +834,7 @@ def process_docx(path, replacements):
         count += _process_table(table, replacements)
     doc.save(path)
     count += _process_textbox_markers(path, replacements)
+    count += _process_header_footer_markers(path, replacements)
     return count
 
 
@@ -1125,7 +1240,12 @@ def auto_terbilang(excel_data: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 # BUILD REPLACEMENTS
 # ═══════════════════════════════════════════════════════════════════════════════
-def build_replacements(excel_data: dict, document_name: str = "") -> dict:
+def build_replacements(
+    excel_data: dict,
+    document_name: str = "",
+    excel_path: str | None = None,
+) -> dict:
+    source_excel_path = excel_path or EXCEL_PATH
     stage = normalize_document_stage(excel_data.get("Tahap Dokumen"))
     kind = contract_doc_kind(document_name)
     detail = detail_enabled(stage, kind)
@@ -1299,6 +1419,9 @@ def build_replacements(excel_data: dict, document_name: str = "") -> dict:
     repl["\u00abLINGKUP_PEKERJAAN\u00bb"] = _format_lingkup_pekerjaan(
         excel_data.get("Lingkup Pekerjaan", "")
     )
+    if str(excel_data.get("Kode Jenis Paket", "") or "").strip().upper() == "PK":
+        repl["\u00abTABEL_PERSONEL_PK\u00bb"] = _format_pk_personil_summary(source_excel_path, "PK")
+        repl["\u00abTABEL_PERALATAN_PK\u00bb"] = _format_pk_equipment_summary(source_excel_path)
     for key in ("Nomor SK PPK", "Tanggal SK PPK", "Uraian SK PPK"):
         repl[FIELD_MAP[key]] = str(excel_data.get(key, "") or "")
     return repl
@@ -1541,7 +1664,8 @@ def generate_multi(xlsm_path: str) -> None:
             _base_lp = '\\\\?\\' + BASE_DIR
             out_dir = os.path.join(_base_lp, safe_nama or f'OUTPUT_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
             os.makedirs(out_dir, exist_ok=True)
-            word_files = template_auto_detect(BASE_DIR) or _word_files_fallback()
+            _kode_template, _folder_template = _template_profile(excel_data)
+            word_files = template_files_for_data(BASE_DIR, excel_data)
             filled = 0
             for src_fname, out_prefix in word_files:
                 src = os.path.join(BASE_DIR, src_fname)
@@ -1549,8 +1673,10 @@ def generate_multi(xlsm_path: str) -> None:
                     continue
                 dst_fname = f"{out_prefix}.docx" if out_prefix else src_fname
                 dst = os.path.join(out_dir, dst_fname)
-                shutil.copy2(src, dst)
-                repl = build_replacements(excel_data, src_fname)
+                _rows, _resource_tables = prepare_template_output(
+                    src, dst, xlsm_path, _kode_template
+                )
+                repl = build_replacements(excel_data, src_fname, xlsm_path)
                 filled += process_docx(dst, repl)
             status_str = f'SUKSES ({filled} replace) — {datetime.now().strftime("%Y-%m-%d %H:%M")}'
             ws_com.Cells(row_idx, 10).Value = status_str
@@ -1966,7 +2092,6 @@ def main():
 
         print(f"  {len(paket_list)} paket ditemukan. Generate Word + PDF...")
 
-        word_files = template_auto_detect(BASE_DIR) or _word_files_fallback()
         _base_pa   = '\\\\?\\' + BASE_DIR
         total_pdf  = 0
 
@@ -1979,6 +2104,8 @@ def main():
 
             for _ed in paket_list:
                 _ed = auto_terbilang(_ed)
+                _kode_template, _folder_template = _template_profile(_ed)
+                word_files = template_files_for_data(BASE_DIR, _ed)
                 _nf  = _ed.get('Nama Paket (Lengkap)', '').strip()
                 _nu  = _ed.get('Nomor Urut Paket', '').strip()
                 # Strip prefix generik (sama seperti mode generate)
@@ -2014,8 +2141,8 @@ def main():
                         continue
                     dst_fname = f"{out_prefix}.docx" if out_prefix else src_fname
                     dst = os.path.join(out_dir_pa, dst_fname)
-                    shutil.copy2(src, dst)
-                    repl = build_replacements(_ed, src_fname)
+                    prepare_template_output(src, dst, EXCEL_PATH, _kode_template)
+                    repl = build_replacements(_ed, src_fname, EXCEL_PATH)
                     process_docx(dst, repl)
 
                 # Convert semua .docx → PDF, hapus .docx setelahnya
@@ -2244,11 +2371,13 @@ def main():
         repl = build_replacements(excel_data, src_fname)
         dst_fname = f"{out_prefix}.docx" if out_prefix else os.path.basename(src_fname)
         dst       = os.path.join(out_dir, dst_fname)
-        if os.path.basename(src).lower() == '9. list_personil.docx':
-            _rows = merge_personil_template(src, EXCEL_PATH, dst, _kode_template)
+        _rows, _resource_tables = prepare_template_output(
+            src, dst, EXCEL_PATH, _kode_template
+        )
+        if _rows:
             print(f"  Personil Excel -> Word: {_rows} baris")
-        else:
-            shutil.copy2(src, dst)
+        if _resource_tables:
+            print(f"  Sumber daya PK Excel -> KAK: {_resource_tables} tabel")
         n = process_docx(dst, repl)
         filled += n
         if pdf_only:
