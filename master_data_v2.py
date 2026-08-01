@@ -73,6 +73,10 @@ def read_master_data(excel_path: str | os.PathLike[str]) -> dict[str, Any]:
             if label is None:
                 continue
             result[str(label).strip()] = _value(row[1].value)
+        result["Lingkup Pekerjaan"] = [
+            str(ws.cell(row_number, 5).value or "").strip()
+            for row_number in range(14, 24)
+        ]
         return result
     finally:
         _close_workbook(wb, temp_dir)
@@ -270,6 +274,10 @@ def restore_snapshot(excel_path: str | os.PathLike[str], snapshot: dict[str, Any
         for label, value in normalized["master_data"].items():
             if label in labels:
                 ws.Cells(labels[label], 2).Value = value
+        scope = normalized["master_data"].get("Lingkup Pekerjaan", [])
+        if isinstance(scope, list):
+            for index, row_number in enumerate(range(14, 24)):
+                ws.Cells(row_number, 5).Value = scope[index] if index < len(scope) else None
 
         try:
             jkk_ws = _com_sheet_with_table(wb, "tblJKKPersonil", [PK_SHEET])
