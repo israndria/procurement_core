@@ -442,10 +442,9 @@ def _source_funds_detail(excel_data: dict) -> str:
     dipa = str(excel_data.get("Nomor DIPA/DPA", "") or "").strip()
     year = str(excel_data.get("Tahun Anggaran", "") or "").strip()
     mak = str(excel_data.get("Kode Rekening (MAK)", "") or "").strip()
-    # Sumber pendanaan pada dokumen PPK cukup menunjuk DIPA/DPA dan mata
-    # anggaran. Label umum seperti "APBD" tidak diulang sebelum kalimat
-    # "dibebankan ..." karena template sudah menyediakan konteks pagu.
-    parts = []
+    # Pertahankan label sumber dari SPSE (mis. APBD/APBDP) sebagai konteks
+    # awal. Detail DIPA/DPA tetap berasal dari field Excel yang diisi user.
+    parts = [source.rstrip(" ,")] if source else []
     if skpd:
         parts.append(f"dibebankan atas DIPA/DPA {skpd}")
     elif dipa:
@@ -653,6 +652,12 @@ def template_files_for_data(base_dir: str, excel_data: dict):
             or lower_name.endswith('.tmp.docx')
         ):
             continue
+        if (
+            code == 'PK'
+            and lower_name == '9. list_personil.docx'
+            and os.path.isfile(os.path.join(scan_dir, '9. List_Personil_Alat.docx'))
+        ):
+            continue
         # Konstruksi memiliki dua varian SPPBJ; pilih sesuai Pagu Anggaran.
         if code == 'PK' and name.lower().startswith('3. sppbj - sampai dengan 200 juta') and pagu > 200_000_000:
             continue
@@ -739,6 +744,146 @@ def merge_personil_template(template_path: str, excel_path: str, output_path: st
     return len(people)
 
 
+def merge_personil_alat_template(template_path: str, excel_path: str, output_path: str):
+    """Isi tabel personil/peralatan PK dari Data PK; alat dukung marker dan fallback header."""
+    import copy
+    from lxml import etree
+
+    ns = {'w': W_NS}
+    xml_ns = 'http://www.w3.org/XML/1998/namespace'
+    marker_map = {
+        '[[NO]]': 'No',
+        '[[JABATAN]]': 'Jabatan',
+        '[[SERTIFIKAT]]': 'Sertifikat',
+        '[[PENGALAMAN]]': 'Pengalaman Kerja',
+    }
+    equipment_marker_map = {
+        '[[NO_ALAT]]': 'No',
+        '[[NAMA_ALAT]]': 'Jenis Alat',
+        '[[JUMLAH_ALAT]]': 'Jumlah',
+        '[[KAPASITAS_ALAT]]': 'Kapasitas (Minimal)',
+    }
+    equipment_headers = {
+        'no': 'No',
+        'namaalat': 'Jenis Alat',
+        'jenisalat': 'Jenis Alat',
+        'jumlah': 'Jumlah',
+        'kapasitas': 'Kapasitas (Minimal)',
+        'kapasitasminimal': 'Kapasitas (Minimal)',
+    }
+
+    def qn(local):
+        return f'{{{W_NS}}}{local}'
+
+    def normalized(value):
+        return _re.sub(r'[^a-z0-9]+', '', str(value or '').casefold())
+
+    def cell_text(cell):
+        return ''.join(cell.xpath('.//w:t/text()', namespaces=ns)).strip()
+
+    def set_cell_text(cell, value):
+        text = '' if value is None else str(value)
+        text_nodes = cell.xpath('.//w:t', namespaces=ns)
+        if not text_nodes:
+            paragraphs = cell.xpath('./w:p', namespaces=ns)
+            paragraph = paragraphs[0] if paragraphs else etree.SubElement(cell, qn('p'))
+            run = paragraph.xpath('./w:r', namespaces=ns)
+            if run:
+                run = run[0]
+            else:
+                run = etree.SubElement(paragraph, qn('r'))
+                paragraph_rpr = paragraph.xpath('./w:pPr/w:rPr', namespaces=ns)
+                if paragraph_rpr:
+                    run.append(copy.deepcopy(paragraph_rpr[0]))
+            text_nodes = [etree.SubElement(run, qn('t'))]
+        text_nodes[0].text = text
+        if text[:1].isspace() or text[-1:].isspace():
+            text_nodes[0].set(f'{{{xml_ns}}}space', 'preserve')
+        else:
+            text_nodes[0].attrib.pop(f'{{{xml_ns}}}space', None)
+        for node in text_nodes[1:]:
+            node.text = ''
+
+    def trim_and_clone(table, rows, field_by_column=None, markers=None):
+        table_rows = table.xpath('./w:tr', namespaces=ns)
+        if len(table_rows) < 2:
+            raise ValueError(f'Tabel donor tidak memiliki row data: {template_path}')
+        donor = table_rows[1]
+        for extra in table_rows[2:]:
+            table.remove(extra)
+        for index, data in enumerate(rows, 1):
+            row = copy.deepcopy(donor)
+            if markers:
+                values = {
+                    marker: str(data.get(field) or (index if field == 'No' else ''))
+                    for marker, field in markers.items()
+                }
+                for node in row.xpath('.//w:t', namespaces=ns):
+                    for marker, value in values.items():
+                        node.text = (node.text or '').replace(marker, value)
+            else:
+                cells = row.xpath('./w:tc', namespaces=ns)
+                for column, cell in enumerate(cells):
+                    field = field_by_column[column] if column < len(field_by_column) else None
+                    value = data.get(field, '') if field else ''
+                    if field == 'No' and not value:
+                        value = index
+                    set_cell_text(cell, value)
+            table.append(row)
+        table.remove(donor)
+        return len(rows)
+
+    people = _personil_rows(excel_path, 'PK')
+    equipment = _equipment_rows(excel_path)
+    with zipfile.ZipFile(template_path, 'r') as zin:
+        root = etree.fromstring(zin.read('word/document.xml'))
+        tables = root.xpath('.//w:tbl', namespaces=ns)
+        personnel_table = next(
+            (table for table in tables
+             if '[[JABATAN]]' in ''.join(table.xpath('.//w:t/text()', namespaces=ns))),
+            None,
+        )
+
+        def is_equipment_table(table):
+            header_cells = table.xpath('./w:tr[1]/w:tc', namespaces=ns)
+            if not header_cells:
+                return False
+            headers = {normalized(cell_text(cell)) for cell in header_cells}
+            has_name = bool(headers.intersection({'namaalat', 'jenisalat'}))
+            has_capacity = bool(headers.intersection({'kapasitas', 'kapasitasminimal'}))
+            return has_name and has_capacity
+
+        equipment_table = next(
+            (table for table in tables if is_equipment_table(table)),
+            None,
+        )
+        if personnel_table is None or equipment_table is None:
+            raise ValueError(f'Tabel personil/alat tidak ditemukan: {template_path}')
+        personnel_count = trim_and_clone(
+            personnel_table, people, markers=marker_map
+        )
+        equipment_text = ''.join(equipment_table.xpath('.//w:t/text()', namespaces=ns))
+        if any(marker in equipment_text for marker in equipment_marker_map):
+            equipment_count = trim_and_clone(
+                equipment_table, equipment, markers=equipment_marker_map
+            )
+        else:
+            header_cells = equipment_table.xpath('./w:tr[1]/w:tc', namespaces=ns)
+            field_by_column = [equipment_headers.get(normalized(cell_text(cell))) for cell in header_cells]
+            equipment_count = trim_and_clone(
+                equipment_table, equipment, field_by_column=field_by_column
+            )
+        for node in root.xpath('.//w:t', namespaces=ns):
+            if node.text:
+                for marker in (*marker_map, *equipment_marker_map):
+                    node.text = node.text.replace(marker, '')
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+            payload = etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone='yes')
+            for item in zin.infolist():
+                zout.writestr(item, payload if item.filename == 'word/document.xml' else zin.read(item.filename))
+    return personnel_count, equipment_count
+
+
 def _equipment_rows(excel_path: str):
     """Baca tabel peralatan sederhana PK dari kolom F:I sheet Data PK."""
     from openpyxl import load_workbook
@@ -786,14 +931,15 @@ def _format_pk_equipment_summary(excel_path: str) -> str:
 
 
 def prepare_template_output(src: str, dst: str, excel_path: str, code: str) -> tuple[int, int]:
-    """Copy a template and apply the Excel-driven personil table hook."""
-    if os.path.basename(src).lower() == '9. list_personil.docx':
+    """Copy template and apply Excel-driven PK personil/peralatan tables."""
+    source_name = os.path.basename(src).lower()
+    if code == 'PK' and source_name == '9. list_personil_alat.docx':
+        return merge_personil_alat_template(src, excel_path, dst)
+    if source_name == '9. list_personil.docx':
         personil_rows = merge_personil_template(src, excel_path, dst, code)
     else:
         shutil.copy2(src, dst)
         personil_rows = 0
-    # KAK uses text markers for the compact resource summary. The authoritative
-    # personil table remains the dedicated 9. List_Personil.docx template.
     return personil_rows, 0
 
 
@@ -2636,13 +2782,13 @@ def main():
         repl = build_replacements(excel_data, src_fname, EXCEL_PATH)
         dst_fname = f"{out_prefix}.docx" if out_prefix else os.path.basename(src_fname)
         dst       = os.path.join(out_dir, dst_fname)
-        _rows, _resource_tables = prepare_template_output(
+        _rows, _equipment_rows_count = prepare_template_output(
             src, dst, EXCEL_PATH, _kode_template
         )
         if _rows:
             print(f"  Personil Excel -> Word: {_rows} baris")
-        if _resource_tables:
-            print(f"  Sumber daya PK Excel -> KAK: {_resource_tables} tabel")
+        if _equipment_rows_count:
+            print(f"  Peralatan Excel -> Word: {_equipment_rows_count} baris")
         n = process_docx(dst, repl)
         filled += n
         if pdf_only:
