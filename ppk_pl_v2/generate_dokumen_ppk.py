@@ -1748,6 +1748,7 @@ def build_replacements(
         # underscore; field substantif tertentu tetap ditampilkan apa adanya.
         upload_blank_fields = CONTRACT_FIELD_KEYS - {
             "Masa Pemeliharaan (Hari)", "Sistem Pembayaran",
+            "Uang Muka (%)",
             "Ada Wakil Sah?",
             "Nilai Penawaran (Angka)", "Nilai Penawaran (Terbilang)",
             "Nilai Kontrak (Angka)", "Nilai Kontrak (Terbilang)",
@@ -1761,6 +1762,9 @@ def build_replacements(
         ).strip()
         if masa_pemeliharaan:
             repl[FIELD_MAP["Masa Pemeliharaan (Hari)"]] = masa_pemeliharaan
+        uang_muka = str(excel_data.get("Uang Muka (%)", "") or "").strip()
+        if uang_muka:
+            repl[FIELD_MAP["Uang Muka (%)"]] = _format_percentage(uang_muka)
 
     # Placeholder blok dinamis: rekening bank dan harga kontrak hanya pada
     # BERKONTRAK. Sistem pembayaran tetap ditampilkan sejak UPLOAD AWAL.
@@ -1798,7 +1802,7 @@ def build_replacements(
         "diberikan uang muka paling sedikit sebesar 30% dari Nilai Kontrak."
     )
     repl["\u00abUANG_MUKA_KONTRAK\u00bb"] = ""
-    if contract and repl.get("\u00abUANG_MUKA_PERSEN\u00bb"):
+    if repl.get("\u00abUANG_MUKA_PERSEN\u00bb"):
         repl["\u00abUANG_MUKA_KONTRAK\u00bb"] = (
             "Kontrak ini diberikan uang muka sebesar "
             f"{repl['\u00abUANG_MUKA_PERSEN\u00bb']} dari Nilai Kontrak"
