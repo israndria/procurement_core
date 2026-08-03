@@ -77,10 +77,20 @@ Private Function RingkasLog(raw As String) As String
     lines = Split(raw, Chr(10))
     Dim out As String
     Dim i As Long
+    Dim skipPthNoise As Boolean
     For i = 0 To UBound(lines)
         Dim ln As String
         ln = Trim(lines(i))
         If ln = "" Then GoTo Skip
+        If skipPthNoise Then
+            If InStr(ln, "Remainder of file ignored") > 0 Then skipPthNoise = False
+            GoTo Skip
+        End If
+        If InStr(ln, "Error processing line") > 0 Or _
+           InStr(ln, "sphinxcontrib_jsmath") > 0 Then
+            skipPthNoise = True
+            GoTo Skip
+        End If
         ' Skip baris noise teknis
         If InStr(ln, "SyntaxWarning") > 0 Then GoTo Skip
         If InStr(ln, "generate_dokumen_ppk.py:") > 0 Then GoTo Skip

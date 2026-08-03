@@ -1288,10 +1288,29 @@ def _kill_lingering_word():
         pass
 
 
+def _new_word_app():
+    """Buat instance Word COM terisolasi untuk batch export."""
+    import win32com.client
+    word = win32com.client.DispatchEx("Word.Application")
+    word.Visible = False
+    word.DisplayAlerts = 0
+    return word
+
+
+def _quit_word_app(word) -> None:
+    if word is None:
+        return
+    try:
+        word.Quit(SaveChanges=False)
+    except Exception:
+        pass
+
+
 def export_docx_to_pdf(docx_path: str, pdf_path: str) -> None:
     import win32com.client, pythoncom, tempfile, shutil as _sh
     pythoncom.CoInitialize()
     word = None
+    doc = None
     # Word COM tidak bisa buka path > 260 char — pakai folder temp pendek sebagai relay
     src_abs = _com_path(os.path.abspath(docx_path))
     dst_abs = _com_path(os.path.abspath(pdf_path))
@@ -1339,17 +1358,18 @@ def export_docx_to_pdf(docx_path: str, pdf_path: str) -> None:
             BitmapMissingFonts=True,
             UseISO19005_1=False,
         )
-        doc.Close(SaveChanges=False)
         # Kalau pakai tmp, copy PDF hasil ke tujuan sebenarnya (pakai \\?\ agar path panjang OK)
         if use_tmp and os.path.exists(tmp_pdf):
             lp_dst = pdf_path if pdf_path.startswith('\\\\?\\') else '\\\\?\\' + dst_abs
             _sh.copy2(tmp_pdf, lp_dst)
     finally:
-        if word:
+        if doc:
             try:
-                word.Quit(SaveChanges=False)
+                doc.Close(SaveChanges=False)
             except Exception:
                 pass
+        if word:
+            _quit_word_app(word)
         pythoncom.CoUninitialize()
         if use_tmp and tmp_dir and os.path.isdir(tmp_dir):
             try: _sh.rmtree(tmp_dir)
@@ -1371,6 +1391,7 @@ def _export_one(word, docx_path: str, pdf_path: str) -> None:
         open_path, out_path = tmp_docx, tmp_pdf
     else:
         open_path, out_path, tmp_dir = src_abs, dst_abs, None
+    doc = None
     try:
         doc = word.Documents.Open(open_path, ReadOnly=False, AddToRecentFiles=False)
         try: doc.ShowGrammaticalErrors = False
@@ -1383,14 +1404,57 @@ def _export_one(word, docx_path: str, pdf_path: str) -> None:
             CreateBookmarks=0, DocStructureTags=True, BitmapMissingFonts=True,
             UseISO19005_1=False,
         )
-        doc.Close(SaveChanges=False)
         if use_tmp and os.path.exists(tmp_pdf):
             lp_dst = pdf_path if pdf_path.startswith('\\\\?\\') else '\\\\?\\' + dst_abs
             _sh.copy2(tmp_pdf, lp_dst)
     finally:
+        if doc:
+            try:
+                doc.Close(SaveChanges=False)
+            except Exception:
+                pass
         if use_tmp and tmp_dir and os.path.isdir(tmp_dir):
             try: __import__('shutil').rmtree(tmp_dir)
             except: pass
+
+
+def _export_one_resilient(word, docx_path: str, pdf_path: str):
+    """Export dengan satu retry memakai instance Word baru bila COM disconnect."""
+    last_error = None
+    for attempt in range(2):
+        try:
+            _export_one(word, docx_path, pdf_path)
+            return word, None
+        except Exception as exc:
+            last_error = exc
+            if attempt == 1:
+                break
+            print(f"  Retry Word COM: {os.path.basename(docx_path)}")
+            _quit_word_app(word)
+            try:
+                word = _new_word_app()
+            except Exception as restart_error:
+                last_error = RuntimeError(
+                    f"Word COM gagal dan restart juga gagal: {restart_error}"
+                )
+                break
+    return word, last_error
+
+
+def _remove_file_resilient(path: str):
+    """Hapus DOCX setelah Word ditutup; beri waktu untuk melepas handle COM/Drive."""
+    import time
+    last_error = None
+    for _attempt in range(10):
+        try:
+            os.remove(path)
+            return None
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.2)
+    return last_error
 
 
 def print_semua_pdf(out_dir: str) -> list:
@@ -1405,22 +1469,20 @@ def print_semua_pdf(out_dir: str) -> list:
     pythoncom.CoInitialize()
     word = None
     try:
-        word = win32com.client.DispatchEx("Word.Application")
-        word.Visible = False
-        word.DisplayAlerts = 0
+        word = _new_word_app()
         for f in files:
             docx = os.path.join(out_dir, f)
             pdf  = docx[:-5] + '.pdf'
             try:
-                _export_one(word, docx, pdf)
+                word, error = _export_one_resilient(word, docx, pdf)
+                if error:
+                    raise error
                 print(f"  PDF OK: {f[:-5]}.pdf")
             except Exception as e:
                 errors.append(f"{f}: {e}")
                 print(f"  PDF GAGAL: {f}: {e}")
     finally:
-        if word:
-            try: word.Quit(SaveChanges=False)
-            except: pass
+        _quit_word_app(word)
         pythoncom.CoUninitialize()
     return errors
 
@@ -2542,13 +2604,13 @@ def main():
 
         _base_pa   = '\\\\?\\' + BASE_DIR
         total_pdf  = 0
+        completed_print_all_docx = []
+        print_all_cleanup_errors = []
 
         pythoncom.CoInitialize()
         word = None
         try:
-            word = win32com.client.DispatchEx("Word.Application")
-            word.Visible = False
-            word.DisplayAlerts = 0
+            word = _new_word_app()
 
             for _ed in paket_list:
                 _ed = auto_terbilang(_ed)
@@ -2580,8 +2642,10 @@ def main():
                     _dp = os.path.join(out_dir_pa, _df)
                     _pp = _dp[:-5] + '.pdf'
                     try:
-                        _export_one(word, _dp, _pp)
-                        os.remove(_dp)
+                        word, _export_error = _export_one_resilient(word, _dp, _pp)
+                        if _export_error:
+                            raise _export_error
+                        completed_print_all_docx.append(_dp)
                         n_ok += 1
                     except Exception as _ex:
                         print(f"    [WARN] PDF gagal ({_df}): {_ex}")
@@ -2590,12 +2654,21 @@ def main():
                       f"{DOCUMENT_STAGE_DIRS[_stage]} — {n_ok} PDF")
 
         finally:
-            if word:
-                try: word.Quit(SaveChanges=False)
-                except: pass
+            _quit_word_app(word)
             pythoncom.CoUninitialize()
 
+        for _docx in completed_print_all_docx:
+            _cleanup_error = _remove_file_resilient(_docx)
+            if _cleanup_error:
+                print_all_cleanup_errors.append(
+                    f"{os.path.basename(_docx)}: {_cleanup_error}"
+                )
+                print(f"    DOCX GAGAL DIHAPUS ({os.path.basename(_docx)}): {_cleanup_error}")
+
         _kill_lingering_word()
+        if print_all_cleanup_errors:
+            print(f"\nPrint All gagal membersihkan {len(print_all_cleanup_errors)} DOCX.")
+            sys.exit(1)
         print(f"\nSelesai. Total PDF: {total_pdf} dari {len(paket_list)} paket.")
         sys.exit(0)
 
@@ -2778,6 +2851,8 @@ def main():
     pdf_only  = (mode == 'pdf-only' or mode == 'selective')
     # dst_list: list of (dst_path, dst_fname, n_replace) untuk batch PDF
     dst_list  = []
+    pdf_errors = []
+    completed_docx = []
     for src_fname, out_prefix in word_files:
         src = os.path.join(BASE_DIR, src_fname)
         if not os.path.exists(src):
@@ -2806,21 +2881,27 @@ def main():
         pythoncom.CoInitialize()
         word = None
         try:
-            word = win32com.client.DispatchEx("Word.Application")
-            word.Visible = False
-            word.DisplayAlerts = 0
+            word = _new_word_app()
             for dst, dst_fname, n in dst_list:
                 pdf_path = dst[:-5] + '.pdf'
                 try:
-                    _export_one(word, dst, pdf_path)
-                    os.remove(dst)
+                    word, _export_error = _export_one_resilient(word, dst, pdf_path)
+                    if _export_error:
+                        raise _export_error
+                    completed_docx.append(dst)
                     print(f"  OK ({n} replace): {dst_fname[:-5]}.pdf")
                 except Exception as e:
+                    pdf_errors.append(f"{dst_fname}: {e}")
                     print(f"  PDF GAGAL ({dst_fname}): {e}")
         finally:
-            if word:
-                try: word.Quit(SaveChanges=False)
-                except: pass
+            _quit_word_app(word)
+        for _docx in completed_docx:
+            _cleanup_error = _remove_file_resilient(_docx)
+            if _cleanup_error:
+                pdf_errors.append(
+                    f"{os.path.basename(_docx)}: PDF berhasil, DOCX gagal dihapus: {_cleanup_error}"
+                )
+                print(f"  DOCX GAGAL DIHAPUS ({os.path.basename(_docx)}): {_cleanup_error}")
             pythoncom.CoUninitialize()
 
     print(f"\nOutput : {out_dir}")
@@ -2833,6 +2914,8 @@ def main():
     if pdf_only:
         n_pdf = len([f for f in os.listdir(out_dir) if f.endswith('.pdf')])
         status_msg = f'SUKSES {mode.upper()} ({filled} replace, {n_pdf} PDF)'
+        if pdf_errors:
+            status_msg += f' - {len(pdf_errors)} PDF gagal'
     else:
         # 8b. Cetak PDF otomatis setelah generate Word
         print("\nMenjalankan cetak PDF otomatis...")
@@ -2862,6 +2945,8 @@ def main():
         print(f"  Supabase: {sb_result['error']} (non-fatal)")
 
     _kill_lingering_word()
+    if pdf_only and pdf_errors:
+        sys.exit(1)
     print("\nSelesai!")
 
 
