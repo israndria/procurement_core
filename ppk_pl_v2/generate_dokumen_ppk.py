@@ -2263,6 +2263,20 @@ def isi_excel_dari_supabase(xlsm_path: str, data: dict) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 # F12: SNAPSHOT (SIMPAN & MUAT)
 # ═══════════════════════════════════════════════════════════════════════════════
+def _snapshot_scope(fields: dict) -> list[str]:
+    """Ambil lingkup dari snapshot list baru atau field bernomor VBA lama/baru."""
+    direct = fields.get("Lingkup Pekerjaan")
+    if isinstance(direct, list):
+        raw = direct
+    elif isinstance(direct, str) and direct.strip():
+        raw = direct.splitlines()
+    else:
+        numbered = [fields.get(f"Lingkup Pekerjaan {index}", "") for index in range(1, 11)]
+        raw = numbered if any(str(value or "").strip() for value in numbered) else []
+    values = [str(value or "").strip() for value in raw[:10]]
+    return values + [""] * (10 - len(values))
+
+
 def simpan_snapshot(xlsm_path: str, kode_rup: str) -> dict:
     import win32com.client, pythoncom, json
     pythoncom.CoInitialize()
@@ -2383,10 +2397,9 @@ def muat_snapshot(xlsm_path: str, kode_rup: str) -> dict:
                 if lbl_str in fields:
                     ws_master.Cells(r, 2).Value = fields[lbl_str]
                     restored += 1
-        scope = fields.get("Lingkup Pekerjaan", [])
-        if isinstance(scope, list):
-            for index, row_number in enumerate(range(14, 24)):
-                ws_master.Cells(row_number, 5).Value = scope[index] if index < len(scope) else None
+        scope = _snapshot_scope(fields)
+        for index, row_number in enumerate(range(14, 24)):
+            ws_master.Cells(row_number, 5).Value = scope[index] or None
 
         return True, restored
 

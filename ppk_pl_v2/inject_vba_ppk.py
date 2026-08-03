@@ -371,6 +371,15 @@ Sub CommitPaket()
     ' Patch fields dict sebelum serialize — pastikan nilai aktual (bukan nilai lama dari snapshot)
     fields("Nomor Urut Paket") = CStr(noUrut)
 
+    ' Snapshot tabel lingkup pekerjaan (D12:G12 = header; data ada di E14:E23).
+    ' Disimpan sebagai field bernomor agar tetap kompatibel dengan serializer
+    ' JSON VBA yang hanya menangani nilai scalar.
+    Dim scopeIndex As Long
+    For scopeIndex = 1 To 10
+        fields("Lingkup Pekerjaan " & CStr(scopeIndex)) = _
+            Trim(CStr(wsMD.Cells(13 + scopeIndex, 5).Value & ""))
+    Next scopeIndex
+
     ' Tulis snapshot JSON langsung dari fields ke kolom 11 (VBA murni)
     If Trim(CStr(wsDP.Cells(1, 11).Value & "")) = "" Then
         wsDP.Cells(1, 11).Value = "Snapshot"

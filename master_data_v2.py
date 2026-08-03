@@ -168,6 +168,17 @@ def normalize_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any]:
     common = raw.get("master_data")
     if not isinstance(common, dict):
         common = {k: v for k, v in raw.items() if not k.startswith("_") and k not in {"data_jkk", "data_pk"}}
+    else:
+        common = dict(common)
+    scope = common.get("Lingkup Pekerjaan")
+    if isinstance(scope, list):
+        scope_items = scope
+    elif isinstance(scope, str) and scope.strip():
+        scope_items = scope.splitlines()
+    else:
+        numbered = [common.get(f"Lingkup Pekerjaan {index}", "") for index in range(1, 11)]
+        scope_items = numbered if any(str(value or "").strip() for value in numbered) else []
+    common["Lingkup Pekerjaan"] = [str(value or "").strip() for value in scope_items[:10]]
     jkk = raw.get("data_jkk") if isinstance(raw.get("data_jkk"), dict) else {}
     pk = raw.get("data_pk") if isinstance(raw.get("data_pk"), dict) else {}
     return {
