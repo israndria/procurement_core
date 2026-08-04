@@ -30,10 +30,11 @@ Private Const SB_KEY As String = "%%SUPABASE_KEY%%"
 Private Const WM_SHEET_BA     As String = "satu_data"
 Private Const WM_SHEET_REVIU  As String = "list_reviu"
 Private Const WM_SHEET_DOKPIL As String = "list_dokpil"
-Private Const WM_PAT_BA           As String = "5. BA PLJKK -"
-Private Const WM_PAT_REVIU        As String = "1. BA Reviu DPP PLJKK -"  ' untuk CetakBAReviuPLPDF (cetak halaman BA dari file 1.)
-Private Const WM_PAT_ISI_REVIU    As String = "2. Isi Reviu PLJKK -"  ' untuk BukaReviu + CetakIsiReviu (Word merge dari list_reviu)
-Private Const WM_PAT_DOKPIL       As String = "3. Dokpil Full PLJKK -"
+' Prefix generik: mendukung varian PLJKK maupun PLPK pada folder paket.
+Private Const WM_PAT_BA           As String = "5. BA "
+Private Const WM_PAT_REVIU        As String = "1. BA Reviu "  ' termasuk BA Reviu DPP PLJKK dan BA Reviu PLPK
+Private Const WM_PAT_ISI_REVIU    As String = "2. Isi Reviu "  ' untuk BukaReviu + CetakIsiReviu
+Private Const WM_PAT_DOKPIL       As String = "3. Dokpil Full "
 
 ' Sheet & Cell selector (F2 = kode_unik, aktif dipakai AutoKodeUnikPL + IsiMasterDataPL)
 Private Const MD_SHEET As String = "@ Master Data"
