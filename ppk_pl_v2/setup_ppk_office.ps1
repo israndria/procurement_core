@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Generator = Join-Path $PSScriptRoot 'generate_dokumen_ppk.py'
+$SignatureLayout = Join-Path $PSScriptRoot 'signature_layout.py'
 $LauncherSource = Join-Path $PSScriptRoot 'generate_dokumen_ppk.bat'
 
 function Test-PokjaRoot([string]$Path) {
@@ -21,6 +22,9 @@ function Test-PokjaRoot([string]$Path) {
 
 if (-not (Test-Path -LiteralPath $Generator -PathType Leaf)) {
     throw "Source generator tidak ditemukan: $Generator"
+}
+if (-not (Test-Path -LiteralPath $SignatureLayout -PathType Leaf)) {
+    throw "Helper proteksi layout signature tidak ditemukan: $SignatureLayout"
 }
 
 $driveCandidates = @(

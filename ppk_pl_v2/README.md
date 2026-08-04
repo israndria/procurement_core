@@ -34,6 +34,29 @@ Script akan:
 
 Setelah setup, tutup-buka Excel. Tombol VBA lama tetap dipakai. Saat generate, source dibaca dari clone lokal dan workbook/template dibaca dari folder paket Google Drive.
 
+## Proteksi blok tanda tangan Word
+
+`signature_layout.py` menjaga blok tanda tangan tidak terbelah saat Word
+melakukan pagination:
+
+- tabel signature diberi `w:cantSplit`;
+- rangkaian paragraf signature diberi `keepLines` dan `keepNext`;
+- patch bersifat idempotent dan tidak mengubah teks, font, warna, gambar, atau
+  relationship DOCX.
+
+Generator memanggil proteksi setelah mail-merge selesai dan sebelum ekspor PDF.
+Untuk memasang ulang pada template sumber tiga profil:
+
+```powershell
+& "$env:POKJA_PYTHON" .\ppk_pl_v2\signature_layout.py `
+  --folder "D:\Dokumen\@ POKJA 2026\Paket Experiment - Pengadaan Langsung\V2 - Template PPK PL\Konstruksi" `
+  --folder "D:\Dokumen\@ POKJA 2026\Paket Experiment - Pengadaan Langsung\V2 - Template PPK PL\Pengawasan" `
+  --folder "D:\Dokumen\@ POKJA 2026\Paket Experiment - Pengadaan Langsung\V2 - Template PPK PL\Perencanaan"
+```
+
+Backup template harus dibuat sebelum patch manual. CLI otomatis melewati file
+backup/temp (`.bak`, `.pre-*`, `.before-*`, `~$`).
+
 ## Injector workbook
 
 Workbook yang sudah aktif tidak perlu diinjeksi ulang. Jika membuat master baru, Excel harus ditutup lalu jalankan:

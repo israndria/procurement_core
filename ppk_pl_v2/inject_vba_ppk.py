@@ -486,6 +486,28 @@ End Sub
 Sub GeneratePilihan()
     ThisWorkbook.Save
 
+    Dim outputFormat As String
+    outputFormat = InputBox("Pilih format output:" & Chr(13) & Chr(13) & _
+                            "1 = Word (.docx)" & Chr(13) & _
+                            "2 = PDF (.pdf)" & Chr(13) & Chr(13) & _
+                            "Default: PDF", "Format Generate Pilihan", "2")
+
+    If Trim(outputFormat) = "" Then
+        MsgBox "Dibatalkan.", vbInformation
+        Exit Sub
+    End If
+
+    Dim formatArg As String
+    Select Case Trim(outputFormat)
+        Case "1"
+            formatArg = "word"
+        Case "2"
+            formatArg = "pdf"
+        Case Else
+            MsgBox "Pilihan format tidak valid. Gunakan 1 (Word) atau 2 (PDF).", vbExclamation, "Format tidak valid"
+            Exit Sub
+    End Select
+
     ' Ambil daftar template dari filesystem (auto-detect, urut numerik)
     Dim ret As Long
     ret = JalankanBat("--mode list-templates")
@@ -506,14 +528,14 @@ Sub GeneratePilihan()
         Exit Sub
     End If
 
-    ret = JalankanBat("--mode selective --files """ & Trim(inputIdx) & """")
+    ret = JalankanBat("--mode selective --format " & formatArg & " --files """ & Trim(inputIdx) & """")
 
     Dim resultLog As String
     resultLog = BacaLog()
 
     If ret = 0 Then
         MsgBox "✅ Generate pilihan selesai!" & Chr(13) & Chr(13) & _
-               Left(RingkasLog(resultLog), 600), vbInformation, "Selesai"
+               Left(RingkasLog(resultLog), 600), vbInformation, "Selesai - " & UCase(formatArg)
     Else
         MsgBox "❌ Generate pilihan gagal." & Chr(13) & Chr(13) & _
                Left(RingkasLog(resultLog), 600), vbCritical, "Error"
@@ -660,6 +682,8 @@ THISWORKBOOK_CODE = r'''
 Private Sub Workbook_Open()
     FormatTanggalMaster
     AutoTanggalSelesaiMaster
+    AutoUangMukaMaster
+    AutoRincianTerminMaster
 End Sub
 
 Private Sub FormatTanggalMaster()
@@ -714,6 +738,15 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
         End If
     End If
 
+    If Target.Row = BarisMaster("Nilai HPS (Angka)") Or _
+       Target.Row = BarisMaster("Nilai Kontrak (Angka)") Or _
+       Target.Row = BarisMaster("Tahap Dokumen") Or _
+       Target.Row = BarisMaster("Uang Muka (%)") Or _
+       Target.Row = BarisMaster("Rincian Termin") Then
+        AutoUangMukaMaster
+        AutoRincianTerminMaster
+    End If
+
     If Target.Row = BarisMaster("Tahap Dokumen") Or _
        Target.Row = BarisMaster("Tanggal SPK") Or _
        Target.Row = BarisMaster("Tanggal Mulai Kerja") Or _
@@ -763,6 +796,60 @@ Private Sub AutoTanggalSelesaiMaster()
     Application.EnableEvents = False
     ws.Cells(finishRow, 2).NumberFormat = "@"
     ws.Cells(finishRow, 2).Value = HariTanggalMaster(DateAdd("d", CLng(days) - 1, startDate))
+
+Keluar:
+    Application.EnableEvents = True
+End Sub
+
+Private Sub AutoUangMukaMaster()
+    On Error GoTo Keluar
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Master Data")
+
+    Dim stageRow As Long, hpsRow As Long, contractRow As Long, uangRow As Long
+    stageRow = BarisMaster("Tahap Dokumen")
+    hpsRow = BarisMaster("Nilai HPS (Angka)")
+    contractRow = BarisMaster("Nilai Kontrak (Angka)")
+    uangRow = BarisMaster("Uang Muka (%)")
+    If stageRow = 0 Or hpsRow = 0 Or contractRow = 0 Or uangRow = 0 Then Exit Sub
+
+    Dim stageAddress As String, hpsAddress As String
+    Dim contractAddress As String, basisExpression As String, q As String
+    stageAddress = ws.Cells(stageRow, 2).Address(False, False)
+    hpsAddress = ws.Cells(hpsRow, 2).Address(False, False)
+    contractAddress = ws.Cells(contractRow, 2).Address(False, False)
+    q = Chr(34)
+    basisExpression = "IF(" & stageAddress & "=" & q & "BERKONTRAK" & q & "," & _
+        contractAddress & "," & hpsAddress & ")"
+    Application.EnableEvents = False
+    ws.Cells(uangRow, 2).Formula = "=IFERROR(IF(OR(" & stageAddress & "=" & q & _
+        "UPLOAD AWAL" & q & "," & stageAddress & "=" & q & "BERKONTRAK" & q & _
+        "),IF(" & basisExpression & "=" & q & q & "," & q & q & ",IF(" & _
+        basisExpression & "<50000000," & q & q & ",IF(" & basisExpression & _
+        "<=200000000,50,30)))," & q & q & ")," & q & q & ")"
+
+Keluar:
+    Application.EnableEvents = True
+End Sub
+
+Private Sub AutoRincianTerminMaster()
+    On Error GoTo Keluar
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Master Data")
+
+    Dim uangRow As Long, rincianRow As Long
+    uangRow = BarisMaster("Uang Muka (%)")
+    rincianRow = BarisMaster("Rincian Termin")
+    If uangRow = 0 Or rincianRow = 0 Then Exit Sub
+
+    Dim uangAddress As String, q As String
+    uangAddress = ws.Cells(uangRow, 2).Address(False, False)
+    q = Chr(34)
+    Application.EnableEvents = False
+    ws.Cells(rincianRow, 2).Formula = "=IF(" & uangAddress & "=" & q & q & "," & q & q & "," & _
+        q & "1. Uang Muka Sebesar " & q & "&TEXT(" & uangAddress & "," & q & "0" & q & ")&" & _
+        q & "% , 2. Termin 1 Progres Kemajuan Fisik " & q & "&UNICHAR(8805)&" & _
+        q & " 50%, dan 3. Termin 2 Progres Kemajuan Fisik 100% (PHO)" & q & ")"
 
 Keluar:
     Application.EnableEvents = True
@@ -996,6 +1083,8 @@ def _ensure_contract_fields(wb):
     ws = wb.Sheets('Master Data')
     fields = {
         31: ('Tahap Dokumen', 'UPLOAD AWAL'),
+        70: ('Nilai Kontrak (Angka)', ''),
+        71: ('Nilai Kontrak (Terbilang)', ''),
         87: ('Uang Muka (%)', ''),
         88: ('Sistem Pembayaran', ''),
         89: ('Rincian Termin', ''),
@@ -1033,6 +1122,15 @@ def _ensure_contract_fields(wb):
         stage_cell.Validation.InCellDropdown = True
     except Exception as exc:
         print(f"  [WARN] Validasi Tahap Dokumen gagal: {exc}")
+    try:
+        # Upload Awal memakai HPS sebagai indikasi; Berkontrak memakai Nilai
+        # Kontrak final. Nilai Kontrak sudah ada di field B70 pada template.
+        ws.Range('B88').Formula = '=IFERROR(IF(OR(B31="UPLOAD AWAL",B31="BERKONTRAK"),IF(IF(B31="BERKONTRAK",B70,B13)="","",IF(IF(B31="BERKONTRAK",B70,B13)<50000000,"",IF(IF(B31="BERKONTRAK",B70,B13)<=200000000,50,30))),""),"")'
+        ws.Range('B90').Formula = '=IF(B88="","","1. Uang Muka Sebesar "&TEXT(B88,"0")&"% , 2. Termin 1 Progres Kemajuan Fisik "&UNICHAR(8805)&" 50%, dan 3. Termin 2 Progres Kemajuan Fisik 100% (PHO)")'
+        print("  Formula uang muka otomatis dipasang di Master Data!B88.")
+        print("  Formula rincian termin otomatis dipasang di Master Data!B90.")
+    except Exception as exc:
+        print(f"  [WARN] Formula uang muka otomatis gagal dipasang: {exc}")
     print("  Field Tahap Dokumen/kontrak dipastikan tanpa mengubah styling.")
 
 

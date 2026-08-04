@@ -4,6 +4,11 @@
 import sys, os, shutil, re as _re, zipfile, argparse, json
 from datetime import date, datetime, timedelta
 
+try:
+    from signature_layout import protect_docx as _protect_docx_layout
+except ImportError:  # pragma: no cover - namespace-package import fallback
+    from ppk_pl_v2.signature_layout import protect_docx as _protect_docx_layout
+
 W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 
 RUNTIME_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -312,11 +317,34 @@ def write_document_stage_marker(excel_data: dict, base_dir: str = BASE_DIR) -> s
     return marker
 
 
-def archive_existing_output(output_dir: str) -> str | None:
-    """Pindahkan output fase sebelumnya ke arsip timestamp, tanpa menghapusnya."""
+def archive_existing_output(
+    output_dir: str,
+    selected_prefixes: set[str] | None = None,
+) -> str | None:
+    """Pindahkan output fase sebelumnya ke arsip timestamp, tanpa menghapusnya.
+
+    ``selected_prefixes`` membatasi arsip pada file direct yang basename stem-nya
+    sama dengan prefix dokumen terpilih. Jika ``None``, perilaku batch lama tetap
+    berlaku: semua file direct diarsipkan.
+    """
     if not os.path.isdir(output_dir):
         return None
-    files = [entry for entry in os.scandir(output_dir) if entry.is_file()]
+    normalized_prefixes = (
+        {str(prefix).strip().casefold() for prefix in selected_prefixes}
+        if selected_prefixes is not None
+        else None
+    )
+    files = []
+    for entry in os.scandir(output_dir):
+        if not entry.is_file():
+            continue
+        if normalized_prefixes is not None:
+            stem, ext = os.path.splitext(entry.name)
+            if ext.casefold() not in {'.pdf', '.docx'}:
+                continue
+            if stem.casefold() not in normalized_prefixes:
+                continue
+        files.append(entry)
     if not files:
         return None
     archive_dir = os.path.join(
@@ -358,9 +386,42 @@ def _percentage_value(value):
         return None
 
 
-def _minimum_uang_muka(excel_data: dict) -> float:
-    hps = _numeric_value(excel_data.get("Nilai HPS (Angka)"))
-    return 50.0 if hps <= 200_000_000 else 30.0
+def _uang_muka_basis(excel_data: dict) -> tuple[str, float]:
+    """Return the threshold basis for the current document stage."""
+    stage = normalize_document_stage(excel_data.get("Tahap Dokumen"))
+    key = "Nilai Kontrak (Angka)" if stage == "BERKONTRAK" else "Nilai HPS (Angka)"
+    return key, _numeric_value(excel_data.get(key))
+
+
+def _minimum_uang_muka(excel_data: dict) -> float | None:
+    """Minimum percentage for the PL PK small-business contract bands."""
+    _basis_key, basis = _uang_muka_basis(excel_data)
+    if basis < 50_000_000:
+        return None
+    return 50.0 if basis <= 200_000_000 else 30.0
+
+
+def _ketentuan_uang_muka(excel_data: dict) -> str:
+    """Build stage-aware wording using HPS only as an initial indication."""
+    stage = normalize_document_stage(excel_data.get("Tahap Dokumen"))
+    if stage == "BERKONTRAK":
+        return (
+            "Untuk Penyedia Usaha Mikro, Usaha Kecil, dan koperasi, dengan nilai "
+            "Kontrak antara Rp50.000.000,00 (lima puluh juta rupiah) sampai "
+            "dengan Rp200.000.000,00 (dua ratus juta rupiah), diberikan uang muka "
+            "paling sedikit sebesar 50% dari Nilai Kontrak; dan dengan nilai "
+            "Kontrak lebih dari Rp200.000.000,00 (dua ratus juta rupiah) sampai "
+            "dengan Rp2.500.000.000,00 (dua miliar lima ratus juta rupiah), "
+            "diberikan uang muka paling sedikit sebesar 30% dari Nilai Kontrak."
+        )
+    return (
+        "Pada fase Upload Awal, indikasi uang muka dihitung berdasarkan Nilai HPS: "
+        "untuk nilai HPS antara Rp50.000.000,00 (lima puluh juta rupiah) sampai "
+        "dengan Rp200.000.000,00 (dua ratus juta rupiah), digunakan paling sedikit "
+        "50%; dan untuk nilai HPS lebih dari Rp200.000.000,00 (dua ratus juta "
+        "rupiah), digunakan paling sedikit 30%. Besaran final pada fase Berkontrak "
+        "mengikuti Nilai Kontrak."
+    )
 
 
 def _format_percentage(value) -> str:
@@ -471,10 +532,16 @@ def validate_document_stage(excel_data: dict) -> list[str]:
         missing.append("Rincian Termin")
     if stage == "BERKONTRAK":
         uang_muka = _percentage_value(excel_data.get("Uang Muka (%)"))
-        if uang_muka is not None and uang_muka < _minimum_uang_muka(excel_data):
+        minimum_uang_muka = _minimum_uang_muka(excel_data)
+        if (
+            uang_muka is not None
+            and minimum_uang_muka is not None
+            and uang_muka < minimum_uang_muka
+        ):
+            basis_key, basis_value = _uang_muka_basis(excel_data)
             missing.append(
-                f"Uang Muka (%) minimal {_minimum_uang_muka(excel_data):g}% "
-                f"untuk HPS {_numeric_value(excel_data.get('Nilai HPS (Angka)')):,.0f}"
+                f"Uang Muka (%) minimal {minimum_uang_muka:g}% "
+                f"untuk {basis_key} {basis_value:,.0f}"
             )
         for key in ("Tanggal SPK", "Tanggal SPMK", "Tanggal Mulai Kerja", "Tanggal Selesai Kerja"):
             if str(excel_data.get(key, "") or "").strip() and _parse_tanggal(excel_data.get(key)) is None:
@@ -1259,6 +1326,9 @@ def process_docx(path, replacements):
     )
     count += _process_textbox_markers(path, text_replacements)
     count += _process_header_footer_markers(path, text_replacements)
+    # Proteksi pagination diterapkan setelah seluruh mail merge/XML patch
+    # selesai, sehingga signature block yang dihasilkan tetap utuh.
+    _protect_docx_layout(path)
     return count
 
 
@@ -1308,6 +1378,7 @@ def _quit_word_app(word) -> None:
 
 def export_docx_to_pdf(docx_path: str, pdf_path: str) -> None:
     import win32com.client, pythoncom, tempfile, shutil as _sh
+    _protect_docx_layout(docx_path)
     pythoncom.CoInitialize()
     word = None
     doc = None
@@ -1379,6 +1450,7 @@ def export_docx_to_pdf(docx_path: str, pdf_path: str) -> None:
 def _export_one(word, docx_path: str, pdf_path: str) -> None:
     """Ekspor satu docx→pdf menggunakan instance Word yang sudah buka. Relay tmp jika path >240."""
     import tempfile, shutil as _sh
+    _protect_docx_layout(docx_path)
     src_abs = _com_path(os.path.abspath(docx_path))
     dst_abs = _com_path(os.path.abspath(pdf_path))
     use_tmp = len(src_abs) > 240
@@ -1758,7 +1830,8 @@ def build_replacements(
             jabatan_wakil = str(excel_data.get("Jabatan Wakil Sah", "") or "").strip()
             val = " — ".join(part for part in (nama_wakil, jabatan_wakil) if part)
         if excel_key == "Uang Muka (%)" and stage == "BERKONTRAK" and not str(val or "").strip():
-            val = f"{_minimum_uang_muka(excel_data):g}%"
+            minimum_uang_muka = _minimum_uang_muka(excel_data)
+            val = f"{minimum_uang_muka:g}%" if minimum_uang_muka is not None else "____%"
         elif excel_key in {"Uang Muka (%)", "Retensi (%)"} and str(val or "").strip():
             val = _format_percentage(val)
         if val and val != 'None':
@@ -1857,12 +1930,7 @@ def build_replacements(
             "____ atas nama Penyedia : ____"
         )
 
-    repl["\u00abKETENTUAN_UANG_MUKA\u00bb"] = (
-        "Untuk nilai HPS s/d Rp. 200.000.000,00 (Dua Ratus Juta Rupiah) "
-        "diberikan uang muka paling sedikit sebesar 50% dari Nilai Kontrak "
-        "dan untuk nilai HPS di atas Rp. 200.000.000,00 (Dua Ratus Juta Rupiah) "
-        "diberikan uang muka paling sedikit sebesar 30% dari Nilai Kontrak."
-    )
+    repl["\u00abKETENTUAN_UANG_MUKA\u00bb"] = _ketentuan_uang_muka(excel_data)
     repl["\u00abUANG_MUKA_KONTRAK\u00bb"] = ""
     if repl.get("\u00abUANG_MUKA_PERSEN\u00bb"):
         repl["\u00abUANG_MUKA_KONTRAK\u00bb"] = (
@@ -2470,6 +2538,8 @@ def main():
     parser.add_argument('--kode', default='', help='Kode RUP untuk mode muat-db')
     parser.add_argument('--jenis', default='', help='Jenis surat (untuk nomor-baru)')
     parser.add_argument('--files', default='', help='Nomor urut template (1-based, pisah koma) untuk mode selective')
+    parser.add_argument('--format', dest='output_format', choices=['word', 'pdf'], default='pdf',
+                        help='Format output mode selective (default: pdf)')
     parser.add_argument('--nomor', default='', help='Nomor urut paket (pisah koma) untuk mode print-pilihan. Contoh: 1,3,5')
     args = parser.parse_args()
     mode = args.mode
@@ -2499,11 +2569,14 @@ def main():
 
     # ── Mode list-templates ───────────────────────────────────────────────────
     if mode == 'list-templates':
-        word_files = template_auto_detect(BASE_DIR)
-        if not word_files:
-            word_files = _word_files_fallback()
+        try:
+            list_data = baca_excel(EXCEL_PATH)
+            word_files = template_files_for_data(BASE_DIR, list_data)
+        except (OSError, ValueError, FileNotFoundError, RuntimeError) as exc:
+            print(f"ERROR TEMPLATE: {exc}")
+            sys.exit(1)
         for idx, (src_fname, out_prefix) in enumerate(word_files, 1):
-            name = out_prefix if out_prefix else src_fname
+            name = out_prefix or os.path.splitext(os.path.basename(src_fname))[0]
             # bersihkan suffix .docx jika ada
             if name.lower().endswith('.docx'):
                 name = name[:-5]
@@ -2835,6 +2908,7 @@ def main():
         sys.exit(1)
 
     # Filter files jika mode selective
+    selected_prefixes = None
     if mode == 'selective':
         if not args.files:
             print("ERROR: --files diperlukan untuk mode selective. Contoh: --files 1,3")
@@ -2848,11 +2922,12 @@ def main():
         if not word_files:
             print("ERROR: Tidak ada template yang cocok dengan filter --files.")
             sys.exit(1)
+        selected_prefixes = {out_prefix for _src_fname, out_prefix in word_files if out_prefix}
 
     # 7. Buat folder output. Bila generate ulang pada fase yang sama, hasil
     # lama diarsipkan agar tidak hilang dan tidak bercampur dengan batch baru.
     write_document_stage_marker(excel_data, _base)
-    archive_dir = archive_existing_output(out_dir)
+    archive_dir = archive_existing_output(out_dir, selected_prefixes)
     os.makedirs(out_dir, exist_ok=True)
     if archive_dir:
         print(f"  Arsip output lama: {archive_dir}")
@@ -2861,11 +2936,13 @@ def main():
     # 8. Copy + process .docx
     filled    = 0
     all_empty = [k for k in FIELD_MAP if not excel_data.get(k) or excel_data[k] in ('', 'None')]
-    pdf_only  = (mode == 'pdf-only' or mode == 'selective')
+    selective_word = mode == 'selective' and args.output_format == 'word'
+    pdf_only  = (mode == 'pdf-only' or (mode == 'selective' and not selective_word))
     # dst_list: list of (dst_path, dst_fname, n_replace) untuk batch PDF
     dst_list  = []
     pdf_errors = []
     completed_docx = []
+    word_outputs = []
     for src_fname, out_prefix in word_files:
         src = os.path.join(BASE_DIR, src_fname)
         if not os.path.exists(src):
@@ -2886,6 +2963,7 @@ def main():
         if pdf_only:
             dst_list.append((dst, dst_fname, n))
         else:
+            word_outputs.append(dst)
             print(f"  OK ({n} replace): {dst_fname}")
 
     # 8b. Batch PDF — satu instance Word untuk semua file
@@ -2924,7 +3002,9 @@ def main():
         for f in all_empty:
             print(f"  - {f}")
 
-    if pdf_only:
+    if selective_word:
+        status_msg = f'SUKSES SELECTIVE WORD/DOCX ({filled} replace, {len(word_outputs)} DOCX)'
+    elif pdf_only:
         n_pdf = len([f for f in os.listdir(out_dir) if f.endswith('.pdf')])
         status_msg = f'SUKSES {mode.upper()} ({filled} replace, {n_pdf} PDF)'
         if pdf_errors:
