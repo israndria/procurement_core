@@ -142,11 +142,10 @@ PL_WORKFLOW_REGISTRY = {
         "folder_name": "Konstruksi",
         "excel_template": "0. BAPLPK- Template.xlsm",
         "word_map": [
-            ("1. Full Dokumen BA PLPK - Template.docx", SHEET_BA_PL),
+            ("1. BA Reviu PLPK - Template.docx", SHEET_BA_PL),
             ("2. Isi Reviu PLPK - Template.docm", SHEET_REVIU_PL),
             ("3. Dokpil Full PK - Template.docx", SHEET_DOKPIL_PL),
             ("5. BA PLPK - Template.docx", SHEET_BA_PL),
-            ("5. Berita Acara Utama PLPK - Template.docx", SHEET_BA_PL),
             ("7. BA Dengan Timpang PLPK - Template.docx", SHEET_BA_PL),
         ],
     },
@@ -184,14 +183,33 @@ def pl_workflow_config(workflow):
     return PL_WORKFLOW_REGISTRY[key]
 
 
+def _pl_template_set_complete(template_dir, workflow_cfg):
+    """True jika donor memiliki semua file yang diminta registry workflow."""
+    required = [workflow_cfg["excel_template"]]
+    required.extend(name for name, _sheet in workflow_cfg["word_map"])
+    return all(os.path.isfile(os.path.join(template_dir, name)) for name in required)
+
+
 def pl_workflow_template_dir(workflow, root=None):
-    """Resolve donor V2; fallback ke donor lama bila V2 belum dibuat."""
+    """Resolve donor V2 lengkap; fallback ke donor legacy bila belum lengkap.
+
+    Folder V2 boleh sudah dibuat bertahap. Jangan memilihnya hanya karena
+    direktorinya ada: setup membutuhkan seluruh file pada ``word_map``.
+    """
     root = root or os.path.join(POKJA_ROOT, "Paket Experiment - Pengadaan Langsung")
     cfg = pl_workflow_config(workflow)
     v2 = os.path.join(root, "V2 - Template PL", cfg["folder_name"])
-    return v2 if os.path.isdir(v2) else (
-        TEMPLATE_DIR_PL_PK if cfg["jenis_pl"] == "PK" else TEMPLATE_DIR_PL
-    )
+    legacy_name = "Development - PL - PK" if cfg["jenis_pl"] == "PK" else "Development - PL - JKK"
+    legacy = os.path.join(root, legacy_name)
+    if not os.path.isdir(legacy):
+        legacy = TEMPLATE_DIR_PL_PK if cfg["jenis_pl"] == "PK" else TEMPLATE_DIR_PL
+    if _pl_template_set_complete(v2, cfg):
+        return v2
+    if _pl_template_set_complete(legacy, cfg):
+        return legacy
+    # Kembalikan kandidat yang paling informatif agar preflight setup dapat
+    # melaporkan file mana yang hilang, bukan menyamarkan masalah konfigurasi.
+    return v2 if os.path.isdir(v2) else legacy
 
 # Output folder per jenis PL (folder tujuan buat folder baru)
 OUTPUT_DIR_PL_JKK = os.path.join(

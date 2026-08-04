@@ -149,6 +149,31 @@ def scrub_excel_copy(excel_path: str | Path) -> list[str]:
     return logs
 
 
+def scrub_excel_pl_copy(excel_path: str | Path, *, is_pk: bool) -> list[str]:
+    """Bersihkan data contoh workbook PL tanpa mengubah layout/macro.
+
+    Donor PL JKK dan PL PK punya layout berbeda. Area input paket dibersihkan
+    berdasarkan family agar contoh paket lama, provider, SBU, personil, alat,
+    dan nilai evaluasi tidak ikut terbawa ke paket baru. Blok INFO PP yang
+    memang hardcode tetap dipertahankan.
+    """
+    path = Path(excel_path)
+    if is_pk:
+        md_ranges = ["C3:C10", "C13:C28", "C29:C80", "C87:C89"]
+    else:
+        md_ranges = ["C3:C10", "C13:C28", "C29:C54", "C61:C63"]
+    targets = {
+        "@ Master Data": md_ranges,
+        "5. HPS": ["A2:I300"],
+    }
+    logs: list[str] = []
+    try:
+        logs.extend(_clear_constants_com(path, targets))
+    except Exception as exc:
+        logs.append(f"⚠ Excel scrub PL gagal: {exc}")
+    return logs
+
+
 def scrub_package_copy(target_dir: str | Path, excel_path: str | Path,
                        word_paths: list[str | Path]) -> list[str]:
     """Scrub copy baru + hasilkan log audit."""

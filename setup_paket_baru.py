@@ -141,6 +141,20 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
         print("[BATAL] Nama folder kosong.")
         return
 
+    template_dir = os.path.abspath(os.fspath(template_dir))
+    required_sources = [excel_template] + [wf_tpl for wf_tpl, _sheet in word_sheet_map]
+    missing_sources = [
+        os.path.join(template_dir, name)
+        for name in required_sources
+        if not os.path.isfile(os.path.join(template_dir, name))
+    ]
+    if missing_sources:
+        details = "\n".join(f"  - {path}" for path in missing_sources)
+        raise FileNotFoundError(
+            "Template workflow tidak lengkap; setup dibatalkan sebelum folder "
+            f"dibuat.\n{details}"
+        )
+
     base = output_base or OUTPUT_BASE
     folder_name = re.sub(r'[<>:"/\\|?*]', '-', folder_name).strip()
     target_dir = os.path.join(base, folder_name)
@@ -257,7 +271,7 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
             print(f"  [FAIL] {wf_dst}")
 
     # Scrub data donor setelah template disalin dan mail merge terhubung.
-    # Hanya Tender PK memakai scrub ini; PL punya struktur workbook berbeda.
+    # PL memakai range berbeda untuk JKK vs konstruksi; jangan bawa data contoh.
     if is_tender and excel_created:
         try:
             from template_scrub import scrub_package_copy
@@ -274,6 +288,17 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
             print(f"  [WARN] Scrub template gagal: {exc}")
     elif is_tender:
         print("\n[4/4] Scrub data donor dilewati — workbook existing dipertahankan.")
+    elif excel_created and workflow:
+        try:
+            from template_scrub import scrub_excel_pl_copy
+
+            is_pk = "KONSTRUKSI" in str(workflow).upper() or "PLPK" in folder_name.upper()
+            scrub_log = scrub_excel_pl_copy(dst_excel, is_pk=is_pk)
+            print("\n[4/4] Scrub data donor PL...")
+            for line in scrub_log:
+                print(f"  {line}")
+        except Exception as exc:
+            print(f"  [WARN] Scrub template PL gagal: {exc}")
 
     print(f"\n{'='*60}")
     print(f"  SETUP SELESAI!")
@@ -322,9 +347,17 @@ def setup_paket_baru_pl(folder_name=None, output_base=None, template_dir=None, w
             output_base = OUTPUT_DIR_PL_JKK
 
     resolved_template_dir = template_dir
-    if not resolved_template_dir:
-        from config import pl_workflow_template_dir
-        resolved_template_dir = pl_workflow_template_dir(workflow)
+    from config import _pl_template_set_complete, pl_workflow_template_dir
+    if resolved_template_dir:
+        resolved_template_dir = os.path.abspath(os.fspath(resolved_template_dir))
+    if not resolved_template_dir or not _pl_template_set_complete(resolved_template_dir, workflow_cfg):
+        fallback_template_dir = pl_workflow_template_dir(workflow)
+        if resolved_template_dir and os.path.normcase(resolved_template_dir) != os.path.normcase(fallback_template_dir):
+            print(
+                "  [WARN] Template eksplisit tidak lengkap; memakai donor lengkap: "
+                f"{fallback_template_dir}"
+            )
+        resolved_template_dir = fallback_template_dir
     _setup_folder(
         folder_name,
         resolved_template_dir,

@@ -127,6 +127,8 @@ Public Sub IsiDataPLByKode(kodePaket As String)
     Dim json As String
     json = FetchSupabasePLByKode(kodePaket)
     If json = "" Then
+        If m_SilentMode Then Err.Raise vbObjectError + 2101, "IsiDataPLByKode", _
+                                      "Data paket tidak dapat diambil dari Supabase."
         If Not m_SilentMode Then _
             MsgBox "Gagal ambil data paket " & kodePaket & " dari Supabase.", _
                    vbExclamation, "Isi Data PL"
@@ -135,8 +137,14 @@ Public Sub IsiDataPLByKode(kodePaket As String)
 
     Dim col As Collection
     Set col = ParsePLJSON(json)
-    If col Is Nothing Then Exit Sub
+    If col Is Nothing Then
+        If m_SilentMode Then Err.Raise vbObjectError + 2102, "IsiDataPLByKode", _
+                                      "Response paket PL tidak valid."
+        Exit Sub
+    End If
     If col.Count = 0 Then
+        If m_SilentMode Then Err.Raise vbObjectError + 2103, "IsiDataPLByKode", _
+                                      "Paket tidak ditemukan di Supabase."
         If Not m_SilentMode Then _
             MsgBox "Paket " & kodePaket & " tidak ditemukan di database.", _
                    vbInformation, "Isi Data PL"
@@ -149,9 +157,17 @@ Public Sub IsiDataPLByKode(kodePaket As String)
     Exit Sub
 
 ErrHandler:
-    If Not m_SilentMode Then _
-        MsgBox "Error IsiDataPLByKode: " & Err.Number & " - " & Err.Description, _
+    Dim errNo As Long: errNo = Err.Number
+    Dim errDesc As String: errDesc = Err.Description
+    If m_SilentMode Then
+        ' COM bulk wajib menerima error. Jangan mengembalikan sukses palsu
+        ' ketika Supabase/VBA gagal saat MsgBox sedang disenyapkan.
+        Err.Raise vbObjectError + 2104, "IsiDataPLByKode", _
+                  "Gagal isi Master Data PL: " & errNo & " - " & errDesc
+    Else
+        MsgBox "Error IsiDataPLByKode: " & errNo & " - " & errDesc, _
                vbCritical, "Isi Data PL"
+    End If
 End Sub
 
 
@@ -220,6 +236,48 @@ End Function
 
 
 ' ============================================================
+' LAYOUT HELPERS: JKK dan PK memakai layout @ Master Data berbeda.
+' Jangan memakai nomor baris provider/personil JKK untuk workbook PK.
+' ============================================================
+Private Function FindLastLabelRow(ws As Worksheet, labelText As String) As Long
+    Dim lastRow As Long
+    Dim r As Long
+    lastRow = ws.Cells(ws.Rows.Count, 2).End(xlUp).Row
+    For r = lastRow To 1 Step -1
+        If StrComp(Trim(CStr(ws.Cells(r, 2).Value)), labelText, vbTextCompare) = 0 Then
+            FindLastLabelRow = r
+            Exit Function
+        End If
+    Next r
+    FindLastLabelRow = 0
+End Function
+
+Private Function IsPKMasterLayout(ws As Worksheet, item As Variant) As Boolean
+    On Error Resume Next
+    IsPKMasterLayout = (UCase(Trim(CStr(item(5)))) = "PK")
+    If Not IsPKMasterLayout Then
+        IsPKMasterLayout = (FindLastLabelRow(ws, "Alat 1") > 0)
+    End If
+    On Error GoTo 0
+End Function
+
+Private Sub ClearPackageDerivedFields(ws As Worksheet, isPK As Boolean)
+    ' Hapus nilai donor paket lama, tetapi pertahankan identitas PP hardcode
+    ' (C11:C12) dan blok INFO PP hardcode (JKK C56:C60 / PK C82:C86).
+    On Error Resume Next
+    ws.Range("C3:C10").ClearContents
+    ws.Range("C13:C28").ClearContents
+    If isPK Then
+        ws.Range("C29:C80").ClearContents
+        ws.Range("C87:C89").ClearContents
+    Else
+        ws.Range("C29:C54").ClearContents
+        ws.Range("C61:C63").ClearContents
+    End If
+    On Error GoTo 0
+End Sub
+
+
 ' AUTOFILL: Tulis nilai dari item ke @ Master Data kolom C
 ' ============================================================
 Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
@@ -235,6 +293,20 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
     On Error Resume Next
     wsMD.Unprotect "pokja2026"
     On Error GoTo 0
+
+    Dim isPK As Boolean: isPK = IsPKMasterLayout(wsMD, item)
+    ClearPackageDerivedFields wsMD, isPK
+
+    ' Label di bagian bawah berbeda antar template. Ambil baris terakhir agar
+    ' label INFO PP/penyedia pada workbook PK tidak menabrak area alat.
+    Dim rowNamaPeserta As Long: rowNamaPeserta = FindLastLabelRow(wsMD, "Nama Peserta")
+    Dim rowNPWPPeserta As Long: rowNPWPPeserta = FindLastLabelRow(wsMD, "NPWP Peserta")
+    Dim rowAlamatPP As Long: rowAlamatPP = FindLastLabelRow(wsMD, "Alamat PP")
+    Dim rowTeleponPP As Long: rowTeleponPP = FindLastLabelRow(wsMD, "Telepon PP")
+    Dim rowMasaBerlaku As Long: rowMasaBerlaku = FindLastLabelRow(wsMD, "Masa Berlaku Penawaran")
+    Dim rowNomorNota As Long: rowNomorNota = FindLastLabelRow(wsMD, "Nomor Nota Dinas")
+    Dim rowTanggalNota As Long: rowTanggalNota = FindLastLabelRow(wsMD, "Tanggal Nota Dinas")
+    Dim rowNomorRekom As Long: rowNomorRekom = FindLastLabelRow(wsMD, "Nomor Surat Rekomendasi")
 
     With wsMD
         ' ── INPUT DATA dari Supabase ──────────────────────────────────────
@@ -290,7 +362,11 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim hpsVal As String: hpsVal = CStr(item(4))
         If Left(hpsVal, 3) <> "Rp." Then hpsVal = "Rp. " & hpsVal
         .Cells(PLR_HPS, 3).Value = hpsVal
-        .Cells(PLR_LOKASI, 3).Value      = "Kabupaten Tapin"   ' lokasi hardcode
+        If CStr(item(14)) <> "" And CStr(item(14)) <> "null" Then
+            .Cells(PLR_LOKASI, 3).Value = CStr(item(14))
+        Else
+            .Cells(PLR_LOKASI, 3).Value = "Kabupaten Tapin"
+        End If
 
         ' Jangka waktu: extract angka pertama saja (handles "30 (Tiga Puluh) Hari Kalender")
         Dim jw As String: jw = Trim(CStr(item(12)))
@@ -324,10 +400,14 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             End If
         End If
         If tahun = "" Then tahun = CStr(Year(Now))
-        ' Sumber dana PL ditulis konsisten beserta tahun anggaran.
-        ' Jika data SPSE hanya berisi "APBD", tahun berjalan dipakai;
-        ' tahun depan otomatis menjadi "APBD 2027" tanpa ubah kode lagi.
-        .Cells(PLR_SUMBER_DANA, 3).Value = "APBD " & tahun
+        ' Sumber dana mempertahankan tipe dari SPSE (APBD/APBDP/APBN/dll).
+        ' Jika SPSE hanya mengirim tipe tanpa tahun, tambahkan tahun anggaran.
+        If srcAng = "" Or srcAng = "null" Then srcAng = "APBD"
+        If InStrRev(srcAng, " ") = 0 Or Not IsNumeric(Mid(srcAng, InStrRev(srcAng, " ") + 1)) Then
+            .Cells(PLR_SUMBER_DANA, 3).Value = srcAng & " " & tahun
+        Else
+            .Cells(PLR_SUMBER_DANA, 3).Value = srcAng
+        End If
         .Cells(PLR_TAHUN_ANGGARAN, 3).Value = tahun
 
         ' Kode Rekening (MAK) — sumber: inbox PL field MAK
@@ -356,27 +436,27 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         End If
 
         ' Nama + NPWP Peserta — sumber: parse Draft_PL PDF
-        If CStr(item(25)) <> "" Then
-            .Cells(PLR_NAMA_PESERTA, 3).Value = CStr(item(25))  ' nama_penyedia
+        If rowNamaPeserta > 0 And CStr(item(25)) <> "" And CStr(item(25)) <> "null" Then
+            .Cells(rowNamaPeserta, 3).Value = CStr(item(25))  ' nama_penyedia
         End If
-        If CStr(item(26)) <> "" Then
-            .Cells(PLR_NPWP_PESERTA, 3).NumberFormat = "@"
-            .Cells(PLR_NPWP_PESERTA, 3).Value = CStr(item(26))  ' npwp_penyedia
+        If rowNPWPPeserta > 0 And CStr(item(26)) <> "" And CStr(item(26)) <> "null" Then
+            .Cells(rowNPWPPeserta, 3).NumberFormat = "@"
+            .Cells(rowNPWPPeserta, 3).Value = CStr(item(26))  ' npwp_penyedia
         End If
 
         ' Nomor/tanggal Nota Dinas + nomor Surat Rekomendasi.
         ' Master Data = single source of truth; @ Evaluasi mereferensikan nilainya.
-        If CStr(item(34)) <> "" Then
-            .Cells(PLR_NOMOR_NOTA, 3).NumberFormat = "@"
-            .Cells(PLR_NOMOR_NOTA, 3).Value = CStr(item(34))
+        If rowNomorNota > 0 And CStr(item(34)) <> "" And CStr(item(34)) <> "null" Then
+            .Cells(rowNomorNota, 3).NumberFormat = "@"
+            .Cells(rowNomorNota, 3).Value = CStr(item(34))
         End If
-        If CStr(item(36)) <> "" And CStr(item(36)) <> "null" Then
-            .Cells(PLR_TANGGAL_NOTA, 3).NumberFormat = "@"
-            .Cells(PLR_TANGGAL_NOTA, 3).Value = FormatTanggalIndo(CStr(item(36)))
+        If rowTanggalNota > 0 And CStr(item(36)) <> "" And CStr(item(36)) <> "null" Then
+            .Cells(rowTanggalNota, 3).NumberFormat = "@"
+            .Cells(rowTanggalNota, 3).Value = FormatTanggalIndo(CStr(item(36)))
         End If
-        If CStr(item(35)) <> "" Then
-            .Cells(PLR_NOMOR_REKOM, 3).NumberFormat = "@"
-            .Cells(PLR_NOMOR_REKOM, 3).Value = CStr(item(35))
+        If rowNomorRekom > 0 And CStr(item(35)) <> "" And CStr(item(35)) <> "null" Then
+            .Cells(rowNomorRekom, 3).NumberFormat = "@"
+            .Cells(rowNomorRekom, 3).Value = CStr(item(35))
         End If
 
         ' ── URAIAN SINGKAT ────────────────────────────────────────────────
@@ -476,22 +556,22 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
 
         ' ── ALAMAT PP: lookup master_dinas.alamat_pp_bertugas via satker ───
         Dim alamatPP As String: alamatPP = LookupAlamatPP(CStr(item(2)))
-        If alamatPP <> "" And alamatPP <> "null" Then
-            .Cells(PLR_ALAMAT_PP, 3).Value = alamatPP
+        If rowAlamatPP > 0 And alamatPP <> "" And alamatPP <> "null" Then
+            .Cells(rowAlamatPP, 3).Value = alamatPP
         End If
 
         ' ── TELEPON PP: lookup master_dinas.telepon_pp via satker ───────
         Dim telPP As String: telPP = LookupTeleponPP(CStr(item(2)))
-        If telPP <> "" And telPP <> "null" Then
-            .Cells(PLR_TELEPON_PP, 3).Value = telPP
+        If rowTeleponPP > 0 And telPP <> "" And telPP <> "null" Then
+            .Cells(rowTeleponPP, 3).Value = telPP
         End If
 
         ' ── MASA BERLAKU PENAWARAN (item 39) ─────────────────────────────
         If UBound(item) >= 39 Then
             Dim mbStr As String: mbStr = CStr(item(39))
-            If mbStr <> "" And mbStr <> "null" And IsNumeric(mbStr) Then
-                .Cells(PLR_MASA_BERLAKU, 3).NumberFormat = "@"
-                .Cells(PLR_MASA_BERLAKU, 3).Value = CInt(mbStr) & " Hari Kalender"
+            If rowMasaBerlaku > 0 And mbStr <> "" And mbStr <> "null" And IsNumeric(mbStr) Then
+                .Cells(rowMasaBerlaku, 3).NumberFormat = "@"
+                .Cells(rowMasaBerlaku, 3).Value = CInt(mbStr) & " Hari Kalender"
             End If
         End If
 
@@ -511,13 +591,17 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         ' ── Jumlah orang (R41-R43 "Minimal Orang 1/2/3") dari field jumlah_orang ──
         ' Array parser stride=4: jabatan/pengalaman/sertifikat/jumlah_orang. Max 3 personil.
         Dim personilJsonStr As String: personilJsonStr = CStr(item(27))
-        ' Bersihkan slot lama dulu (R32-R40 jabatan/pengalaman/sertifikat + R41-R43 jumlah)
+        ' Bersihkan slot lama dulu. PK: 2 slot mulai R33; JKK: 3 slot mulai R32.
         Dim clrI As Long
-        For clrI = 0 To 2
-            .Cells(PLR_PERSONIL_BASE + clrI * PLR_PERSONIL_STRIDE, 3).ClearContents
-            .Cells(PLR_PERSONIL_BASE + clrI * PLR_PERSONIL_STRIDE + 1, 3).ClearContents
-            .Cells(PLR_PERSONIL_BASE + clrI * PLR_PERSONIL_STRIDE + 2, 3).ClearContents
-            .Cells(PLR_MINORANG_BASE + clrI, 3).ClearContents
+        Dim personilBase As Long: personilBase = FindLastLabelRow(wsMD, "Jabatan Personil 1")
+        Dim personilCount As Long: personilCount = IIf(isPK, 2, 3)
+        For clrI = 0 To personilCount - 1
+            If personilBase > 0 Then
+                .Cells(personilBase + clrI * PLR_PERSONIL_STRIDE, 3).ClearContents
+                .Cells(personilBase + clrI * PLR_PERSONIL_STRIDE + 1, 3).ClearContents
+                .Cells(personilBase + clrI * PLR_PERSONIL_STRIDE + 2, 3).ClearContents
+            End If
+            If Not isPK Then .Cells(PLR_MINORANG_BASE + clrI, 3).ClearContents
         Next clrI
         If personilJsonStr <> "" And personilJsonStr <> "null" Then
             Dim personilArr() As String
@@ -525,13 +609,28 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             Dim nP As Long: nP = (UBound(personilArr) + 1) \ 4
             Dim iP As Long
             For iP = 0 To nP - 1
-                If iP >= 3 Then Exit For
-                Dim baseRow As Long: baseRow = PLR_PERSONIL_BASE + iP * PLR_PERSONIL_STRIDE
-                .Cells(baseRow, 3).Value     = personilArr(iP * 4)       ' jabatan
-                .Cells(baseRow + 1, 3).Value = personilArr(iP * 4 + 1)   ' pengalaman
-                .Cells(baseRow + 2, 3).Value = personilArr(iP * 4 + 2)   ' sertifikat
-                .Cells(PLR_MINORANG_BASE + iP, 3).Value = personilArr(iP * 4 + 3)  ' jumlah orang -> R41/R42/R43
+                If iP >= personilCount Then Exit For
+                If personilBase > 0 Then
+                    Dim baseRow As Long: baseRow = personilBase + iP * PLR_PERSONIL_STRIDE
+                    .Cells(baseRow, 3).Value     = personilArr(iP * 4)       ' jabatan
+                    .Cells(baseRow + 1, 3).Value = personilArr(iP * 4 + 1)   ' pengalaman
+                    .Cells(baseRow + 2, 3).Value = personilArr(iP * 4 + 2)   ' sertifikat
+                    If Not isPK Then .Cells(PLR_MINORANG_BASE + iP, 3).Value = personilArr(iP * 4 + 3)
+                End If
             Next iP
+        End If
+
+        ' Field personil legacy PK (jika tersedia di Supabase) diletakkan pada
+        ' baris berlabel, tidak pada area alat/personil tabel.
+        If isPK Then
+            Dim rowJabTeknis As Long: rowJabTeknis = FindLastLabelRow(wsMD, "Jabatan Personil Teknis")
+            Dim rowJabK3 As Long: rowJabK3 = FindLastLabelRow(wsMD, "Jabatan Personil K3")
+            Dim rowSkkTeknis As Long: rowSkkTeknis = FindLastLabelRow(wsMD, "Sertifikat SKK/SKA Teknis")
+            Dim rowSkkK3 As Long: rowSkkK3 = FindLastLabelRow(wsMD, "Sertifikat SKK/SKA K3")
+            If rowJabTeknis > 0 Then .Cells(rowJabTeknis, 3).Value = CStr(item(17))
+            If rowSkkTeknis > 0 Then .Cells(rowSkkTeknis, 3).Value = CStr(item(18))
+            If rowJabK3 > 0 Then .Cells(rowJabK3, 3).Value = CStr(item(19))
+            If rowSkkK3 > 0 Then .Cells(rowSkkK3, 3).Value = CStr(item(20))
         End If
     End With
 
