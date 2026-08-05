@@ -159,6 +159,7 @@ def read_excel_data(excel_path, sheet_name):
             # adalah tabel input yang memang disediakan untuk operator paket.
             data["_source_sheet"] = sheet_name
             data["_dokpil_equipment"] = _read_dokpil_equipment(temp_path)
+            data["_dokpil_personnel"] = _read_dokpil_personnel(temp_path)
         if sheet_name == "satu_data":
             _augment_ba_counts(data, temp_path)
             _normalize_revaluasi_data(data)
@@ -224,6 +225,49 @@ def _read_dokpil_equipment(excel_copy_path):
             except Exception:
                 pass
     return equipment
+
+
+def _read_dokpil_personnel(excel_copy_path):
+    """Baca personil aktif dari ``Tabel Alat & Personil!G4:J9``.
+
+    Sheet tersebut menjadi sumber tunggal tabel personil Dokpil. Baris tanpa
+    Jabatan (termasuk hasil formula ``0``) tidak dikirim ke Word; nomor
+    dinormalisasi ulang agar tidak ada nomor kosong atau loncat.
+    """
+    from openpyxl import load_workbook
+
+    personnel = []
+    wb = None
+    try:
+        wb = load_workbook(
+            excel_copy_path,
+            read_only=True,
+            data_only=True,
+            keep_links=False,
+        )
+        if "Tabel Alat & Personil" not in wb.sheetnames:
+            return personnel
+        ws = wb["Tabel Alat & Personil"]
+        for row in ws.iter_rows(min_row=4, max_row=9, min_col=7, max_col=10, values_only=True):
+            _no, _jabatan, _sertifikat, _pengalaman = row
+            jabatan = _meaningful_dokpil_value(_jabatan)
+            if not jabatan:
+                continue
+            personnel.append({
+                "no": str(len(personnel) + 1),
+                "jabatan": jabatan,
+                "sertifikat": _meaningful_dokpil_value(_sertifikat),
+                "pengalaman": _meaningful_dokpil_value(_pengalaman),
+            })
+    except Exception as exc:
+        print(f"Warning read Dokpil personnel: {exc}")
+    finally:
+        if wb is not None:
+            try:
+                wb.close()
+            except Exception:
+                pass
+    return personnel
 
 
 def _set_data_aliases(data, field_name, value):
@@ -518,6 +562,97 @@ def _prepare_dokpil_personnel_table(wdDoc, data):
         traceback.print_exc()
 
 
+def _prepare_dokpil_personnel_markers_docx(docx_path, personnel):
+    """Isi tabel personil berbasis marker ``[[..._PERSONIL]]``.
+
+    Marker dipasang pada satu row donor di tabel Word. Row donor dihapus,
+    lalu dikloning sesuai personil aktif dari Excel. Iterasi hanya memproses
+    row langsung pada tabel target agar marker di nested table tidak salah
+    dianggap sebagai row tabel pembungkus.
+    """
+    import copy as _copy
+    import zipfile
+    from lxml import etree as LET
+
+    ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    marker_fields = {
+        "[[NO_PERSONIL]]": "no",
+        "[[JABATAN_PERSONIL]]": "jabatan",
+        "[[SERTIFIKAT_PERSONIL]]": "sertifikat",
+        "[[PENGALAMAN_PERSONIL]]": "pengalaman",
+    }
+    changed = False
+
+    with zipfile.ZipFile(docx_path, "r") as zin:
+        names = zin.namelist()
+        if "word/document.xml" not in names:
+            return False
+        root = LET.fromstring(zin.read("word/document.xml"))
+
+        targets = []
+        for table in root.iter(ns + "tbl"):
+            rows = [child for child in table if child.tag == ns + "tr"]
+            for index, row in enumerate(rows):
+                cells = [child for child in row if child.tag == ns + "tc"]
+                if not cells:
+                    continue
+                # Row pembungkus dapat memuat nested table marker; target
+                # sebenarnya akan ditemukan pada iterasi tabel anak.
+                if row.find(".//" + ns + "tbl") is not None:
+                    continue
+                row_text = _xml_text_content(row, ns)
+                if not any(marker in row_text for marker in marker_fields):
+                    continue
+                fields_by_column = []
+                for cell in cells:
+                    cell_text = _xml_text_content(cell, ns)
+                    fields_by_column.append(
+                        next(
+                            (field for marker, field in marker_fields.items() if marker in cell_text),
+                            None,
+                        )
+                    )
+                if any(fields_by_column):
+                    targets.append((table, index, row, fields_by_column))
+
+        if not targets:
+            return False
+
+        for target, _index, donor, fields_by_column in targets:
+            # Posisi donor disimpan sebelum row marker dihapus.
+            insert_at = list(target).index(donor)
+            target.remove(donor)
+            for item in personnel or []:
+                clone = _copy.deepcopy(donor)
+                cells = [child for child in clone if child.tag == ns + "tc"]
+                for cell, field in zip(cells, fields_by_column):
+                    if field:
+                        _set_dokpil_cell_text(
+                            cell,
+                            item.get(field, ""),
+                            ns,
+                            LET,
+                            _copy,
+                        )
+                target.insert(insert_at, clone)
+                insert_at += 1
+            changed = True
+
+        if not changed:
+            return False
+        new_xml = LET.tostring(root, encoding="UTF-8", xml_declaration=True, standalone=True)
+        tmp = docx_path + ".tmp"
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+            for name in names:
+                zout.writestr(
+                    name,
+                    new_xml if name == "word/document.xml" else zin.read(name),
+                )
+    os.replace(tmp, docx_path)
+    print(f"Dokpil personnel marker table ready: {len(targets)} table(s), {len(personnel or [])} row(s) each")
+    return True
+
+
 def _prepare_dokpil_personnel_docx(docx_path, data):
     """Clone row tenaga ahli pada XML DOCX sebelum Word membukanya.
 
@@ -529,6 +664,12 @@ def _prepare_dokpil_personnel_docx(docx_path, data):
     import copy as _copy
     import zipfile
     from lxml import etree as LET
+
+    # Jalur baru: marker kurung siku membaca tabel input G:J. Jika template
+    # belum memakai marker baru, lanjutkan ke kompatibilitas MERGEFIELD lama.
+    personnel = (data or {}).get("_dokpil_personnel")
+    if personnel is not None and _prepare_dokpil_personnel_markers_docx(docx_path, personnel):
+        return
 
     active_slots = []
     for slot in range(1, 4):
