@@ -153,10 +153,10 @@ def read_excel_data(excel_path, sheet_name):
                     if header != normalized:
                         data.setdefault(f"{header}{n}", val)
                 seen[normalized] = n + 1
-        if sheet_name == "list_dokpil":
-            # Tabel persyaratan peralatan pada Dokpil tidak mengambil data
-            # dari cache sheet list_dokpil. Sumber tunggalnya adalah tabel
-            # input yang memang disediakan untuk operator paket.
+        if sheet_name in {"list_dokpil", "list_reviu"}:
+            # Tabel persyaratan peralatan pada Dokpil dan Isi Reviu tidak
+            # mengambil data dari cache sheet mail-merge. Sumber tunggalnya
+            # adalah tabel input yang memang disediakan untuk operator paket.
             data["_source_sheet"] = sheet_name
             data["_dokpil_equipment"] = _read_dokpil_equipment(temp_path)
         if sheet_name == "satu_data":
@@ -660,10 +660,10 @@ def _set_dokpil_cell_text(cell, value, ns, LET, copy_module):
 
 
 def _prepare_dokpil_equipment_docx(docx_path, data):
-    """Isi tabel persyaratan alat Dokpil dari sheet Tabel Alat & Personil.
+    """Isi tabel marker alat dari sheet Tabel Alat & Personil.
 
-    Target dikenali dari marker row atau header empat kolom alat. Marker row
-    mengikuti template ``9. List_Personil_Alat.docx``:
+    Target dikenali dari marker row atau header empat kolom alat. Marker
+    mengikuti template Dokpil/Isi Reviu:
     ``[[NO_ALAT]]``, ``[[NAMA_ALAT]]``, ``[[JUMLAH_ALAT]]``,
     ``[[KAPASITAS_ALAT]]``. Semua perubahan hanya dilakukan pada salinan
     ``(Merged)``.
@@ -697,10 +697,7 @@ def _prepare_dokpil_equipment_docx(docx_path, data):
             return
         root = LET.fromstring(zin.read("word/document.xml"))
 
-        target = None
-        header_index = None
-        header_row = None
-        source_row = None
+        targets = []
         for table in root.iter(ns + "tbl"):
             rows = [child for child in table if child.tag == ns + "tr"]
             for index, row in enumerate(rows):
@@ -728,9 +725,6 @@ def _prepare_dokpil_equipment_docx(docx_path, data):
                     and set(fields_by_column) == {"no", "jenis", "jumlah", "kapasitas"}
                 )
                 if marker_row or header_row_ok:
-                    target = table
-                    header_index = index
-                    header_row = row
                     if marker_row:
                         fields_by_column = [
                             next(
@@ -740,41 +734,41 @@ def _prepare_dokpil_equipment_docx(docx_path, data):
                             for cell_index, cell in enumerate(cells[:4])
                         ]
                     if index + 1 < len(rows):
-                        source_row = rows[index + 1]
+                        targets.append((table, index, row, rows[index + 1], fields_by_column))
                     break
-            if target is not None:
-                break
 
-        if target is None or source_row is None:
-            print("Warning dynamic Dokpil equipment row: target table/header tidak ditemukan")
+        if not targets:
+            print("Warning dynamic equipment row: target table/header tidak ditemukan")
             return
 
-        rows = [child for child in target if child.tag == ns + "tr"]
-        # Template produksi memiliki satu row kosong. Hapus seluruh row data
-        # agar hasil tidak menggandakan alat saat template sudah pernah diisi.
-        for row in rows[header_index + 1:]:
-            target.remove(row)
+        for target, header_index, header_row, source_row, fields_by_column in targets:
+            rows = [child for child in target if child.tag == ns + "tr"]
+            # Template produksi memiliki satu row donor. Hapus seluruh row
+            # data agar hasil tidak menggandakan alat saat template sudah
+            # pernah diisi. Hanya tabel yang memiliki marker/header yang masuk.
+            for row in rows[header_index + 1:]:
+                target.remove(row)
 
-        insert_at = list(target).index(header_row) + 1
-        # source_row sudah dilepas dari target; salin formatnya untuk setiap
-        # alat aktif. Bila tidak ada alat, tabel dibiarkan header-only.
-        for item in equipment:
-            clone = _copy.deepcopy(source_row)
-            cells = [child for child in clone if child.tag == ns + "tc"]
-            if len(cells) < 4:
-                print("Warning dynamic Dokpil equipment row: donor bukan 4 kolom")
-                return
-            item_values = {
-                "no": item.get("no", ""),
-                "jenis": item.get("jenis", ""),
-                "jumlah": item.get("jumlah", ""),
-                "kapasitas": item.get("kapasitas", ""),
-            }
-            for cell, field in zip(cells[:4], fields_by_column):
-                value = item_values.get(field, "")
-                _set_dokpil_cell_text(cell, value, ns, LET, _copy)
-            target.insert(insert_at, clone)
-            insert_at += 1
+            insert_at = list(target).index(header_row) + 1
+            # source_row sudah dilepas dari target; salin formatnya untuk
+            # setiap alat aktif. Tanpa alat, tabel dibiarkan header-only.
+            for item in equipment:
+                clone = _copy.deepcopy(source_row)
+                cells = [child for child in clone if child.tag == ns + "tc"]
+                if len(cells) < 4:
+                    print("Warning dynamic equipment row: donor bukan 4 kolom")
+                    break
+                item_values = {
+                    "no": item.get("no", ""),
+                    "jenis": item.get("jenis", ""),
+                    "jumlah": item.get("jumlah", ""),
+                    "kapasitas": item.get("kapasitas", ""),
+                }
+                for cell, field in zip(cells[:4], fields_by_column):
+                    value = item_values.get(field, "")
+                    _set_dokpil_cell_text(cell, value, ns, LET, _copy)
+                target.insert(insert_at, clone)
+                insert_at += 1
 
         new_xml = LET.tostring(root, encoding="UTF-8", xml_declaration=True, standalone=True)
         tmp = docx_path + ".tmp"
@@ -785,7 +779,7 @@ def _prepare_dokpil_equipment_docx(docx_path, data):
                     new_xml if name == "word/document.xml" else zin.read(name),
                 )
     os.replace(tmp, docx_path)
-    print(f"Dokpil equipment table ready: {len(equipment)} row(s)")
+    print(f"Equipment table(s) ready: {len(targets)} table(s), {len(equipment)} row(s) each")
 
 
 def cleanup_blank_pages(doc):
@@ -1408,7 +1402,8 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             (data or {}).get("_source_sheet") == "list_dokpil"
             or os.path.basename(word_path).lower().startswith("3. dokpil full")
         )
-        if _is_dokpil:
+        _is_reviu = (data or {}).get("_source_sheet") == "list_reviu"
+        if _is_dokpil or _is_reviu:
             # Bentuk tabel sebelum Documents.Open: Word sering mengubah
             # struktur row/field ketika dokumen dibuka, terutama pada tabel
             # dengan vertically merged cells.
