@@ -121,8 +121,17 @@ def _validate_vba_source(content: str) -> None:
 def _create_backup(filepath: str) -> Path:
     """Backup unik dan recoverable sebelum VBA workbook diubah."""
     source = Path(filepath)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    source_id = hashlib.sha1(str(source).encode("utf-8")).hexdigest()[:10]
+    safe_stem = source.stem[:80].rstrip(" .")
+    backup_name = f"{safe_stem}.{source_id}.before-{MOD_NAME}-{stamp}{source.suffix}"
+
+    # Ukur path tujuan sebenarnya. Mengukur source.name saja tidak cukup:
+    # suffix timestamp + nama modul dapat mendorong path paket melewati
+    # MAX_PATH walaupun path source masih di bawah ambang.
     backup_dir = source.parent / ".vba-backup"
-    if len(str(backup_dir / source.name)) >= 248:
+    backup = backup_dir / backup_name
+    if len(str(backup)) >= 240:
         configured_root = os.environ.get("POKJA_DRIVE_ROOT", "").strip()
         pokja_root = Path(configured_root) if configured_root else None
         if not pokja_root or not pokja_root.exists():
@@ -131,13 +140,8 @@ def _create_backup(filepath: str) -> Path:
                 SCRIPT_DIR,
             )
         backup_dir = pokja_root / ".vba-backup"
-    backup_dir.mkdir(exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    source_id = hashlib.sha1(str(source).encode("utf-8")).hexdigest()[:10]
-    safe_stem = source.stem[:80].rstrip(" .")
-    backup = backup_dir / (
-        f"{safe_stem}.{source_id}.before-{MOD_NAME}-{stamp}{source.suffix}"
-    )
+        backup = backup_dir / backup_name
+    backup_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, backup)
     return backup
 

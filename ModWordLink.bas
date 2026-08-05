@@ -327,7 +327,7 @@ Private Sub RunMerge(mode As String, wordFile As String, sheetName As String)
     Application.StatusBar = "Merging " & wordFile & "... Word akan muncul sebentar lagi."
     
     ' Reset status bar setelah 5 detik
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    ScheduleWordLinkStatusBarReset
 End Sub
 
 Private Function Q(s As String) As String
@@ -439,6 +439,15 @@ End Function
 Public Function ScriptDir_Public() As String
     ScriptDir_Public = ScriptDir()
 End Function
+
+' Reset status bar secara sinkron.
+' Jangan membuat callback Application.OnTime: proses Word/PDF dapat
+' meninggalkan callback tertunda yang memicu break/popup di konteks Excel lain.
+Private Sub ScheduleWordLinkStatusBarReset()
+    On Error Resume Next
+    Application.StatusBar = False
+    On Error GoTo 0
+End Sub
 
 Public Sub ResetStatusBar()
     Application.StatusBar = False

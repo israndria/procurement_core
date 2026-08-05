@@ -39,6 +39,16 @@ Private Const WM_PAT_DOKPIL       As String = "3. Dokpil Full "
 ' Sheet & Cell selector (F2 = kode_unik, aktif dipakai AutoKodeUnikPL + IsiMasterDataPL)
 Private Const MD_SHEET As String = "@ Master Data"
 
+' Reset status bar secara sinkron.
+' Callback Application.OnTime tidak dipakai: callback tertunda dapat
+' mengeksekusi macro saat konteks workbook/VBE sudah berubah dan memicu
+' break/popup walaupun error sudah diberi On Error Resume Next.
+Private Sub SchedulePLStatusBarReset()
+    On Error Resume Next
+    Application.StatusBar = False
+    On Error GoTo 0
+End Sub
+
 ' Kolom yang di-fetch dari draft_paket_pl
 ' index: 0=kode_paket, 1=nama_paket, 2=satker, 3=kode_rup, 4=nilai_hps,
 '        5=jenis_pl, 6=jenis_kontrak, 7=status, 8=nama_ppk, 9=nip_ppk,
@@ -748,7 +758,7 @@ Public Sub MuatPenawaranPL()
     ' JSON kosong [] = penawaran belum masuk, skip diam-diam
     If Trim(rawJson) = "[]" Or Trim(rawJson) = "" Then
         Application.StatusBar = "Penawaran PL belum masuk — sheet '6. Penawaran' belum diisi."
-        Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+        SchedulePLStatusBarReset
         Exit Sub
     End If
 
@@ -1354,7 +1364,7 @@ Public Sub CetakDokpilPlJkkPDF()
     End If
 
     Set wsh = Nothing
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    SchedulePLStatusBarReset
 End Sub
 
 Public Sub CetakReviuPlJkkPDF()
@@ -1410,7 +1420,7 @@ Public Sub CetakReviuPlJkkPDF()
     End If
 
     Set wsh = Nothing
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    SchedulePLStatusBarReset
 End Sub
 
 Public Sub CetakBAReviuPLPDF()
@@ -1467,7 +1477,7 @@ Public Sub CetakBAReviuPLPDF()
     End If
 
     Set wsh = Nothing
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    SchedulePLStatusBarReset
 End Sub
 
 Private Function ChooseOutputModePL(ByRef outPrinter As String) As String
@@ -1586,7 +1596,7 @@ Public Sub CetakBAPLJKKPDF()
     End If
 
     Set wsh = Nothing
-    Application.OnTime Now + TimeValue("00:00:05"), "ResetStatusBar"
+    SchedulePLStatusBarReset
 End Sub
 
 

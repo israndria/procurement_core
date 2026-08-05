@@ -153,6 +153,12 @@ def read_excel_data(excel_path, sheet_name):
                     if header != normalized:
                         data.setdefault(f"{header}{n}", val)
                 seen[normalized] = n + 1
+        if sheet_name == "list_dokpil":
+            # Tabel persyaratan peralatan pada Dokpil tidak mengambil data
+            # dari cache sheet list_dokpil. Sumber tunggalnya adalah tabel
+            # input yang memang disediakan untuk operator paket.
+            data["_source_sheet"] = sheet_name
+            data["_dokpil_equipment"] = _read_dokpil_equipment(temp_path)
         if sheet_name == "satu_data":
             _augment_ba_counts(data, temp_path)
             _normalize_revaluasi_data(data)
@@ -167,6 +173,57 @@ def read_excel_data(excel_path, sheet_name):
             pass
 
     return data
+
+
+def _meaningful_dokpil_value(value):
+    """Normalisasi nilai slot alat; 0 dari formula Excel berarti kosong."""
+    value = format_value(value).strip()
+    if value.casefold() in ("", "0", "0.0", "none", "null", "-", "—"):
+        return ""
+    return value
+
+
+def _read_dokpil_equipment(excel_copy_path):
+    """Baca alat aktif dari ``Tabel Alat & Personil!B4:E9``.
+
+    Sheet tersebut adalah area input operator. Baris dengan Jenis Alat
+    kosong/0 tidak dikirim ke Dokpil, sehingga jumlah row Word selalu sama
+    dengan jumlah alat aktif, bukan jumlah slot maksimum pada template.
+    """
+    from openpyxl import load_workbook
+
+    equipment = []
+    wb = None
+    try:
+        wb = load_workbook(
+            excel_copy_path,
+            read_only=True,
+            data_only=True,
+            keep_links=False,
+        )
+        if "Tabel Alat & Personil" not in wb.sheetnames:
+            return equipment
+        ws = wb["Tabel Alat & Personil"]
+        for row in ws.iter_rows(min_row=4, max_row=9, min_col=2, max_col=5, values_only=True):
+            _no, _jenis, _kapasitas, _jumlah = row
+            jenis = _meaningful_dokpil_value(_jenis)
+            if not jenis:
+                continue
+            equipment.append({
+                "no": str(len(equipment) + 1),
+                "jenis": jenis,
+                "kapasitas": _meaningful_dokpil_value(_kapasitas),
+                "jumlah": _meaningful_dokpil_value(_jumlah),
+            })
+    except Exception as exc:
+        print(f"Warning read Dokpil equipment: {exc}")
+    finally:
+        if wb is not None:
+            try:
+                wb.close()
+            except Exception:
+                pass
+    return equipment
 
 
 def _set_data_aliases(data, field_name, value):
@@ -557,6 +614,178 @@ def _prepare_dokpil_personnel_docx(docx_path, data):
                 zout.writestr(name, new_xml if name == "word/document.xml" else zin.read(name))
     os.replace(tmp, docx_path)
     print(f"Dokpil personnel XML ready: {len(active_slots)} row(s)")
+
+
+def _xml_text_content(node, ns):
+    """Ambil teks visible + kode merge field dari node Word XML."""
+    text_tags = {ns + "t", ns + "instrText", ns + "delText"}
+    return "".join(
+        child.text or ""
+        for child in node.iter()
+        if child.tag in text_tags
+    )
+
+
+def _set_dokpil_cell_text(cell, value, ns, LET, copy_module):
+    """Ganti isi sel tanpa membuang tcPr/pPr/rPr donor."""
+    paragraphs = [child for child in cell if child.tag == ns + "p"]
+    if paragraphs:
+        paragraph = paragraphs[0]
+    else:
+        paragraph = LET.Element(ns + "p")
+        cell.append(paragraph)
+
+    paragraph_properties = paragraph.find(ns + "pPr")
+    run_properties = None
+    first_run = paragraph.find(".//" + ns + "r")
+    if first_run is not None:
+        first_run_properties = first_run.find(ns + "rPr")
+        if first_run_properties is not None:
+            run_properties = copy_module.deepcopy(first_run_properties)
+
+    # Row donor sudah membawa paragraph/cell formatting. Bersihkan hanya
+    # isi paragraph agar border, alignment, font, dan width tetap utuh.
+    for child in list(paragraph):
+        if child is not paragraph_properties:
+            paragraph.remove(child)
+
+    run = LET.SubElement(paragraph, ns + "r")
+    if run_properties is not None:
+        run.append(run_properties)
+    text_node = LET.SubElement(run, ns + "t")
+    value = "" if value is None else str(value)
+    if value[:1].isspace() or value[-1:].isspace():
+        text_node.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    text_node.text = value
+
+
+def _prepare_dokpil_equipment_docx(docx_path, data):
+    """Isi tabel persyaratan alat Dokpil dari sheet Tabel Alat & Personil.
+
+    Target dikenali dari marker row atau header empat kolom alat. Marker row
+    mengikuti template ``9. List_Personil_Alat.docx``:
+    ``[[NO_ALAT]]``, ``[[NAMA_ALAT]]``, ``[[JUMLAH_ALAT]]``,
+    ``[[KAPASITAS_ALAT]]``. Semua perubahan hanya dilakukan pada salinan
+    ``(Merged)``.
+    """
+    import copy as _copy
+    import zipfile
+    from lxml import etree as LET
+
+    equipment = data.get("_dokpil_equipment") if data else None
+    if equipment is None:
+        return
+
+    ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    marker_fields = {
+        "[[NO_ALAT]]": "no",
+        "[[NAMA_ALAT]]": "jenis",
+        "[[JUMLAH_ALAT]]": "jumlah",
+        "[[KAPASITAS_ALAT]]": "kapasitas",
+    }
+    header_fields = {
+        "no": "no",
+        "jenis": "jenis",
+        "namaalat": "jenis",
+        "jumlah": "jumlah",
+        "kapasitas": "kapasitas",
+        "kapasitasminimal": "kapasitas",
+    }
+    with zipfile.ZipFile(docx_path, "r") as zin:
+        names = zin.namelist()
+        if "word/document.xml" not in names:
+            return
+        root = LET.fromstring(zin.read("word/document.xml"))
+
+        target = None
+        header_index = None
+        header_row = None
+        source_row = None
+        for table in root.iter(ns + "tbl"):
+            rows = [child for child in table if child.tag == ns + "tr"]
+            for index, row in enumerate(rows):
+                cells = [child for child in row if child.tag == ns + "tc"]
+                values = [
+                    re.sub(r"\s+", " ", _xml_text_content(cell, ns)).strip().casefold()
+                    for cell in cells
+                ]
+                normalized_headers = [
+                    re.sub(r"[^a-z0-9]+", "", value) for value in values[:4]
+                ]
+                fields_by_column = [header_fields.get(value) for value in normalized_headers]
+                row_text = _xml_text_content(row, ns)
+                # Dokpil membungkus tabel alat di dalam sel tabel persyaratan
+                # teknis. Jangan salah menganggap row pembungkus sebagai
+                # target hanya karena teks marker ikut terbaca dari nested
+                # table; target sebenarnya ditemukan saat iterasi tabel anak.
+                has_nested_table = row.find(".//" + ns + "tbl") is not None
+                marker_row = (
+                    not has_nested_table
+                    and any(marker in row_text for marker in marker_fields)
+                )
+                header_row_ok = (
+                    len(fields_by_column) == 4
+                    and set(fields_by_column) == {"no", "jenis", "jumlah", "kapasitas"}
+                )
+                if marker_row or header_row_ok:
+                    target = table
+                    header_index = index
+                    header_row = row
+                    if marker_row:
+                        fields_by_column = [
+                            next(
+                                (field for marker, field in marker_fields.items() if marker in _xml_text_content(cell, ns)),
+                                fields_by_column[cell_index] if cell_index < len(fields_by_column) else None,
+                            )
+                            for cell_index, cell in enumerate(cells[:4])
+                        ]
+                    if index + 1 < len(rows):
+                        source_row = rows[index + 1]
+                    break
+            if target is not None:
+                break
+
+        if target is None or source_row is None:
+            print("Warning dynamic Dokpil equipment row: target table/header tidak ditemukan")
+            return
+
+        rows = [child for child in target if child.tag == ns + "tr"]
+        # Template produksi memiliki satu row kosong. Hapus seluruh row data
+        # agar hasil tidak menggandakan alat saat template sudah pernah diisi.
+        for row in rows[header_index + 1:]:
+            target.remove(row)
+
+        insert_at = list(target).index(header_row) + 1
+        # source_row sudah dilepas dari target; salin formatnya untuk setiap
+        # alat aktif. Bila tidak ada alat, tabel dibiarkan header-only.
+        for item in equipment:
+            clone = _copy.deepcopy(source_row)
+            cells = [child for child in clone if child.tag == ns + "tc"]
+            if len(cells) < 4:
+                print("Warning dynamic Dokpil equipment row: donor bukan 4 kolom")
+                return
+            item_values = {
+                "no": item.get("no", ""),
+                "jenis": item.get("jenis", ""),
+                "jumlah": item.get("jumlah", ""),
+                "kapasitas": item.get("kapasitas", ""),
+            }
+            for cell, field in zip(cells[:4], fields_by_column):
+                value = item_values.get(field, "")
+                _set_dokpil_cell_text(cell, value, ns, LET, _copy)
+            target.insert(insert_at, clone)
+            insert_at += 1
+
+        new_xml = LET.tostring(root, encoding="UTF-8", xml_declaration=True, standalone=True)
+        tmp = docx_path + ".tmp"
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+            for name in names:
+                zout.writestr(
+                    name,
+                    new_xml if name == "word/document.xml" else zin.read(name),
+                )
+    os.replace(tmp, docx_path)
+    print(f"Dokpil equipment table ready: {len(equipment)} row(s)")
 
 
 def cleanup_blank_pages(doc):
@@ -1175,7 +1404,15 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         wdApp.DisplayAlerts = 0
         wdApp.Visible = False
 
-        if mode == "pdf_dokpil":
+        _is_dokpil = (
+            (data or {}).get("_source_sheet") == "list_dokpil"
+            or os.path.basename(word_path).lower().startswith("3. dokpil full")
+        )
+        if _is_dokpil:
+            # Bentuk tabel sebelum Documents.Open: Word sering mengubah
+            # struktur row/field ketika dokumen dibuka, terutama pada tabel
+            # dengan vertically merged cells.
+            _prepare_dokpil_equipment_docx(copy_path, data)
             _prepare_dokpil_personnel_docx(copy_path, data)
 
         wdDoc = wdApp.Documents.Open(
