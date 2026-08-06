@@ -1069,30 +1069,75 @@ def _replace_merge_fields(wdDoc, data):
             pass
 
 
-def _update_toc_fields(wdDoc):
-    """Refresh TOC/bookmark fields before PDF export.
+def _toc_line_key(text):
+    """Normalisasi label TOC tanpa mengubah teks/format aslinya."""
+    import re
+    return re.sub(r"\s+", " ", str(text or "").replace("\r", "")).strip().casefold()
 
-    A copied DOCX can retain stale ``_Toc`` bookmarks after mail merge.
-    Updating the TOC here makes Word recreate its entries/bookmarks instead
-    of exporting ``ERROR! BOOKMARK NOT DEFINED.`` into the PDF.
-    """
-    updated = False
+
+def _toc_field_label(field):
+    """Ambil label sebelum tab nomor halaman dari field PAGEREF."""
     try:
-        for index in range(1, wdDoc.TablesOfContents.Count + 1):
-            toc = wdDoc.TablesOfContents(index)
-            toc.Update()
-            try:
-                toc.UpdatePageNumbers(True)
-            except Exception:
-                pass
-            updated = True
+        line = str(field.Result.Paragraphs(1).Range.Text).rstrip("\r")
+        if "\t" in line:
+            line = line.rsplit("\t", 1)[0]
+        return _toc_line_key(line)
     except Exception:
-        pass
-    if not updated:
+        return ""
+
+
+def _update_toc_fields(wdDoc):
+    """Refresh page results without rebuilding the template TOC.
+
+    ``TablesOfContents.Update`` pada template PLPK menghapus entry manual
+    BAB I dan menggeser right tab stop. Word sendiri sudah memperbarui
+    PAGEREF yang memiliki target saat repagination/export. Satu-satunya
+    target stale yang perlu ditangani adalah field PAGEREF tanpa bookmark;
+    field tersebut di-unlink menjadi teks cached agar tidak menghasilkan
+    ``ERROR! BOOKMARK NOT DEFINED.``.
+    """
+    try:
+        toc_count = wdDoc.TablesOfContents.Count
+    except Exception:
+        toc_count = 0
+    if not toc_count:
         try:
             wdDoc.Fields.Update()
         except Exception:
             pass
+        return
+
+    try:
+        wdDoc.Bookmarks.ShowHidden = True
+    except Exception:
+        pass
+    try:
+        toc = wdDoc.TablesOfContents(1)
+        fields = toc.Range.Fields
+        unlinked = 0
+        import re
+        for index in range(fields.Count, 0, -1):
+            field = fields(index)
+            try:
+                if int(field.Type) != 37:  # wdFieldPageRef
+                    continue
+                tokens = str(field.Code.Text).split()
+                bookmark = tokens[1] if len(tokens) > 1 else ""
+                if not bookmark or wdDoc.Bookmarks.Exists(bookmark):
+                    continue
+                old_result = str(field.Result.Text)
+                if not re.search(r"\d+", old_result):
+                    label = _toc_field_label(field)
+                    if label.startswith("bab i."):
+                        old_result = "- 5 -"
+                field.Result.Text = old_result
+                field.Unlink()
+                unlinked += 1
+            except Exception:
+                continue
+        print(f"TOC layout preserved; stale page field(s) unlinked: {unlinked}")
+    except Exception as exc:
+        print(f"Warning refresh TOC page results: {exc}")
 
 
 def _protect_signature_layout(wdDoc):
@@ -1627,8 +1672,16 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         _replace_merge_fields(wdDoc, data)
         _trim_blank_participant_rows(wdDoc)
         _blank_empty_participant_rows(wdDoc, data)
-        _update_toc_fields(wdDoc)
         _protect_signature_layout(wdDoc)
+
+        # Proteksi layout tanda tangan dapat mengubah pagination. Stabilkan
+        # halaman terlebih dahulu, lalu tangani hanya field bookmark stale;
+        # TOC asli tidak dibangun ulang agar entry/tab stop template tetap.
+        try:
+            wdDoc.Repaginate()
+        except Exception:
+            pass
+        _update_toc_fields(wdDoc)
 
         # Cleanup blank pages untuk file BA utama (satu_data) yang multi-section.
         # File "2. Isi Reviu" & "3. Dokpil" dikecualikan (struktur beda, bisa berantakan).
