@@ -184,10 +184,20 @@ def _meaningful_dokpil_value(value):
     return value
 
 
-def _read_dokpil_equipment(excel_copy_path):
-    """Baca alat aktif dari ``Tabel Alat & Personil!B4:E9``.
+def _dokpil_input_sheet(wb):
+    """Cari sheet input alat/personil dengan nama lama maupun nama Tender."""
+    aliases = {"tabel alat & personil", "alat & personil"}
+    for name in wb.sheetnames:
+        if str(name).strip().casefold() in aliases:
+            return wb[name]
+    return None
 
-    Sheet tersebut adalah area input operator. Baris dengan Jenis Alat
+
+def _read_dokpil_equipment(excel_copy_path):
+    """Baca alat aktif dari sheet input ``B4:E9``.
+
+    Sheet dapat bernama ``Alat & Personil`` (Tender) atau
+    ``Tabel Alat & Personil`` (PLPK lama). Baris dengan Jenis Alat
     kosong/0 tidak dikirim ke Dokpil, sehingga jumlah row Word selalu sama
     dengan jumlah alat aktif, bukan jumlah slot maksimum pada template.
     """
@@ -202,11 +212,13 @@ def _read_dokpil_equipment(excel_copy_path):
             data_only=True,
             keep_links=False,
         )
-        if "Tabel Alat & Personil" not in wb.sheetnames:
+        ws = _dokpil_input_sheet(wb)
+        if ws is None:
             return equipment
-        ws = wb["Tabel Alat & Personil"]
         for row in ws.iter_rows(min_row=4, max_row=9, min_col=2, max_col=5, values_only=True):
             _no, _jenis, _kapasitas, _jumlah = row
+            if str(_jenis or "").strip().casefold() in {"jenis alat", "nama alat", "nama peralatan utama"}:
+                continue
             jenis = _meaningful_dokpil_value(_jenis)
             if not jenis:
                 continue
@@ -228,11 +240,11 @@ def _read_dokpil_equipment(excel_copy_path):
 
 
 def _read_dokpil_personnel(excel_copy_path):
-    """Baca personil aktif dari ``Tabel Alat & Personil!G4:J9``.
+    """Baca personil aktif dari sheet input ``G4:J9``.
 
-    Sheet tersebut menjadi sumber tunggal tabel personil Dokpil. Baris tanpa
-    Jabatan (termasuk hasil formula ``0``) tidak dikirim ke Word; nomor
-    dinormalisasi ulang agar tidak ada nomor kosong atau loncat.
+    Sheet dapat bernama ``Alat & Personil`` atau ``Tabel Alat & Personil``.
+    Baris tanpa Jabatan (termasuk hasil formula ``0``) tidak dikirim ke Word;
+    nomor dinormalisasi ulang agar tidak ada nomor kosong atau loncat.
     """
     from openpyxl import load_workbook
 
@@ -245,11 +257,13 @@ def _read_dokpil_personnel(excel_copy_path):
             data_only=True,
             keep_links=False,
         )
-        if "Tabel Alat & Personil" not in wb.sheetnames:
+        ws = _dokpil_input_sheet(wb)
+        if ws is None:
             return personnel
-        ws = wb["Tabel Alat & Personil"]
         for row in ws.iter_rows(min_row=4, max_row=9, min_col=7, max_col=10, values_only=True):
             _no, _jabatan, _sertifikat, _pengalaman = row
+            if str(_jabatan or "").strip().casefold() in {"jabatan", "jabatan personil", "nama personil"}:
+                continue
             jabatan = _meaningful_dokpil_value(_jabatan)
             if not jabatan:
                 continue
@@ -801,10 +815,11 @@ def _set_dokpil_cell_text(cell, value, ns, LET, copy_module):
 
 
 def _prepare_dokpil_equipment_docx(docx_path, data):
-    """Isi tabel marker alat dari sheet Tabel Alat & Personil.
+    """Isi tabel marker alat dari sheet input alat/personil.
 
-    Target dikenali dari marker row atau header empat kolom alat. Marker
-    mengikuti template Dokpil/Isi Reviu:
+    Target dikenali dari marker row, header empat kolom PLPK, atau header
+    delapan kolom Dokpil Tender. Marker canonical mengikuti template
+    Dokpil/Isi Reviu:
     ``[[NO_ALAT]]``, ``[[NAMA_ALAT]]``, ``[[JUMLAH_ALAT]]``,
     ``[[KAPASITAS_ALAT]]``. Semua perubahan hanya dilakukan pada salinan
     ``(Merged)``.
@@ -823,11 +838,19 @@ def _prepare_dokpil_equipment_docx(docx_path, data):
         "[[NAMA_ALAT]]": "jenis",
         "[[JUMLAH_ALAT]]": "jumlah",
         "[[KAPASITAS_ALAT]]": "kapasitas",
+        # Marker tambahan tabel Tender. Sumber Excel saat ini hanya
+        # menyediakan empat field canonical di atas.
+        "[[MERK_TIPE_ALAT]]": None,
+        "[[KONDISI_ALAT]]": None,
+        "[[STATUS_KEPEMILIKAN_ALAT]]": None,
+        "[[KETERANGAN_ALAT]]": None,
     }
     header_fields = {
         "no": "no",
         "jenis": "jenis",
         "namaalat": "jenis",
+        "namaperalatanutama": "jenis",
+        "jenisalat": "jenis",
         "jumlah": "jumlah",
         "kapasitas": "kapasitas",
         "kapasitasminimal": "kapasitas",
@@ -848,7 +871,7 @@ def _prepare_dokpil_equipment_docx(docx_path, data):
                     for cell in cells
                 ]
                 normalized_headers = [
-                    re.sub(r"[^a-z0-9]+", "", value) for value in values[:4]
+                    re.sub(r"[^a-z0-9]+", "", value) for value in values
                 ]
                 fields_by_column = [header_fields.get(value) for value in normalized_headers]
                 row_text = _xml_text_content(row, ns)
@@ -861,19 +884,35 @@ def _prepare_dokpil_equipment_docx(docx_path, data):
                     not has_nested_table
                     and any(marker in row_text for marker in marker_fields)
                 )
-                header_row_ok = (
+                canonical_header_ok = (
                     len(fields_by_column) == 4
                     and set(fields_by_column) == {"no", "jenis", "jumlah", "kapasitas"}
                 )
+                tender_header_ok = (
+                    len(normalized_headers) >= 5
+                    and (
+                        normalized_headers[:5] == [
+                            "no", "namaperalatanutama", "merkdantipe", "kapasitas", "jumlah"
+                        ]
+                        or normalized_headers[:6] == [
+                            "no", "jenis", "merekdantipe", "kapasitas", "jumlah", "kepemilikanstatus"
+                        ]
+                    )
+                )
+                header_row_ok = canonical_header_ok or tender_header_ok
                 if marker_row or header_row_ok:
                     if marker_row:
-                        fields_by_column = [
-                            next(
-                                (field for marker, field in marker_fields.items() if marker in _xml_text_content(cell, ns)),
-                                fields_by_column[cell_index] if cell_index < len(fields_by_column) else None,
+                        marker_fields_by_column = []
+                        for cell in cells:
+                            cell_text = _xml_text_content(cell, ns)
+                            marker = next(
+                                (marker for marker in marker_fields if marker in cell_text),
+                                None,
                             )
-                            for cell_index, cell in enumerate(cells[:4])
-                        ]
+                            marker_fields_by_column.append(
+                                marker_fields[marker] if marker is not None else None
+                            )
+                        fields_by_column = marker_fields_by_column
                     if index + 1 < len(rows):
                         targets.append((table, index, row, rows[index + 1], fields_by_column))
                     break
@@ -896,8 +935,8 @@ def _prepare_dokpil_equipment_docx(docx_path, data):
             for item in equipment:
                 clone = _copy.deepcopy(source_row)
                 cells = [child for child in clone if child.tag == ns + "tc"]
-                if len(cells) < 4:
-                    print("Warning dynamic equipment row: donor bukan 4 kolom")
+                if len(cells) < len(fields_by_column):
+                    print("Warning dynamic equipment row: jumlah kolom donor tidak cocok")
                     break
                 item_values = {
                     "no": item.get("no", ""),
@@ -905,7 +944,7 @@ def _prepare_dokpil_equipment_docx(docx_path, data):
                     "jumlah": item.get("jumlah", ""),
                     "kapasitas": item.get("kapasitas", ""),
                 }
-                for cell, field in zip(cells[:4], fields_by_column):
+                for cell, field in zip(cells, fields_by_column):
                     value = item_values.get(field, "")
                     _set_dokpil_cell_text(cell, value, ns, LET, _copy)
                 target.insert(insert_at, clone)
