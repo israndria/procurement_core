@@ -962,6 +962,38 @@ def _fit_path(folder, filename, max_total=240):
     return os.path.join(folder, stem[:avail].rstrip() + ext)
 
 
+def _word_process_id(word_app, word_doc=None):
+    """Ambil PID instance Word yang dibuat DispatchEx; None jika gagal."""
+    import ctypes
+    for owner in (word_app, getattr(word_app, "ActiveWindow", None), word_doc,
+                  getattr(word_doc, "ActiveWindow", None) if word_doc is not None else None):
+        try:
+            hwnd = int(getattr(owner, "Hwnd"))
+            pid = ctypes.c_ulong(0)
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value:
+                return int(pid.value)
+        except Exception:
+            continue
+    return None
+
+
+def _terminate_word_process(pid):
+    """Tutup paksa hanya PID Word milik engine, bukan Word user lain."""
+    if not pid:
+        return
+    try:
+        import subprocess
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
 def _strip_mailmerge_datasource(docx_path):
     """Hapus attachment mail merge (w:mailMerge di word/settings.xml) dari copy
     (Merged). Path Excel panjang bikin connection string/SQL >255 char sehingga
@@ -1034,6 +1066,32 @@ def _replace_merge_fields(wdDoc, data):
                         val = ""
                     _set_field_result(field, val)
         except:
+            pass
+
+
+def _update_toc_fields(wdDoc):
+    """Refresh TOC/bookmark fields before PDF export.
+
+    A copied DOCX can retain stale ``_Toc`` bookmarks after mail merge.
+    Updating the TOC here makes Word recreate its entries/bookmarks instead
+    of exporting ``ERROR! BOOKMARK NOT DEFINED.`` into the PDF.
+    """
+    updated = False
+    try:
+        for index in range(1, wdDoc.TablesOfContents.Count + 1):
+            toc = wdDoc.TablesOfContents(index)
+            toc.Update()
+            try:
+                toc.UpdatePageNumbers(True)
+            except Exception:
+                pass
+            updated = True
+    except Exception:
+        pass
+    if not updated:
+        try:
+            wdDoc.Fields.Update()
+        except Exception:
             pass
 
 
@@ -1530,7 +1588,10 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
 
     pythoncom.CoInitialize()
     wdApp = None
+    wdDoc = None
+    word_pid = None
     new_instance = False
+    _deferred_pdf_success = None
 
     try:
         wdApp = win32com.client.DispatchEx("Word.Application")
@@ -1558,6 +1619,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             AddToRecentFiles=False,
             Visible=False
         )
+        word_pid = _word_process_id(wdApp, wdDoc)
 
         # Dokpil memiliki tabel personel dinamis. Bentuk row terlebih dahulu
         # saat field masih berupa MERGEFIELD; setelah di-unlink field clone
@@ -1565,6 +1627,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         _replace_merge_fields(wdDoc, data)
         _trim_blank_participant_rows(wdDoc)
         _blank_empty_participant_rows(wdDoc, data)
+        _update_toc_fields(wdDoc)
         _protect_signature_layout(wdDoc)
 
         # Cleanup blank pages untuk file BA utama (satu_data) yang multi-section.
@@ -1693,7 +1756,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     ExportFormat=17,
                     Range=0,  # wdExportAllDocument
                 )
-                show_success(pdf_path)
+                _deferred_pdf_success = pdf_path
             elif mode == "pdf_bareviu":
                 pdf_path = _fit_path(folder, f"BA_REVIU_DPP_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
@@ -1703,7 +1766,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     From=3,
                     To=6,
                 )
-                show_success(pdf_path)
+                _deferred_pdf_success = pdf_path
             elif mode == "pdf_bareviu_pl":
                 pdf_path = _fit_path(folder, f"BA_REVIU_PL_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
@@ -1713,7 +1776,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     From=1,
                     To=3,
                 )
-                show_success(pdf_path)
+                _deferred_pdf_success = pdf_path
             elif mode == "pdf_bapljkk":
                 # Export Section 3 s/d akhir (skip Section 1+2 = Reviu DPP)
                 # Pakai Range agar tidak perlu tahu nomor halaman (robust terhadap perubahan isi Reviu)
@@ -1725,7 +1788,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     _start = wdDoc.Content.Start
                 _rng = wdDoc.Range(_start, wdDoc.Content.End)
                 _rng.ExportAsFixedFormat(OutputFileName=pdf_path, ExportFormat=17)
-                show_success(pdf_path)
+                _deferred_pdf_success = pdf_path
             elif mode == "pdf_revaluasi":
                 pdf_path = _fit_path(folder, f"REvaluasi_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
@@ -1735,7 +1798,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     From=30,
                     To=37,
                 )
-                show_success(pdf_path)
+                _deferred_pdf_success = pdf_path
             elif mode == "pdf_all":
                 # Output ke subfolder "6. BA Reviu Lengkap" (buat kalau belum ada)
                 _ba_reviu_dir = os.path.join(folder, "6. BA Reviu Lengkap")
@@ -1749,7 +1812,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     )
                 except Exception:
                     wdDoc.SaveAs2(pdf_path, FileFormat=17)
-                show_success(pdf_path)
+                _deferred_pdf_success = pdf_path
             elif mode == "pdf_dokpil":
                 # Ambil nama paket dari sheet satu_data (list_dokpil tidak punya field nama paket)
                 _np_dokpil = nama_paket_pdf
@@ -1770,7 +1833,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     ExportFormat=17,
                     Range=0,  # wdExportAllDocument
                 )
-                show_success(pdf_path)
+                _deferred_pdf_success = pdf_path
             elif mode == "pdf_pembuktian":
                 # File "5. Berita Acara Utama PK": export full Word -> PDF, sisip sheet
                 # "7.2 Dengan Nego" SETELAH tiap halaman anchor nego (2 occurrence).
@@ -1794,7 +1857,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 else:
                     import shutil as _sh
                     _sh.copy2(temp_word_pdf, final_pdf_path)
-                show_success(final_pdf_path)
+                _deferred_pdf_success = final_pdf_path
 
             elif mode == "pdf_pembuktian_timpang":
                 # File "7. BA Dengan Timpang PK": export full Word -> PDF, sisip:
@@ -1830,7 +1893,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 else:
                     import shutil as _sh
                     _sh.copy2(temp_word_pdf, final_pdf_path)
-                show_success(final_pdf_path)
+                _deferred_pdf_success = final_pdf_path
 
             else:
                 pdf_path = _fit_path(folder, f"Undangan_{nama_paket_pdf}.pdf")
@@ -1841,20 +1904,41 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     From=1,
                     To=2,
                 )
-                show_success(pdf_path)
+                _deferred_pdf_success = pdf_path
 
-            wdDoc.Close(False)
+            # Tutup Word dulu sebelum membuka PDF. COM cleanup sengaja
+            # dipisahkan dan ditelan agar error "object disconnected" saat
+            # Close/Quit tidak memunculkan popup atau membuka file Merged.
+            try:
+                wdDoc.Close(False)
+            except Exception:
+                pass
             if new_instance:
-                wdApp.Quit()
+                try:
+                    wdApp.Quit()
+                except Exception:
+                    pass
 
     except Exception as e:
         if wdApp:
             try:
                 wdApp.ScreenUpdating = True
-                wdApp.Visible = True
+                wdApp.Visible = mode in ("buka", "print")
             except: pass
         show_error(f"Error saat merge:\n{e}")
     finally:
+        if mode.startswith("pdf"):
+            try:
+                if wdDoc is not None:
+                    wdDoc.Close(False)
+            except Exception:
+                pass
+            try:
+                if wdApp is not None and new_instance:
+                    wdApp.Quit()
+            except Exception:
+                pass
+            _terminate_word_process(word_pid)
         pythoncom.CoUninitialize()
         # Hapus file (Merged) ke Recycle Bin setelah selesai
         try:
@@ -1863,6 +1947,21 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 send2trash.send2trash(copy_path)
         except Exception:
             pass
+        try:
+            # Word meninggalkan lock file ``~$`` bila instance dihentikan
+            # setelah COM terputus. File ini bukan dokumen user dan aman
+            # dibersihkan setelah PID engine ditutup.
+            lock_path = os.path.join(
+                os.path.dirname(copy_path),
+                "~$" + os.path.basename(copy_path)[2:],
+            )
+            if os.path.exists(lock_path):
+                os.remove(lock_path)
+        except Exception:
+            pass
+        # Buka PDF setelah Word dan file Merged benar-benar selesai ditutup.
+        if _deferred_pdf_success:
+            show_success(_deferred_pdf_success)
 
 
 def show_error(msg):
