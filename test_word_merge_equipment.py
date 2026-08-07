@@ -9,6 +9,68 @@ import word_merge
 
 
 class DokpilEquipmentTests(unittest.TestCase):
+    def test_reader_accepts_standalone_personnel_sheet_with_quantity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "paket.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Personil"
+            ws.append([])
+            ws.append([])
+            ws.append([None, "No", "Jabatan", "Sertifikat", "Pengalaman", "Jumlah"])
+            ws.append([None, 1, "Ketua Tim", "SKA Jalan", "1 Tahun", 1])
+            ws.append([None, 2, 0, 0, 0, 0])
+            wb.save(path)
+
+            self.assertEqual(
+                word_merge._read_dokpil_personnel(str(path)),
+                [
+                    {
+                        "no": "1",
+                        "jabatan": "Ketua Tim",
+                        "sertifikat": "SKA Jalan",
+                        "pengalaman": "1 Tahun",
+                        "jumlah": "1",
+                    }
+                ],
+            )
+
+    def test_personnel_markers_fill_quantity(self):
+        personnel = [
+            {
+                "no": "1",
+                "jabatan": "Ketua Tim",
+                "sertifikat": "SKA Jalan",
+                "pengalaman": "1 Tahun",
+                "jumlah": "1",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dokpil.docx"
+            doc = Document()
+            table = doc.add_table(rows=1, cols=5)
+            for cell, value in zip(
+                table.rows[0].cells,
+                (
+                    "[[NO_PERSONIL]]",
+                    "[[JABATAN_PERSONIL]]",
+                    "[[JUMLAH_PERSONIL]]",
+                    "[[PENGALAMAN_PERSONIL]]",
+                    "[[SERTIFIKAT_PERSONIL]]",
+                ),
+            ):
+                cell.text = value
+            doc.save(path)
+
+            word_merge._prepare_dokpil_personnel_docx(
+                str(path), {"_dokpil_personnel": personnel}
+            )
+            merged = Document(path)
+            self.assertEqual(
+                [cell.text.strip() for cell in merged.tables[0].rows[0].cells],
+                ["1", "Ketua Tim", "1", "1 Tahun", "SKA Jalan"],
+            )
+
     def test_reader_accepts_tender_sheet_and_skips_header_empty_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "paket.xlsx"

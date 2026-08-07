@@ -193,6 +193,14 @@ def _dokpil_input_sheet(wb):
     return None
 
 
+def _dokpil_personnel_sheet(wb):
+    """Cari sheet personil terpisah, lalu fallback ke sheet gabungan."""
+    for name in wb.sheetnames:
+        if str(name).strip().casefold() == "personil":
+            return wb[name], True
+    return _dokpil_input_sheet(wb), False
+
+
 def _read_dokpil_equipment(excel_copy_path):
     """Baca alat aktif dari sheet input ``B4:E9``.
 
@@ -240,9 +248,11 @@ def _read_dokpil_equipment(excel_copy_path):
 
 
 def _read_dokpil_personnel(excel_copy_path):
-    """Baca personil aktif dari sheet input ``G4:J9``.
+    """Baca personil aktif dari sheet ``Personil!B4:F9`` atau ``G4:K9``.
 
-    Sheet dapat bernama ``Alat & Personil`` atau ``Tabel Alat & Personil``.
+    Sheet terpisah ``Personil`` memakai kolom No/Jabatan/Sertifikat/
+    Pengalaman/Jumlah. Layout gabungan lama memakai kolom yang sama mulai
+    dari G dan tetap kompatibel jika kolom Jumlah belum tersedia.
     Baris tanpa Jabatan (termasuk hasil formula ``0``) tidak dikirim ke Word;
     nomor dinormalisasi ulang agar tidak ada nomor kosong atau loncat.
     """
@@ -257,11 +267,15 @@ def _read_dokpil_personnel(excel_copy_path):
             data_only=True,
             keep_links=False,
         )
-        ws = _dokpil_input_sheet(wb)
+        ws, standalone = _dokpil_personnel_sheet(wb)
         if ws is None:
             return personnel
-        for row in ws.iter_rows(min_row=4, max_row=9, min_col=7, max_col=10, values_only=True):
-            _no, _jabatan, _sertifikat, _pengalaman = row
+        if standalone:
+            rows = ws.iter_rows(min_row=4, max_row=9, min_col=2, max_col=6, values_only=True)
+        else:
+            rows = ws.iter_rows(min_row=4, max_row=9, min_col=7, max_col=11, values_only=True)
+        for row in rows:
+            _no, _jabatan, _sertifikat, _pengalaman, _jumlah = row
             if str(_jabatan or "").strip().casefold() in {"jabatan", "jabatan personil", "nama personil"}:
                 continue
             jabatan = _meaningful_dokpil_value(_jabatan)
@@ -272,6 +286,7 @@ def _read_dokpil_personnel(excel_copy_path):
                 "jabatan": jabatan,
                 "sertifikat": _meaningful_dokpil_value(_sertifikat),
                 "pengalaman": _meaningful_dokpil_value(_pengalaman),
+                "jumlah": _meaningful_dokpil_value(_jumlah),
             })
     except Exception as exc:
         print(f"Warning read Dokpil personnel: {exc}")
@@ -592,6 +607,7 @@ def _prepare_dokpil_personnel_markers_docx(docx_path, personnel):
     marker_fields = {
         "[[NO_PERSONIL]]": "no",
         "[[JABATAN_PERSONIL]]": "jabatan",
+        "[[JUMLAH_PERSONIL]]": "jumlah",
         "[[SERTIFIKAT_PERSONIL]]": "sertifikat",
         "[[PENGALAMAN_PERSONIL]]": "pengalaman",
     }
