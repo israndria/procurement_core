@@ -6,10 +6,10 @@ Flow urutan halaman:
   Hal 3+    : isi_reviu.pdf semua halaman
   Hal akhir : hasil_scan.pdf halaman 3 (lembar absensi/ttd akhir)
 
-Output: 6. BA Reviu Lengkap/BA_REVIU_FULL_{nama_paket}.pdf
+Output: 6. BA Reviu Lengkap/BA_REVIU_FULL_{suffix}.pdf
 
 Usage:
-    python gabung_ba_reviu.py <folder_paket>
+    python gabung_ba_reviu.py <folder_paket> [POKJA_045]
     python gabung_ba_reviu.py <folder_paket> --dry-run
 """
 import os
@@ -25,6 +25,12 @@ OUTPUT_PREFIX = "BA_REVIU_FULL_"
 def _safe_filename(s: str, max_len: int = 80) -> str:
     s = re.sub(r'[<>:"/\\|?*]', '', str(s)).strip()
     return s[:max_len] if s else "Dokumen"
+
+
+def _output_suffix(suffix: str, folder_paket: str) -> str:
+    if suffix.upper().startswith("POKJA_"):
+        return _safe_filename(suffix[6:])
+    return _safe_filename(suffix) if suffix else _safe_filename(_nama_paket_dari_folder(folder_paket))
 
 
 def _nama_paket_dari_folder(folder_paket: str) -> str:
@@ -96,7 +102,7 @@ def deteksi_file(subfolder_path: str) -> dict:
     }
 
 
-def gabung(folder_paket: str, dry_run: bool = False) -> dict:
+def gabung(folder_paket: str, dry_run: bool = False, suffix: str = "") -> dict:
     """
     Gabung BA Reviu Lengkap.
     Return: {'ok': bool, 'output': path, 'pesan': str, 'warning': str}
@@ -110,8 +116,8 @@ def gabung(folder_paket: str, dry_run: bool = False) -> dict:
     if not files['scan']:
         return {'ok': False, 'output': '', 'pesan': files['warning'] or "File scan tidak ditemukan.", 'warning': files['warning']}
 
-    nama_paket = _nama_paket_dari_folder(folder_paket)
-    output_name = f"{OUTPUT_PREFIX}{_safe_filename(nama_paket)}.pdf"
+    output_suffix = _output_suffix(suffix, folder_paket)
+    output_name = f"{OUTPUT_PREFIX}{output_suffix}.pdf"
     output_path = os.path.join(subfolder_path, output_name)
 
     if dry_run:
@@ -177,11 +183,12 @@ def main():
         sys.exit(1)
 
     folder_paket = os.path.abspath(args[0])
+    suffix = args[1] if len(args) > 1 else ""
     if not os.path.isdir(folder_paket):
         print(f"[ERROR] Folder tidak ditemukan: {folder_paket}")
         sys.exit(1)
 
-    result = gabung(folder_paket, dry_run=dry_run)
+    result = gabung(folder_paket, dry_run=dry_run, suffix=suffix)
 
     if result['warning']:
         print(f"[WARN] {result['warning']}")

@@ -62,11 +62,14 @@ Public Sub GabungBAReviu()
 
     ' Gabung BA Reviu Lengkap: scan hal 1-2 + Isi Reviu + scan hal 3
 
-    ' Output: 6. BA Reviu Lengkap\BA_REVIU_FULL_{nama_paket}.pdf
+    ' Output: 6. BA Reviu Lengkap\BA_REVIU_FULL_{nomor_pokja}.pdf
 
     Dim folderPaket As String
 
     folderPaket = ThisWorkbook.Path
+
+    Dim kodePokja As String
+    kodePokja = KodePokjaOutput()
 
     Dim cmd As String
 
@@ -74,7 +77,7 @@ Public Sub GabungBAReviu()
 
     Set wsh = CreateObject("WScript.Shell")
 
-    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\gabung_ba_reviu.py") & " " & Q(folderPaket)
+    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\gabung_ba_reviu.py") & " " & Q(folderPaket) & " " & Q("POKJA_" & kodePokja)
 
     wsh.Run cmd, 0, False
 
@@ -113,8 +116,7 @@ Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, stat
     End If
 
     Dim kodePokja As String
-    kodePokja = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
-    If kodePokja = "" Then kodePokja = "000"
+    kodePokja = KodePokjaOutput()
 
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
@@ -139,7 +141,7 @@ Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, stat
 
         cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " printer " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(sheetName) & " " & Q(printerName) & " " & fromPage & " " & toPage
     Else
-        cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " " & mode & " " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(sheetName) & " " & Q(kodePokja)
+        cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\word_merge.py") & " " & mode & " " & Q(wordPath) & " " & Q(ThisWorkbook.FullName) & " " & Q(sheetName) & " " & Q("POKJA_" & kodePokja)
     End If
 
     wsh.Run cmd, 0, False
@@ -157,6 +159,14 @@ Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, stat
     End If
     Set wsh = Nothing
 End Sub
+
+Private Function KodePokjaOutput() As String
+    Dim kode As String
+    kode = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
+    If kode = "" Then kode = "000"
+    If IsNumeric(kode) Then kode = Format(CLng(kode), "000")
+    KodePokjaOutput = kode
+End Function
 
 ' ===== OUTPUT MODE: Popup pilih PDF atau Printer =====
 

@@ -29,6 +29,15 @@ def _safe_filename(s: str, max_len: int = 80) -> str:
     return s[:max_len] if s else 'Dokumen'
 
 
+def _pdf_output_suffix(pdf_name: str = "", package_name: str = "") -> str:
+    """Resolve suffix PDF; marker POKJA_NNN mengalahkan nama paket."""
+    safe_name = pdf_name or "000"
+    marker = "POKJA_"
+    if safe_name.upper().startswith(marker):
+        return _safe_filename(safe_name[len(marker):])
+    return _safe_filename(package_name) if package_name else safe_name
+
+
 def format_value(value):
     if value is None:
         return ""
@@ -1839,15 +1848,15 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             return
 
         elif mode.startswith("pdf"):
-            safe_name = pdf_name if pdf_name else "000"
-
             # Ambil nama paket dari data dict
             _npk = ''
             for _nk in ['Nama_Paket','NamaTender','Nama_Tender','nama_paket','nama_tender']:
                 _v = data.get(_nk) or data.get(_nk.lower())
                 if _v and str(_v).strip() not in ('','None','null'):
                     _npk = str(_v).strip(); break
-            nama_paket_pdf = _safe_filename(_npk) if _npk else safe_name
+            # Tender Excel mengirim marker eksplisit agar nama PDF stabil
+            # berdasarkan nomor Pokja, bukan nama paket yang panjang.
+            nama_paket_pdf = _pdf_output_suffix(pdf_name, _npk)
 
             if mode == "pdf_full":
                 # Export full dokumen (template BA dipecah per-file, no page-range).
