@@ -4,7 +4,7 @@ gabung_ba_reviu.py — Gabung BA Reviu Lengkap dari 2 file PDF.
 Flow urutan halaman:
   Hal 1-2   : hasil_scan.pdf halaman 1-2 (lembar ttd basah + absensi awal)
   Hal 3+    : isi_reviu.pdf semua halaman
-  Hal akhir : hasil_scan.pdf halaman 3 (lembar absensi/ttd akhir)
+  Hal akhir : hasil_scan.pdf halaman 3 dst. (lembar absensi/ttd akhir)
 
 Output: 6. BA Reviu Lengkap/BA_REVIU_FULL_{suffix}.pdf
 
@@ -147,9 +147,10 @@ def gabung(folder_paket: str, dry_run: bool = False, suffix: str = "") -> dict:
         for i in range(n_reviu):
             writer.add_page(rdr_reviu.pages[i])
 
-        # Hal akhir: scan halaman 3 (index 2), kalau ada
-        if n_scan >= 3:
-            writer.add_page(rdr_scan.pages[2])
+        # Hal akhir: semua halaman scan setelah dua halaman pembuka,
+        # termasuk halaman 3 dan 4, tetap dalam urutan aslinya.
+        for i in range(2, n_scan):
+            writer.add_page(rdr_scan.pages[i])
 
         # Tulis output (fallback suffix kalau locked)
         path = output_path

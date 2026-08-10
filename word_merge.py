@@ -1933,7 +1933,11 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             elif mode == "pdf_dokpil":
                 # Ambil nama paket dari sheet satu_data (list_dokpil tidak punya field nama paket)
                 _np_dokpil = nama_paket_pdf
-                if _np_dokpil == safe_name:  # fallback belum dapat nama
+                # `pdf_name` adalah marker mentah (mis. POKJA_041). Jika
+                # suffix masih sama dengan marker/default mentah, ambil nama
+                # paket dari satu_data sebagai fallback. Jangan pakai
+                # `safe_name`: variabel itu hanya lokal di helper suffix.
+                if _np_dokpil == (pdf_name or "000"):  # fallback belum dapat nama
                     try:
                         _data_sd = read_excel_data(excel_path, "satu_data")
                         if _data_sd:
