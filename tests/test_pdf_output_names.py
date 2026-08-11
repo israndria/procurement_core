@@ -2,12 +2,22 @@ from pathlib import Path
 
 from gabung_ba_reviu import gabung
 from pypdf import PdfReader, PdfWriter
-from word_merge import _pdf_output_suffix
+from word_merge import _next_available_pdf_path, _pdf_output_suffix
 
 
 def test_tender_pdf_uses_pokja_marker_over_package_name():
     assert _pdf_output_suffix("POKJA_045", "Paket Jalan Sangat Panjang") == "045"
     assert _pdf_output_suffix("", "Paket Jalan") == "Paket Jalan"
+
+
+def test_dokpil_pdf_versions_increment_without_overwrite(tmp_path):
+    target = tmp_path / "dokpil_057.pdf"
+
+    assert Path(_next_available_pdf_path(target)).name == "dokpil_057.pdf"
+    target.touch()
+    assert Path(_next_available_pdf_path(target)).name == "dokpil_057_v2.pdf"
+    (tmp_path / "dokpil_057_v2.pdf").touch()
+    assert Path(_next_available_pdf_path(target)).name == "dokpil_057_v3.pdf"
 
 
 def test_gabung_ba_reviu_uses_pokja_marker(tmp_path):

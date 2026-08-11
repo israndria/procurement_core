@@ -1030,6 +1030,21 @@ def _fit_path(folder, filename, max_total=240):
     return os.path.join(folder, stem[:avail].rstrip() + ext)
 
 
+def _next_available_pdf_path(target_path):
+    """Pilih nama PDF kosong: target asli, lalu ``_v2``, ``_v3``, dst."""
+    target_path = os.fspath(target_path)
+    if not os.path.exists(target_path):
+        return target_path
+
+    stem, ext = os.path.splitext(target_path)
+    version = 2
+    while True:
+        candidate = f"{stem}_v{version}{ext}"
+        if not os.path.exists(candidate):
+            return candidate
+        version += 1
+
+
 def _word_process_id(word_app, word_doc=None):
     """Ambil PID instance Word yang dibuat DispatchEx; None jika gagal."""
     import ctypes
@@ -1957,7 +1972,9 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                                     break
                     except Exception:
                         pass
-                pdf_path = _fit_path(folder, f"dokpil_{_np_dokpil}.pdf")
+                pdf_path = _next_available_pdf_path(
+                    _fit_path(folder, f"dokpil_{_np_dokpil}.pdf")
+                )
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
