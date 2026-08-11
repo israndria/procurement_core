@@ -23,6 +23,8 @@ import datetime
 import shutil
 import glob
 
+from word_xml_compat import normalize_word_document_xml_in_zip
+
 
 def _safe_filename(s: str, max_len: int = 80) -> str:
     s = re.sub(r'[<>:"/\\|?*]', '', str(s)).strip().replace('\n',' ').replace('\r','')
@@ -874,9 +876,11 @@ def _prepare_dokpil_equipment_docx(docx_path, data):
         "no": "no",
         "jenis": "jenis",
         "namaalat": "jenis",
+        "namaperalatan": "jenis",
         "namaperalatanutama": "jenis",
         "jenisalat": "jenis",
         "jumlah": "jumlah",
+        "jumlahunitbuah": "jumlah",
         "kapasitas": "kapasitas",
         "kapasitasminimal": "kapasitas",
     }
@@ -1519,6 +1523,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             raise RuntimeError(f"Gagal menerapkan header profil: {_header_err}")
         _blank_empty_participant_rows_xml(_merged_b, data)
         _strip_mailmerge_datasource(_merged_b)
+        normalize_word_document_xml_in_zip(_merged_b)
         pythoncom.CoInitialize()
         wdApp = win32com.client.DispatchEx("Word.Application")
         wdApp.DisplayAlerts = 0
@@ -1720,6 +1725,10 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             # dengan vertically merged cells.
             _prepare_dokpil_equipment_docx(copy_path, data)
             _prepare_dokpil_personnel_docx(copy_path, data)
+
+        # lxml-based preparation can collapse Word namespace declarations;
+        # repair the copy immediately before COM parses it.
+        normalize_word_document_xml_in_zip(copy_path)
 
         wdDoc = wdApp.Documents.Open(
             FileName=copy_path,

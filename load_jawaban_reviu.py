@@ -19,6 +19,8 @@ import re
 from lxml import etree
 from copy import deepcopy
 
+from word_xml_compat import normalize_word_document_xml
+
 NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 W = '{' + NS + '}'
 
@@ -109,7 +111,7 @@ def inject(docm_path, json_path):
         print("[ERROR] word/document.xml tidak ditemukan dalam docm")
         sys.exit(1)
 
-    tree = etree.fromstring(doc_xml)
+    tree = etree.fromstring(normalize_word_document_xml(doc_xml))
     body = tree.find('.//{%s}body' % NS)
     if body is None:
         print("[ERROR] w:body tidak ditemukan")

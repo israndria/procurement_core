@@ -11,6 +11,8 @@ import zipfile
 import shutil
 from lxml import etree
 
+from word_xml_compat import normalize_word_document_xml
+
 NS        = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 W         = '{' + NS + '}'
 JSON_FILE = 'jawaban_reviu.json'
@@ -79,7 +81,7 @@ def simpan(docm_path):
         with open(jp, encoding='utf-8') as f:
             data = json.load(f)
 
-    tree = etree.fromstring(doc_xml)
+    tree = etree.fromstring(normalize_word_document_xml(doc_xml))
     body = tree.find('.//{%s}body' % NS)
 
     diperbarui = 0
@@ -145,7 +147,7 @@ def _inject_zip(docm_path, data):
         os.remove(tmp)
         raise RuntimeError("word/document.xml tidak ditemukan dalam docm")
 
-    tree = etree.fromstring(doc_xml)
+    tree = etree.fromstring(normalize_word_document_xml(doc_xml))
     body = tree.find('.//{%s}body' % NS)
     if body is None:
         os.remove(tmp)

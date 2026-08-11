@@ -83,7 +83,7 @@ def test_equipment_markers_fill_all_nested_tables(tmp_path):
         outer_cell = etree.SubElement(outer_row, w + "tc")
         inner = etree.SubElement(outer_cell, w + "tbl")
         header = etree.SubElement(inner, w + "tr")
-        for value in ("No", "Jenis", "Kapasitas (Minimal)", "Jumlah"):
+        for value in ("No", "Nama Peralatan", "Kapasitas", "Jumlah (Unit/Buah)"):
             header.append(element("tc", value))
         donor = etree.SubElement(inner, w + "tr")
         for value in ("[[NO_ALAT]]", "[[NAMA_ALAT]]", "[[KAPASITAS_ALAT]]", "[[JUMLAH_ALAT]]"):
