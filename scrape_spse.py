@@ -26,9 +26,20 @@ from supabase.lib.client_options import SyncClientOptions
 
 # --- Setup ---
 _dir = os.path.dirname(os.path.abspath(__file__))
-_env = os.path.join(_dir, "secret_supabase.env")
-if os.path.exists(_env):
-    load_dotenv(_env)
+_env_candidates = [
+    os.path.join(_dir, "secret_supabase.env"),
+    os.path.join(os.environ.get("POKJA_SECRET_ROOT", ""), "secret_supabase.env"),
+    os.path.join(
+        os.environ.get("LOCALAPPDATA", ""),
+        "POKJA2026",
+        "Secrets",
+        "secret_supabase.env",
+    ),
+]
+for _env in _env_candidates:
+    if _env and os.path.exists(_env):
+        load_dotenv(_env, override=False)
+        break
 
 logging.basicConfig(
     level=logging.INFO,
