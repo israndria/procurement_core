@@ -181,7 +181,7 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
 
     # Auto-create subfolder (untuk semua tipe paket, baru maupun existing)
     # Mode Tender: subfolder identik dengan PL JKK, kecuali no.9
-    is_tender = bool(re.search(r"Pokja\s+\d+", folder_name, re.IGNORECASE))
+    is_tender = bool(re.search(r"Pokja\s*[-]?\s*\d+", folder_name, re.IGNORECASE))
     _subfolder_9 = "9. Dokumen Penawaran Teknis & Biaya" if is_tender else "9. Dokumen Teknis Biaya"
     _subfolders = [
         "0. Draft Dokumen PPK",
@@ -219,7 +219,7 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     # PL JKK:  "1. PLJKK - Nama Paket" → "Nama Paket"
     # PL PK:   "1. PLPK - Nama Paket"  → "Nama Paket"
     pokja_suffix = ""
-    m_pokja = re.search(r"Pokja\s+(\d+)", folder_name, re.IGNORECASE)
+    m_pokja = re.search(r"Pokja\s*[-]?\s*(\d+)", folder_name, re.IGNORECASE)
     if m_pokja:
         pokja_suffix = m_pokja.group(1)
     else:
