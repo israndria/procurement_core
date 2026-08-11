@@ -160,57 +160,67 @@ def inject_buttons(filepath):
         PURPLE    = (102, 51, 153)
         TEAL      = (0, 128, 128)
 
-        # --- @ Master Data: tombol di KANAN data, di bawah border "Dokumen Pemilihan" ---
-        # "Dokumen Pemilihan" selalu di row 20, border selesai row 23.
-        # Tombol diposisikan di area kanan panel Master Data; posisi vertikal
-        # mengikuti layout final (baris visual 248, 284, ..., 413.5).
-        # Baris 1 (yi=0): BukaBA PK | Print BA Reviu | — | —
-        # Baris 2 (yi=1): PrintPembuktian | REvaluasi | — | —
-        # Baris 3 (yi=2): PrintTimpang | MuatDraft | ParseDraft | KodeUnik
-        # Baris 4 (yi=3): UpdateHPS | BukaReviu | PrintIsiReviu | PrintBAReviu2
-        # Baris 5 (yi=4): BukaDokpil | PrintDokpil | Relink | —
-        # Baris 6 (yi=5): SyncDraft | DiffHighlight | — | —
-        # Baris 7 (yi=6): GabungBAReviu | RefreshDataTender | — | —
+        # --- @ Master Data: layout kanonik tombol Tender ---
+        # Ukuran tombol mengikuti template yang sudah dirapikan; yang diubah
+        # hanya gap dan posisi internal agar jarak antar tombol konsisten.
         _ws_md_anchor = wb.Sheets("@ Master Data")
-        _AX = _ws_md_anchor.Cells(28, 6).Left + 14  # col F row 28 + 5mm kanan
-        _AY = 248.0
-        _BW = 120.0    # button width
-        _BH = 27.1     # button height
-        _GX = 5.0      # gap horizontal antar tombol
-        _GY = 31.0     # fallback gap vertikal
-        _TOPS = (248.0, 284.0, 318.0, 351.5, 382.5, 413.5)
-        print(f"  Anchor: F28 Left={_AX:.1f}, row 28 Top={_AY:.1f}")
+        _AX = _ws_md_anchor.Cells(1, 6).Left + 3.0
+        _AY = 32.0
+        _GX = 3.0       # gap horizontal antar tombol
+        _GY = 4.0       # gap vertikal antar baris
+        _DEFAULT_BUTTON_SIZE = (90.0, 27.0)
+        _BUTTON_SIZES = {
+            "btnBukaBA": (74.6, 27.1),
+            "btnPrintBAReviu": (82.9, 27.1),
+            "btnPembuktianTimpang": (79.7, 26.9),
+            "btnKodeUnik": (87.7, 26.9),
+            "btnREvaluasi": (80.1, 26.9),
+            "btnPrintPembuktian": (105.7, 26.9),
+            "btnUpdateHPS": (89.1, 26.5),
+            "btnBukaReviu": (71.0, 26.5),
+            "btnPrintIsiReviu": (79.0, 26.5),
+            "btnPrintDokpil": (67.1, 26.5),
+            "btnBukaDokpil": (67.5, 26.5),
+            "btnGabungBAReviu": (89.2, 26.3),
+            "btnRefreshPaket": (76.9, 26.3),
+            "btnRelink": (92.5, 26.5),
+            "btnParseDraft": (118.7, 26.9),
+        }
+        print(f"  Anchor: F1 Left={_AX:.1f}, top={_AY:.1f}")
 
         master_data_btns = [
-            # (name, label, macro, yi, xi, color)
-            # Baris 1
-            ("btnBukaBA",          "Buka BA PK",          "BukaBA",                   0, 0, BLUE_WORD),
-            ("btnPrintBAReviu",    "Print BA Reviu",       "PrintBAReviuPDF",          0, 1, BLACK),
-            # Baris 2
-            ("btnPrintPembuktian", "Print BA Pembuktian", "PrintPembuktianPDF",        1, 0, BLACK),
-            ("btnREvaluasi",       "Print REvaluasi",     "PrintREvaluasiPDF",         1, 1, BLACK),
-            # Baris 3
-            ("btnPembuktianTimpang","Print Timpang",       "PrintPembuktianTimpangPDF",2, 0, BLACK),
-            ("btnParseDraft",      "Parse Ulang Draft Lokal", "ParseDraftTerpilih",     2, 1, GREEN),
-            ("btnKodeUnik",        "Kode Unik Surat",     "GenerateKodeUnik",          2, 2, TEAL),
-            # Baris 4: UpdateHPS masuk kolom 0
-            ("btnUpdateHPS",       "Update HPS Saja",     "UpdateHPSSaja",             3, 0, (220, 53, 69)),
-            ("btnBukaReviu",       "Buka Reviu",          "BukaReviu",                 3, 1, BLUE_WORD),
-            ("btnPrintIsiReviu",   "Print Isi Reviu",     "PrintIsiReviuPDF",          3, 2, BLACK),
-            ("btnPrintBAReviu2",   "Print BA Reviu",      "PrintBAReviuPDF",           3, 3, BLACK),
-            # Baris 5
-            ("btnBukaDokpil",      "Buka Dokpil",         "BukaDokpil",                4, 0, BLUE_WORD),
-            ("btnPrintDokpil",     "Print Dokpil",        "PrintDokpilPDF",            4, 1, BLACK),
-            ("btnRelink",          "Relink Template",     "RelinkTemplate",            4, 2, (255, 140, 0)),
-            # Baris 6
-            ("btnGabungBAReviu",   "Gabung BA Reviu",     "GabungBAReviu",             5, 0, (0, 128, 96)),
-            ("btnRefreshPaket",    "Refresh Paket",       "RefreshPaket",              5, 1, (0, 128, 128)),
+            # (name, label, macro, row, color)
+            ("btnBukaBA",           "Buka BA PK",             "BukaBA",                    0, BLUE_WORD),
+            ("btnPrintBAReviu",     "Print BA Reviu",         "PrintBAReviuPDF",           0, BLACK),
+            ("btnPembuktianTimpang", "Print Timpang",          "PrintPembuktianTimpangPDF", 0, BLACK),
+            ("btnKodeUnik",         "Kode Unik Surat",        "GenerateKodeUnik",           0, TEAL),
+            ("btnREvaluasi",        "Print REvaluasi",        "PrintREvaluasiPDF",          0, BLACK),
+            ("btnPrintPembuktian",  "Print BA Pembuktian",    "PrintPembuktianPDF",         1, BLACK),
+            ("btnUpdateHPS",        "Update HPS Saja",        "UpdateHPSSaja",              1, (220, 53, 69)),
+            ("btnBukaReviu",        "Buka Reviu",             "BukaReviu",                  1, BLUE_WORD),
+            ("btnPrintIsiReviu",    "Print Isi Reviu",        "PrintIsiReviuPDF",           1, BLACK),
+            ("btnPrintDokpil",      "Print Dokpil",           "PrintDokpilPDF",             1, BLACK),
+            ("btnBukaDokpil",       "Buka Dokpil",            "BukaDokpil",                 2, BLUE_WORD),
+            ("btnGabungBAReviu",    "Gabung BA Reviu",        "GabungBAReviu",              2, (0, 128, 96)),
+            ("btnRefreshPaket",     "Refresh Paket",          "RefreshPaket",               2, (0, 128, 128)),
+            ("btnRelink",           "Relink Template",        "RelinkTemplate",             2, (255, 140, 0)),
+            ("btnParseDraft",       "Parse Ulang Draft Lokal", "ParseDraftTerpilih",        2, GREEN),
         ]
 
-        def _add_master_btn(ws_md, name, label, macro, yi, xi, color):
-            left = _AX + xi * (_BW + _GX)
-            top  = _TOPS[yi] if yi < len(_TOPS) else _AY + yi * _GY
-            shp  = ws_md.Shapes.AddShape(5, left, top, _BW, _BH)
+        _row_tops = {}
+        _next_top = _AY
+        for _yi in sorted({b[3] for b in master_data_btns}):
+            _row_tops[_yi] = _next_top
+            _row_height = max(
+                _BUTTON_SIZES.get(b[0], _DEFAULT_BUTTON_SIZE)[1]
+                for b in master_data_btns if b[3] == _yi
+            )
+            _next_top += _row_height + _GY
+
+        def _add_master_btn(ws_md, name, label, macro, yi, color, left):
+            width, height = _BUTTON_SIZES.get(name, _DEFAULT_BUTTON_SIZE)
+            top = _row_tops.get(yi, _AY)
+            shp = ws_md.Shapes.AddShape(5, left, top, width, height)
             shp.Name = name
             r, g, b = color
             shp.Fill.ForeColor.RGB = r + (g * 256) + (b * 65536)
@@ -271,11 +281,16 @@ def inject_buttons(filepath):
                 if shp.Name in btn_names_md:
                     shp.Delete()
                     print(f"    Deleted {shp.Name}")
-            for name, label, macro, yi, xi, color in master_data_btns:
-                try:
-                    _add_master_btn(ws_md, name, label, macro, yi, xi, color)
-                except Exception as e:
-                    print(f"    [WARN] {label}: {e}")
+            for _yi in sorted(_row_tops):
+                _left = _AX
+                for name, label, macro, _row, color in (
+                    b for b in master_data_btns if b[3] == _yi
+                ):
+                    try:
+                        _add_master_btn(ws_md, name, label, macro, _row, color, _left)
+                    except Exception as e:
+                        print(f"    [WARN] {label}: {e}")
+                    _left += _BUTTON_SIZES.get(name, _DEFAULT_BUTTON_SIZE)[0] + _GX
         except Exception as e:
             print(f"    [WARN] Sheet '@ Master Data': {e}")
 
