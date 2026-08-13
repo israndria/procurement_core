@@ -58,6 +58,14 @@ st.markdown("""
             background: inherit !important;
             color: inherit !important;
         }
+        .spse-cek-table .spse-row-participant {
+            background: #eef2f7 !important;
+            color: #344054 !important;
+        }
+        .spse-cek-table .spse-row-participant td {
+            background: inherit !important;
+            color: inherit !important;
+        }
         @media (prefers-color-scheme: dark) {
             .spse-cek-table .spse-row-winner-running {
                 background: #594b14 !important;
@@ -66,6 +74,10 @@ st.markdown("""
             .spse-cek-table .spse-row-winner-done {
                 background: #123c27 !important;
                 color: #b7f7c9 !important;
+            }
+            .spse-cek-table .spse-row-participant {
+                background: #1f2937 !important;
+                color: #d1d5db !important;
             }
         }
         .spse-cek-table a {
@@ -932,6 +944,14 @@ with tab_cek:
     def _is_konstruksi(jenis_pengadaan):
         return str(jenis_pengadaan or "").strip().lower().startswith("pekerjaan konstruksi")
 
+    def _is_pemenang(value):
+        """Normalisasi flag Supabase agar None/string False tidak dianggap menang."""
+        if value is None or (not isinstance(value, str) and pd.isna(value)):
+            return False
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "t", "yes", "y"}
+        return bool(value)
+
     @st.cache_data(ttl=120)
     def _cari_penyedia(query):
         """Cari pemenang Tender + Non-Tender, lalu gabungkan metadata paket."""
@@ -1039,20 +1059,27 @@ with tab_cek:
                 st.warning(f"Ada hasil untuk **{cek_query}**, tetapi bukan paket Pekerjaan Konstruksi.")
                 st.stop()
 
+            df_merged["_is_pemenang"] = df_merged["is_pemenang"].apply(_is_pemenang)
             df_merged["_berjalan"] = df_merged["tahapan"].apply(_is_berjalan)
-            df_merged["_pemenang_berjalan"] = df_merged["is_pemenang"].fillna(False) & df_merged["_berjalan"]
+            df_merged["_pemenang_berjalan"] = df_merged["_is_pemenang"] & df_merged["_berjalan"]
+            df_merged["status_peran"] = df_merged["_is_pemenang"].map({
+                True: "🏆 Pemenang",
+                False: "👤 Peserta — bukan pemenang",
+            })
 
             nama_unik = df_merged["nama_peserta"].dropna().unique()
 
             for nama_psd in sorted(nama_unik):
                 df_nama = df_merged[df_merged["nama_peserta"] == nama_psd]
                 total_ikut = len(df_nama)
-                menang = df_nama["is_pemenang"].sum()
+                menang = int(df_nama["_is_pemenang"].sum())
+                peserta_bukan_pemenang = total_ikut - menang
                 berjalan = df_nama["_berjalan"].sum()
-                menang_berjalan = df_nama["_pemenang_berjalan"].sum()
+                menang_berjalan = int(df_nama["_pemenang_berjalan"].sum())
                 npwp_val = df_nama["npwp"].dropna().iloc[0] if not df_nama["npwp"].dropna().empty else "-"
 
-                skp_over = menang_berjalan > 5
+                skp_limit = 5
+                skp_over = menang_berjalan > skp_limit
                 card_accent = "#dc3545" if skp_over else ("#d89b00" if menang_berjalan >= 4 else "#28a745")
                 flag = "🔴 OVER LIMIT!" if skp_over else ("🟡 Mendekati Limit" if menang_berjalan >= 4 else "🟢 Aman")
 
@@ -1065,12 +1092,14 @@ with tab_cek:
     </div>
     <div style="text-align:right;">
       <span style="font-size:18px;font-weight:bold;">{flag}</span><br>
-      <span style="font-size:12px;">SKP berjalan sebagai pemenang: <strong>{menang_berjalan}</strong>/5</span>
+      <span style="font-size:12px;">Paket dimenangkan: <strong>{menang}</strong></span><br>
+      <span style="font-size:12px;">SKP aktif sebagai pemenang: <strong>{menang_berjalan}</strong> dari batas {skp_limit}</span>
     </div>
   </div>
   <div style="display:flex;gap:24px;margin-top:8px;font-size:13px;">
-    <span>📦 Total paket ditemukan: <strong>{total_ikut}</strong></span>
-    <span>🏆 Menang: <strong>{menang}</strong></span>
+    <span>📦 Total keterlibatan: <strong>{total_ikut}</strong></span>
+    <span>🏆 Paket dimenangkan: <strong>{menang}</strong></span>
+    <span>👤 Peserta bukan pemenang: <strong>{peserta_bukan_pemenang}</strong></span>
     <span>⚙️ Paket masih berjalan: <strong>{berjalan}</strong></span>
     <span>⚠️ Menang & berjalan: <strong>{menang_berjalan}</strong></span>
   </div>
@@ -1078,15 +1107,16 @@ with tab_cek:
 
             st.write("---")
 
-            st.markdown(f"**📋 Detail Semua Paket ({len(df_merged)} baris)**")
+            st.markdown(f"**📋 Detail Semua Keterlibatan ({len(df_merged)} baris)**")
+            st.caption("🏆 Pemenang dihitung sebagai kemenangan. 👤 Peserta — bukan pemenang hanya menunjukkan ikut tender dan tidak dihitung sebagai kemenangan/SKP.")
 
             kolom_cek = ["nama_peserta", "npwp", "nama_paket", "instansi", "jenis_pengadaan", "tahapan",
                          "harga_penawaran", "harga_negosiasi", "skor_akhir",
-                         "alasan_gugur", "is_pemenang", "kontrak_mulai", "kontrak_selesai", "link_detail"]
+                         "alasan_gugur", "status_peran", "kontrak_mulai", "kontrak_selesai", "link_detail"]
             kolom_ada = [c for c in kolom_cek if c in df_merged.columns]
-            df_cek_tampil = df_merged[kolom_ada].sort_values(
-                ["nama_peserta", "is_pemenang"], ascending=[True, False]
-            )
+            df_cek_tampil = df_merged.sort_values(
+                ["nama_peserta", "_is_pemenang"], ascending=[True, False]
+            )[kolom_ada]
 
             def _render_cek_html(df_c):
                 cols = df_c.columns.tolist()
@@ -1096,19 +1126,19 @@ with tab_cek:
                 )
                 rows_html = ""
                 for _, row in df_c.iterrows():
-                    is_win = bool(row.get("is_pemenang", False))
+                    is_win = _is_pemenang(row.get("_is_pemenang", row.get("is_pemenang", False)))
                     berjalan_row = _is_berjalan(row.get("tahapan", ""))
                     if is_win and berjalan_row:
                         row_class = "spse-row-winner-running"
                     elif is_win:
                         row_class = "spse-row-winner-done"
                     else:
-                        row_class = ""
+                        row_class = "spse-row-participant"
                     cells = ""
                     for c in cols:
                         val = row.get(c, "-")
-                        if c == "is_pemenang":
-                            val = "✅" if val else ""
+                        if c == "status_peran":
+                            val = val or "👤 Peserta — bukan pemenang"
                         elif c == "link_detail" and val and val != "-":
                             val = f'<a href="{val}" target="_blank" style="font-size:11px;">Buka</a>'
                         elif val is None or str(val) in ("None", "nan", ""):
@@ -1119,7 +1149,7 @@ with tab_cek:
                 <table class="spse-cek-table" style="border-collapse:collapse;width:100%;font-family:monospace;">
                 <thead style="position:sticky;top:0;z-index:1;"><tr>{header}</tr></thead>
                 <tbody>{rows_html}</tbody></table></div>
-                <p class="spse-cek-legend" style="font-size:11px;margin-top:4px;">🟢 Menang & selesai | 🟡 Menang & masih berjalan | ⚠️ Cek SKP jika kolom ini banyak kuning</p>'''
+                <p class="spse-cek-legend" style="font-size:11px;margin-top:4px;">🟢 Menang & selesai | 🟡 Menang & masih berjalan | 👤 Peserta bukan pemenang tidak dihitung sebagai kemenangan/SKP</p>'''
 
             st.markdown(_render_cek_html(df_cek_tampil), unsafe_allow_html=True)
 
@@ -1138,6 +1168,7 @@ with tab_cek:
 - Ketik sebagian nama: `PT Karya` → tampil pemenang Tender dan Non-Tender dengan nama mengandung "PT Karya"
 - Ketik NPWP: `12.345.678` → cari berdasarkan NPWP
 - Interpretasi warna: 🟡 = pemenang tapi paket masih berjalan (dihitung dalam SKP), 🟢 = menang sudah selesai
+- Baris `👤 Peserta — bukan pemenang` hanya menunjukkan ikut tender; tidak dihitung sebagai kemenangan atau SKP.
 - **Batas SKP**: maksimal 5 paket berjalan sebagai pemenang (Perpres 16/2018). Jika merah → investigasi lebih lanjut
 """)
 
