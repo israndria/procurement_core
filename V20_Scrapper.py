@@ -5,6 +5,7 @@ import logging
 import subprocess
 import requests
 import pandas as pd
+import time
 from io import StringIO, BytesIO
 from supabase import create_client
 import os
@@ -27,11 +28,20 @@ st.markdown("""
 def _load_env_manual():
     """Baca .env langsung tanpa load_dotenv."""
     import pathlib
-    kandidat = [
+    kandidat = []
+    secret_root = os.environ.get("POKJA_SECRET_ROOT", "").strip()
+    if secret_root:
+        kandidat.append(pathlib.Path(secret_root) / "secret_supabase.env")
+    kandidat.extend([
+        pathlib.Path(__file__).resolve().parent.parent / "Secrets" / "secret_supabase.env",
         pathlib.Path(__file__).resolve().parent / "secret_supabase.env",
         pathlib.Path(os.getcwd()) / "secret_supabase.env",
-        pathlib.Path(r"D:\Dokumen\@ POKJA 2026\V19_Scheduler\WPy64-313110\secret_supabase.env"),
-    ]
+    ])
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    if local_app_data:
+        kandidat.append(
+            pathlib.Path(local_app_data) / "POKJA2026" / "Secrets" / "secret_supabase.env"
+        )
     errs = []
     for path in kandidat:
         try:
@@ -183,6 +193,7 @@ def get_last_update(kode_lpse, kategori_selected, bulk_map=None):
 
 # --- 4. ENGINE SCRAPING ---
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/147.0.0.0 Safari/537.36"
+RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
 
 def buat_opener():
     """Buat requests.Session — cookie otomatis, tidak perlu cloudscraper."""
@@ -195,10 +206,23 @@ def fetch_html(opener, url, referer=None, data=None):
     if data:
         headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
         headers["X-Requested-With"] = "XMLHttpRequest"
-        r = opener.post(url, data=data, headers=headers, timeout=20)
     else:
         headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-        r = opener.get(url, headers=headers, timeout=20)
+
+    for attempt in range(3):
+        if data:
+            r = opener.post(url, data=data, headers=headers, timeout=20)
+        else:
+            r = opener.get(url, headers=headers, timeout=20)
+        if r.status_code not in RETRYABLE_HTTP_STATUS or attempt == 2:
+            break
+        retry_after = r.headers.get("Retry-After", "")
+        try:
+            delay = max(5, min(60, int(float(retry_after))))
+        except (TypeError, ValueError):
+            delay = 5 * (attempt + 1)
+        log.warning(f"  HTTP {r.status_code} {url} — retry {attempt + 1}/2 dalam {delay} detik")
+        time.sleep(delay)
     r.raise_for_status()
     return r.text
 
@@ -208,7 +232,9 @@ def get_session(opener, kode_lpse, endpoint):
     html = fetch_html(opener, url)
     time.sleep(2)
     m = re.search(r"authenticityToken = '([a-f0-9]+)'", html)
-    return m.group(1) if m else ""
+    if not m:
+        raise RuntimeError(f"authenticityToken tidak ditemukan: {url}")
+    return m.group(1)
 
 def get_list_paket(opener, token, kode_lpse, endpoint, endpoint_dt, tahun):
     import time
@@ -229,7 +255,7 @@ def get_list_paket(opener, token, kode_lpse, endpoint, endpoint_dt, tahun):
                     time.sleep(5 * (attempt + 1))
                 else:
                     log.error(f"  get_list gagal start={start}: {e}")
-                    return semua
+                    return None
         if not rows: break
         semua.extend(rows); start += PAGE; time.sleep(1)
         if len(rows) < PAGE: break
@@ -246,7 +272,8 @@ def parse_tabel1(html):
 
 def get_detail_paket(opener, kode_lpse, endpoint, kode_tender, suffix="pengumumanlelang"):
     base_lelang   = f"{BASE_URL}/{kode_lpse}/{endpoint}/{kode_tender}"
-    base_evaluasi = f"{BASE_URL}/{kode_lpse}/evaluasi/{kode_tender}"
+    eval_endpoint = "evaluasinontender" if endpoint == "nontender" else "evaluasi"
+    base_evaluasi = f"{BASE_URL}/{kode_lpse}/{eval_endpoint}/{kode_tender}"
     referer = f"{BASE_URL}/{kode_lpse}/{endpoint}"
     detail = {}
     try:
@@ -315,6 +342,8 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, incremental=False)
         token  = get_session(opener, kode_lpse, endpoint)
         _time.sleep(1)  # jeda kecil sebelum get_list agar tidak langsung hit server
         rows   = get_list_paket(opener, token, kode_lpse, endpoint, endpoint_dt, tahun_pilihan)
+        if rows is None:
+            raise RuntimeError(f"Daftar paket gagal total untuk {nama_lpse}")
         log.info(f"  {nama_lpse}: {len(rows)} paket ditemukan di SPSE")
     except Exception as e:
         log.error(f"  {nama_lpse}: Gagal ambil list — {e}")
@@ -832,7 +861,7 @@ with tab_dashboard:
 # ============================================================
 with tab_cek:
     st.subheader("🔍 Cek Penyedia — Deteksi SKP Berjalan")
-    st.caption("Cari penyedia berdasarkan nama atau NPWP di seluruh data tender. SKP maksimal = 5 paket berjalan bersamaan.")
+    st.caption("Cari penyedia berdasarkan nama atau NPWP di Tender dan Non-Tender Pekerjaan Konstruksi. SKP maksimal = 5 paket berjalan bersamaan.")
 
     cek_col1, cek_col2 = st.columns([3, 1])
     with cek_col1:
@@ -846,46 +875,96 @@ with tab_cek:
         if not tahapan:
             return False
         t = str(tahapan).strip().lower()
-        if "selesai" in t or "dibatalkan" in t or "gagal" in t:
+        if any(status in t for status in ("selesai", "dibatalkan", "batal", "gagal", "tidak ada jadwal")):
             return False
         return True
 
+    def _is_konstruksi(jenis_pengadaan):
+        return str(jenis_pengadaan or "").strip().lower().startswith("pekerjaan konstruksi")
+
     @st.cache_data(ttl=120)
     def _cari_penyedia(query):
-        """Cari di tabel tender_peserta by nama_peserta atau npwp, join info paket dari tabel tender."""
+        """Cari pemenang Tender + Non-Tender, lalu gabungkan metadata paket."""
         try:
             sb = _sb()
-            r1 = sb.table("tender_peserta").select(
+            peserta_select = (
                 "kode_tender,urutan,nama_peserta,npwp,harga_penawaran,harga_negosiasi,"
                 "skor_akhir,alasan_gugur,is_pemenang"
-            ).ilike("nama_peserta", f"%{query}%").limit(200).execute()
+            )
+            r1 = sb.table("tender_peserta").select(peserta_select) \
+                .ilike("nama_peserta", f"%{query}%").limit(200).execute()
 
-            r2 = sb.table("tender_peserta").select(
-                "kode_tender,urutan,nama_peserta,npwp,harga_penawaran,harga_negosiasi,"
-                "skor_akhir,alasan_gugur,is_pemenang"
-            ).ilike("npwp", f"%{query}%").limit(200).execute()
+            r2 = sb.table("tender_peserta").select(peserta_select) \
+                .ilike("npwp", f"%{query}%").limit(200).execute()
 
-            semua = r1.data + r2.data
+            semua = []
             seen = set()
-            unik = []
-            for row in semua:
-                key = (row.get("kode_tender"), row.get("urutan"))
+            for row in r1.data + r2.data:
+                key = ("Tender", row.get("kode_tender"), row.get("urutan"))
                 if key not in seen:
                     seen.add(key)
-                    unik.append(row)
+                    row = dict(row)
+                    row["__source"] = "Tender"
+                    semua.append(row)
 
-            if not unik:
+            nt_select = (
+                "kode_tender,nama_paket,instansi,tahapan,jenis_pengadaan,"
+                "nama_pemenang,pemenang_berkontrak,kontrak_mulai,kontrak_selesai,"
+                "link_detail,harga_kontrak"
+            )
+            nt_rows = []
+            for kolom in ("nama_pemenang", "pemenang_berkontrak"):
+                nt_rows.extend(
+                    (row, kolom)
+                    for row in sb.table("non_tender").select(nt_select)
+                    .ilike(kolom, f"%{query}%").limit(200).execute().data
+                )
+
+            default_names = {"", "belum ada pemenang", "belum ada kontrak", "-", "nan", "none"}
+            for row, kolom_match in nt_rows:
+                provider = str(row.get(kolom_match) or "").strip()
+                if provider.lower() in default_names:
+                    continue
+                key = ("Non Tender", row.get("kode_tender"), provider)
+                if key in seen:
+                    continue
+                seen.add(key)
+                semua.append({
+                    "kode_tender": row.get("kode_tender"),
+                    "urutan": 0,
+                    "nama_peserta": provider,
+                    "npwp": "-",
+                    "harga_penawaran": row.get("harga_kontrak", "0"),
+                    "harga_negosiasi": "-",
+                    "skor_akhir": "-",
+                    "alasan_gugur": "",
+                    "is_pemenang": True,
+                    "__source": "Non Tender",
+                })
+
+            if not semua:
                 return pd.DataFrame(), pd.DataFrame()
 
-            df_psd = pd.DataFrame(unik)
+            df_psd = pd.DataFrame(semua)
 
-            kode_list = df_psd["kode_tender"].unique().tolist()
-            r3 = sb.table("tender").select(
-                "kode_tender,nama_paket,instansi,tahapan,kontrak_mulai,kontrak_selesai,link_detail"
-            ).in_("kode_tender", kode_list).execute()
-
-            df_tender = pd.DataFrame(r3.data) if r3.data else pd.DataFrame()
-            return df_psd, df_tender
+            info_select = (
+                "kode_tender,nama_paket,instansi,tahapan,jenis_pengadaan,"
+                "kontrak_mulai,kontrak_selesai,link_detail"
+            )
+            info_rows = []
+            tender_codes = [r["kode_tender"] for r in semua if r.get("__source") == "Tender"]
+            nt_codes = [r["kode_tender"] for r in semua if r.get("__source") == "Non Tender"]
+            if tender_codes:
+                info_rows.extend(
+                    sb.table("tender").select(info_select)
+                    .in_("kode_tender", list(set(tender_codes))).execute().data
+                )
+            if nt_codes:
+                info_rows.extend(
+                    sb.table("non_tender").select(info_select)
+                    .in_("kode_tender", list(set(nt_codes))).execute().data
+                )
+            return df_psd, pd.DataFrame(info_rows)
         except Exception as e:
             st.error(f"Error query: {e}")
             return pd.DataFrame(), pd.DataFrame()
@@ -901,11 +980,17 @@ with tab_cek:
                 df_merged = df_psd.merge(df_tender, on="kode_tender", how="left")
             else:
                 df_merged = df_psd.copy()
-                for c in ["nama_paket", "instansi", "tahapan", "kontrak_mulai", "kontrak_selesai", "link_detail"]:
+                for c in ["nama_paket", "instansi", "tahapan", "jenis_pengadaan", "kontrak_mulai", "kontrak_selesai", "link_detail"]:
                     df_merged[c] = "-"
 
+            if "jenis_pengadaan" in df_merged.columns:
+                df_merged = df_merged[df_merged["jenis_pengadaan"].apply(_is_konstruksi)].copy()
+            if df_merged.empty:
+                st.warning(f"Ada hasil untuk **{cek_query}**, tetapi bukan paket Pekerjaan Konstruksi.")
+                st.stop()
+
             df_merged["_berjalan"] = df_merged["tahapan"].apply(_is_berjalan)
-            df_merged["_pemenang_berjalan"] = df_merged["is_pemenang"] & df_merged["_berjalan"]
+            df_merged["_pemenang_berjalan"] = df_merged["is_pemenang"].fillna(False) & df_merged["_berjalan"]
 
             nama_unik = df_merged["nama_peserta"].dropna().unique()
 
@@ -934,7 +1019,7 @@ with tab_cek:
     </div>
   </div>
   <div style="display:flex;gap:24px;margin-top:8px;font-size:13px;">
-    <span>📦 Total ikut tender: <strong>{total_ikut}</strong></span>
+    <span>📦 Total paket ditemukan: <strong>{total_ikut}</strong></span>
     <span>🏆 Menang: <strong>{menang}</strong></span>
     <span>⚙️ Paket masih berjalan: <strong>{berjalan}</strong></span>
     <span>⚠️ Menang & berjalan: <strong>{menang_berjalan}</strong></span>
@@ -945,7 +1030,7 @@ with tab_cek:
 
             st.markdown(f"**📋 Detail Semua Paket ({len(df_merged)} baris)**")
 
-            kolom_cek = ["nama_peserta", "npwp", "nama_paket", "instansi", "tahapan",
+            kolom_cek = ["nama_peserta", "npwp", "nama_paket", "instansi", "jenis_pengadaan", "tahapan",
                          "harga_penawaran", "harga_negosiasi", "skor_akhir",
                          "alasan_gugur", "is_pemenang", "kontrak_mulai", "kontrak_selesai", "link_detail"]
             kolom_ada = [c for c in kolom_cek if c in df_merged.columns]
@@ -1000,7 +1085,7 @@ with tab_cek:
         st.info("Masukkan nama penyedia atau NPWP di kotak pencarian di atas, lalu klik 🔍 Cari.")
         st.markdown("""
 **Cara pakai:**
-- Ketik sebagian nama: `PT Karya` → tampil semua penyedia dengan nama mengandung "PT Karya"
+- Ketik sebagian nama: `PT Karya` → tampil pemenang Tender dan Non-Tender dengan nama mengandung "PT Karya"
 - Ketik NPWP: `12.345.678` → cari berdasarkan NPWP
 - Interpretasi warna: 🟡 = pemenang tapi paket masih berjalan (dihitung dalam SKP), 🟢 = menang sudah selesai
 - **Batas SKP**: maksimal 5 paket berjalan sebagai pemenang (Perpres 16/2018). Jika merah → investigasi lebih lanjut

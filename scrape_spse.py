@@ -29,6 +29,7 @@ _dir = os.path.dirname(os.path.abspath(__file__))
 _env_candidates = [
     os.path.join(_dir, "secret_supabase.env"),
     os.path.join(os.environ.get("POKJA_SECRET_ROOT", ""), "secret_supabase.env"),
+    os.path.join(_dir, os.pardir, "Secrets", "secret_supabase.env"),
     os.path.join(
         os.environ.get("LOCALAPPDATA", ""),
         "POKJA2026",
@@ -84,6 +85,7 @@ DAFTAR_LPSE = [
 
 BASE_URL = "https://spse.inaproc.id"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/147.0.0.0 Safari/537.36"
+RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
 
 
 def _sb():
@@ -118,10 +120,23 @@ def fetch_html(session, url, referer=None, data=None):
     if data:
         headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
         headers["X-Requested-With"] = "XMLHttpRequest"
-        r = session.post(url, data=data, headers=headers, timeout=20)
     else:
         headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-        r = session.get(url, headers=headers, timeout=20)
+
+    for attempt in range(3):
+        if data:
+            r = session.post(url, data=data, headers=headers, timeout=20)
+        else:
+            r = session.get(url, headers=headers, timeout=20)
+        if r.status_code not in RETRYABLE_HTTP_STATUS or attempt == 2:
+            break
+        retry_after = r.headers.get("Retry-After", "")
+        try:
+            delay = max(5, min(60, int(float(retry_after))))
+        except (TypeError, ValueError):
+            delay = 5 * (attempt + 1)
+        log.warning(f"  HTTP {r.status_code} {url} — retry {attempt + 1}/2 dalam {delay} detik")
+        time.sleep(delay)
     r.raise_for_status()
     return r.text
 
@@ -131,7 +146,9 @@ def get_session(session, kode_lpse, endpoint):
     html = fetch_html(session, url)
     time.sleep(2)
     m = re.search(r"authenticityToken = '([a-f0-9]+)'", html)
-    return m.group(1) if m else ""
+    if not m:
+        raise RuntimeError(f"authenticityToken tidak ditemukan: {url}")
+    return m.group(1)
 
 
 def get_list_paket(session, token, kode_lpse, endpoint, endpoint_dt, tahun):
@@ -160,7 +177,7 @@ def get_list_paket(session, token, kode_lpse, endpoint, endpoint_dt, tahun):
                     time.sleep(5 * (attempt + 1))
                 else:
                     log.error(f"  get_list_paket gagal start={start}: {e}")
-                    return semua
+                    return None
         if not rows:
             break
         semua.extend(rows)
@@ -374,7 +391,8 @@ def _to_float(val):
 def get_detail_nontender(session, kode_lpse, endpoint, kode_tender, suffix):
     """Detail untuk Non Tender / Pencatatan — endpoint berbeda, tanpa peserta."""
     base   = f"{BASE_URL}/{kode_lpse}/{endpoint}/{kode_tender}"
-    base_e = f"{BASE_URL}/{kode_lpse}/evaluasi/{kode_tender}"
+    eval_endpoint = "evaluasinontender" if endpoint == "nontender" else "evaluasi"
+    base_e = f"{BASE_URL}/{kode_lpse}/{eval_endpoint}/{kode_tender}"
     ref    = f"{BASE_URL}/{kode_lpse}/{endpoint}"
     detail = {}
 
@@ -437,10 +455,13 @@ def scrape_satu_lpse(kode_lpse, nama_lpse, endpoint, endpoint_dt, suffix, tabel,
         session = buat_session()
         token   = get_session(session, kode_lpse, endpoint)
         rows    = get_list_paket(session, token, kode_lpse, endpoint, endpoint_dt, tahun)
+        if rows is None:
+            log.error(f"  Daftar paket gagal total untuk {nama_lpse}")
+            return 0, 1
         log.info(f"  {len(rows)} paket ditemukan")
     except Exception as e:
         log.error(f"  Gagal ambil list: {e}")
-        return 0, 0
+        return 0, 1
 
     sb = _sb()
     ok = err = 0
@@ -583,7 +604,7 @@ def main():
             time.sleep(5)
 
     log.info(f"=== SELESAI: total {total_ok} OK, {total_err} error ===")
-    if total_ok == 0 and total_err > 0:
+    if total_err > 0:
         sys.exit(1)
 
 

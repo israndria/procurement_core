@@ -1,6 +1,6 @@
 Option Explicit
 
-Dim shell, fso, repoDir, codeRoot, pythonExe, scriptPath, command, rc
+Dim shell, fso, repoDir, codeRoot, pythonExe, scriptPath, command, rcTender, rcNonTender
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 
@@ -19,9 +19,17 @@ If Not fso.FileExists(pythonExe) Or Not fso.FileExists(scriptPath) Then
 End If
 
 shell.Environment("Process")("SCRAPE_TAHUN") = "2026"
-shell.Environment("Process")("SCRAPE_KATEGORI") = "Tender"
 shell.Environment("Process")("SCRAPE_KODE_LPSE") = ""
 shell.CurrentDirectory = repoDir
 command = Chr(34) & pythonExe & Chr(34) & " " & Chr(34) & scriptPath & Chr(34)
-rc = shell.Run(command, 0, True)
-WScript.Quit rc
+
+shell.Environment("Process")("SCRAPE_KATEGORI") = "Tender"
+rcTender = shell.Run(command, 0, True)
+
+shell.Environment("Process")("SCRAPE_KATEGORI") = "Non Tender"
+rcNonTender = shell.Run(command, 0, True)
+
+If rcTender <> 0 Then
+    WScript.Quit rcTender
+End If
+WScript.Quit rcNonTender

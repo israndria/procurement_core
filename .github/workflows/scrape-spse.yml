@@ -56,3 +56,13 @@ jobs:
           SCRAPE_TAHUN: ${{ github.event.inputs.tahun || '2026' }}
           SCRAPE_KATEGORI: ${{ github.event.inputs.kategori || 'Tender' }}
         run: python scrape_spse.py
+
+      - name: Jalankan Non Tender terjadwal
+        if: github.event_name == 'schedule'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SCRAPE_KODE_LPSE: ''
+          SCRAPE_TAHUN: '2026'
+          SCRAPE_KATEGORI: 'Non Tender'
+        run: python scrape_spse.py
