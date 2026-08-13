@@ -21,6 +21,56 @@ st.markdown("""
         .stCheckbox { margin-bottom: -15px; }
         .block-container { padding-top: 1rem; padding-bottom: 2rem; }
         h1 { padding-top: 0rem; }
+        .spse-provider-card {
+            color: var(--text-color, #1f2937);
+            background: var(--secondary-background-color, #f8fafc);
+            border: 1px solid var(--border-color, #d1d5db);
+            border-left: 4px solid var(--spse-accent, #28a745);
+        }
+        .spse-provider-card .spse-muted,
+        .spse-cek-legend {
+            color: var(--secondary-text-color, #6b7280);
+        }
+        .spse-cek-table {
+            color: var(--text-color, #1f2937);
+            border-color: var(--border-color, #d1d5db);
+        }
+        .spse-cek-table th {
+            color: var(--text-color, #1f2937);
+            background: var(--secondary-background-color, #f8fafc);
+            border-color: var(--border-color, #d1d5db);
+        }
+        .spse-cek-table td {
+            color: var(--text-color, #1f2937);
+            border-bottom: 1px solid var(--border-color, #d1d5db);
+            background: var(--background-color, #ffffff);
+        }
+        .spse-cek-table .spse-row-winner-running {
+            background: #fff3cd !important;
+            color: #5c4300 !important;
+        }
+        .spse-cek-table .spse-row-winner-done {
+            background: #d4edda !important;
+            color: #155724 !important;
+        }
+        .spse-cek-table .spse-row-winner-running td,
+        .spse-cek-table .spse-row-winner-done td {
+            background: inherit !important;
+            color: inherit !important;
+        }
+        @media (prefers-color-scheme: dark) {
+            .spse-cek-table .spse-row-winner-running {
+                background: #594b14 !important;
+                color: #fff4b8 !important;
+            }
+            .spse-cek-table .spse-row-winner-done {
+                background: #123c27 !important;
+                color: #b7f7c9 !important;
+            }
+        }
+        .spse-cek-table a {
+            color: var(--primary-color, #2563eb);
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -1003,15 +1053,15 @@ with tab_cek:
                 npwp_val = df_nama["npwp"].dropna().iloc[0] if not df_nama["npwp"].dropna().empty else "-"
 
                 skp_over = menang_berjalan > 5
-                card_color = "#f8d7da" if skp_over else ("#fff3cd" if menang_berjalan >= 4 else "#d4edda")
+                card_accent = "#dc3545" if skp_over else ("#d89b00" if menang_berjalan >= 4 else "#28a745")
                 flag = "🔴 OVER LIMIT!" if skp_over else ("🟡 Mendekati Limit" if menang_berjalan >= 4 else "🟢 Aman")
 
                 st.markdown(f"""
-<div style="background:{card_color};border-radius:8px;padding:12px 16px;margin-bottom:8px;border-left:4px solid {'#dc3545' if skp_over else ('#ffc107' if menang_berjalan>=4 else '#28a745')};">
+<div class="spse-provider-card" style="--spse-accent:{card_accent};border-radius:8px;padding:12px 16px;margin-bottom:8px;">
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <div>
       <strong style="font-size:15px;">{nama_psd}</strong><br>
-      <span style="font-size:12px;color:#666;">NPWP: {npwp_val}</span>
+      <span class="spse-muted" style="font-size:12px;">NPWP: {npwp_val}</span>
     </div>
     <div style="text-align:right;">
       <span style="font-size:18px;font-weight:bold;">{flag}</span><br>
@@ -1049,11 +1099,11 @@ with tab_cek:
                     is_win = bool(row.get("is_pemenang", False))
                     berjalan_row = _is_berjalan(row.get("tahapan", ""))
                     if is_win and berjalan_row:
-                        bg = "#fff3cd"
+                        row_class = "spse-row-winner-running"
                     elif is_win:
-                        bg = "#d4edda"
+                        row_class = "spse-row-winner-done"
                     else:
-                        bg = "white"
+                        row_class = ""
                     cells = ""
                     for c in cols:
                         val = row.get(c, "-")
@@ -1063,13 +1113,13 @@ with tab_cek:
                             val = f'<a href="{val}" target="_blank" style="font-size:11px;">Buka</a>'
                         elif val is None or str(val) in ("None", "nan", ""):
                             val = "-"
-                        cells += f'<td style="padding:5px 10px;font-size:11px;background:{bg};max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{str(val)}">{val}</td>'
+                        cells += f'<td class="{row_class}" style="padding:5px 10px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{str(val)}">{val}</td>'
                     rows_html += f"<tr>{cells}</tr>"
                 return f'''<div style="overflow-x:auto;max-height:500px;overflow-y:auto;">
-                <table style="border-collapse:collapse;width:100%;font-family:monospace;">
+                <table class="spse-cek-table" style="border-collapse:collapse;width:100%;font-family:monospace;">
                 <thead style="position:sticky;top:0;z-index:1;"><tr>{header}</tr></thead>
                 <tbody>{rows_html}</tbody></table></div>
-                <p style="font-size:11px;color:#888;margin-top:4px;">🟢 Menang & selesai | 🟡 Menang & masih berjalan | ⚠️ Cek SKP jika kolom ini banyak kuning</p>'''
+                <p class="spse-cek-legend" style="font-size:11px;margin-top:4px;">🟢 Menang & selesai | 🟡 Menang & masih berjalan | ⚠️ Cek SKP jika kolom ini banyak kuning</p>'''
 
             st.markdown(_render_cek_html(df_cek_tampil), unsafe_allow_html=True)
 
