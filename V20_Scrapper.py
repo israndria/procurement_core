@@ -480,10 +480,10 @@ def scrape_satu_lpse(target, tahun_pilihan, kategori_pilihan, incremental=False)
 # --- 5. UI UTAMA (TABS) ---
 # ============================================================
 st.title("🏗️ SPSE Scraper V3.0")
-tab_scraper, tab_dashboard, tab_cek, tab_log = st.tabs(["🚀 Scraper", "📊 Dashboard", "🔍 Cek Penyedia", "📋 Log & Status"])
+tab_cek, tab_scraper, tab_dashboard, tab_log = st.tabs(["🔍 Cek Penyedia", "🚀 Scraper", "📊 Dashboard", "📋 Log & Status"])
 
 # ============================================================
-# TAB 1: SCRAPER
+# TAB 2: SCRAPER
 # ============================================================
 with tab_scraper:
     col_thn, col_kat = st.columns([1, 2])
@@ -599,7 +599,7 @@ with tab_scraper:
                 st.markdown(baris)
 
 # ============================================================
-# TAB 2: DASHBOARD
+# TAB 3: DASHBOARD
 # ============================================================
 with tab_dashboard:
     st.subheader("📊 Dashboard Data Tender")
@@ -919,7 +919,7 @@ with tab_dashboard:
         st.rerun()
 
 # ============================================================
-# TAB 3: CEK PENYEDIA (DETEKSI SKP OVER-LIMIT)
+# TAB 1: CEK PENYEDIA (DETEKSI SKP OVER-LIMIT)
 # ============================================================
 with tab_cek:
     st.subheader("🔍 Cek Penyedia — Deteksi SKP Berjalan")
