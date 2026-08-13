@@ -1424,7 +1424,8 @@ Public Sub CetakReviuPlJkkPDF()
 End Sub
 
 Public Sub CetakBAReviuPLPDF()
-    ' Cetak BA Reviu PL halaman 1-3 ke PDF
+    ' Cetak BA Reviu PL halaman 1-2 ke PDF.
+    ' Halaman 3 hanya header/overflow dan tidak termasuk BA Reviu.
     Dim wordFile As String
     wordFile = FindWordFilePL(WM_PAT_REVIU)
     If wordFile = "" Then Exit Sub
@@ -1462,7 +1463,7 @@ Public Sub CetakBAReviuPLPDF()
               Chr(34) & wordPath & Chr(34) & " " & _
               Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
               Chr(34) & WM_SHEET_BA & Chr(34) & " " & _
-              Chr(34) & printerName & Chr(34) & " 1 3"
+              Chr(34) & printerName & Chr(34) & " 1 2"
         wsh.Run cmd, 0, False
         Application.StatusBar = "Printing BA Reviu PL ke " & printerName & " ..."
     Else
@@ -2058,11 +2059,23 @@ Private Function ScriptDirPL() As String
         End If
     End If
 
+    ' POKJA_V19_ROOT lama kadang tidak ikut terbawa ke proses Excel.
+    ' Fallback ke clone procurement_core lokal per-PC, bukan Google Drive.
+    Dim localRoot As Variant
+    For Each localRoot In Array("D:\POKJA2026-Code\procurement_core", "C:\POKJA2026-Code\procurement_core")
+        If Dir(CStr(localRoot) & "\word_merge.py") <> "" And _
+           Dir(CStr(localRoot) & "\python\python.exe") <> "" Then
+            ScriptDirPL = CStr(localRoot)
+            Exit Function
+        End If
+    Next localRoot
+
     Dim folder As String
     folder = ThisWorkbook.Path
     Dim i As Integer
     For i = 1 To 10
-        If Dir(folder & "\V19_Scheduler\WPy64-313110\python\python.exe") <> "" Then
+        If Dir(folder & "\V19_Scheduler\WPy64-313110\python\python.exe") <> "" And _
+           Dir(folder & "\V19_Scheduler\WPy64-313110\word_merge.py") <> "" Then
             ScriptDirPL = folder & "\V19_Scheduler\WPy64-313110"
             Exit Function
         End If

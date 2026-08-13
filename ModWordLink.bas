@@ -71,13 +71,31 @@ Public Sub GabungBAReviu()
     Dim kodePokja As String
     kodePokja = KodePokjaOutput()
 
+    Dim scriptRoot As String
+    scriptRoot = ScriptDir()
+    If scriptRoot = "" Then Exit Sub
+
+    Dim pythonPath As String
+    pythonPath = PyExe()
+    If pythonPath = "" Or Dir(pythonPath) = "" Then
+        MsgBox "Python runtime tidak ditemukan." & vbCrLf & _
+               "Periksa POKJA_PYTHON atau clone procurement_core lokal.", _
+               vbCritical, "Gabung BA Reviu"
+        Exit Sub
+    End If
+    If Dir(scriptRoot & "\gabung_ba_reviu.py") = "" Then
+        MsgBox "gabung_ba_reviu.py tidak ditemukan di:" & vbCrLf & scriptRoot, _
+               vbCritical, "Gabung BA Reviu"
+        Exit Sub
+    End If
+
     Dim cmd As String
 
     Dim wsh As Object
 
     Set wsh = CreateObject("WScript.Shell")
 
-    cmd = Q(PyExe()) & " " & Q(ScriptDir() & "\gabung_ba_reviu.py") & " " & Q(folderPaket) & " " & Q("POKJA_" & kodePokja)
+    cmd = Q(pythonPath) & " " & Q(scriptRoot & "\gabung_ba_reviu.py") & " " & Q(folderPaket) & " " & Q("POKJA_" & kodePokja)
 
     wsh.Run cmd, 0, False
 
@@ -162,7 +180,32 @@ End Sub
 
 Private Function KodePokjaOutput() As String
     Dim kode As String
+    On Error Resume Next
     kode = Trim(CStr(ThisWorkbook.Sheets("1. Input Data").Range("E14").Value))
+    On Error GoTo 0
+
+    ' Workbook PL tidak memiliki sheet 1. Input Data. Ambil nomor Pokja
+    ' dari referensi PL pada @ Master Data!C20 (contoh: .../PP-31/...).
+    If kode = "" Then
+        Dim refPL As String
+        Dim posPP As Long
+        refPL = Trim(CStr(ThisWorkbook.Sheets("@ Master Data").Range("C20").Value))
+        posPP = InStr(1, refPL, "PP-", vbTextCompare)
+        If posPP > 0 Then
+            posPP = posPP + 3
+            Do While posPP <= Len(refPL) And Mid(refPL, posPP, 1) Like "#"
+                kode = kode & Mid(refPL, posPP, 1)
+                posPP = posPP + 1
+            Loop
+        End If
+    End If
+
+    ' Fallback terakhir: kode paket PL di @ Master Data!F2.
+    If kode = "" Then
+        On Error Resume Next
+        kode = Trim(CStr(ThisWorkbook.Sheets("@ Master Data").Range("F2").Value))
+        On Error GoTo 0
+    End If
     If kode = "" Then kode = "000"
     If IsNumeric(kode) Then kode = Format(CLng(kode), "000")
     KodePokjaOutput = kode

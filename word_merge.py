@@ -1915,7 +1915,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     ExportFormat=17,
                     Range=3,  # wdExportFromTo
                     From=1,
-                    To=3,
+                    To=2,
                 )
                 _deferred_pdf_success = pdf_path
             elif mode == "pdf_bapljkk":

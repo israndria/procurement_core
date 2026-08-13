@@ -20,6 +20,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 BAS_FILE = SCRIPT_DIR / "ModDraftPaketPL.bas"
 MOD_NAME = "ModDraftPaketPL"
+WORDLINK_BAS_FILE = SCRIPT_DIR / "ModWordLink.bas"
+WORDLINK_MOD_NAME = "ModWordLink"
 
 # Event workbook untuk BAPLJKK — relink tetap manual, input tanggal dipermudah.
 WORKBOOK_OPEN_CODE = (
@@ -99,10 +101,10 @@ WORKBOOK_OPEN_CODE = (
 )
 
 
-def _validate_vba_source(content: str) -> None:
+def _validate_vba_source(content: str, module_name: str = MOD_NAME) -> None:
     """Tolak source BAS rusak sebelum menyentuh workbook."""
-    if f'Attribute VB_Name = "{MOD_NAME}"' not in content:
-        raise ValueError(f"Attribute VB_Name {MOD_NAME} tidak ditemukan")
+    if f'Attribute VB_Name = "{module_name}"' not in content:
+        raise ValueError(f"Attribute VB_Name {module_name} tidak ditemukan")
     if "%%SUPABASE_URL%%" in content or "%%SUPABASE_KEY%%" in content:
         raise ValueError("Placeholder secret VBA belum tersubstitusi")
 
@@ -262,6 +264,51 @@ def inject_pl(filepath: str):
             f'Attribute VB_Name = "{MOD_NAME}"\n{imported_text}'
         )
         print(f"  [OK] {MOD_NAME} lolos verifikasi source pasca-import")
+
+        # Tombol Gabung BA Reviu memakai ModWordLink. Paket PL lama sering
+        # membawa modul ini dari donor lama, sehingga resolver Python-nya
+        # tidak mengenali clone procurement_core lokal. Sinkronkan modul inti
+        # di injector PL agar workbook baru maupun existing konsisten.
+        if not WORDLINK_BAS_FILE.exists():
+            raise FileNotFoundError(f"{WORDLINK_BAS_FILE} tidak ditemukan")
+        wordlink_content = WORDLINK_BAS_FILE.read_text(encoding="utf-8")
+        _validate_vba_source(wordlink_content, WORDLINK_MOD_NAME)
+        wordlink_tmp = tempfile.NamedTemporaryFile(
+            suffix=".bas", delete=False, mode="w", encoding="utf-8"
+        )
+        wordlink_tmp.write(
+            wordlink_content.replace(
+                f'Attribute VB_Name = "{WORDLINK_MOD_NAME}"',
+                f'Attribute VB_Name = "{WORDLINK_MOD_NAME}_NEW"',
+            )
+        )
+        wordlink_tmp.close()
+        wordlink_tmp_path = wordlink_tmp.name
+        imported_wordlink = vb.VBComponents.Import(wordlink_tmp_path)
+        old_wordlink = None
+        for comp in vb.VBComponents:
+            if comp.Name == WORDLINK_MOD_NAME:
+                old_wordlink = comp
+                break
+        if old_wordlink:
+            vb.VBComponents.Remove(old_wordlink)
+            print(f"  {WORDLINK_MOD_NAME} lama dihapus")
+        imported_wordlink.Name = WORDLINK_MOD_NAME
+        imported_wordlink_text = imported_wordlink.CodeModule.Lines(
+            1, imported_wordlink.CodeModule.CountOfLines
+        )
+        expected_wordlink_lines = len(wordlink_content.splitlines()) - 1
+        if imported_wordlink.CodeModule.CountOfLines != expected_wordlink_lines:
+            raise ValueError(
+                f"Jumlah baris {WORDLINK_MOD_NAME} berubah setelah import: "
+                f"{imported_wordlink.CodeModule.CountOfLines} != {expected_wordlink_lines}"
+            )
+        _validate_vba_source(
+            f'Attribute VB_Name = "{WORDLINK_MOD_NAME}"\n{imported_wordlink_text}',
+            WORDLINK_MOD_NAME,
+        )
+        print(f"  [OK] {WORDLINK_MOD_NAME} imported ({imported_wordlink.CodeModule.CountOfLines} baris)")
+        os.unlink(wordlink_tmp_path)
 
         # Inject Workbook_Open ke ThisWorkbook
         this_wb_comp = None
