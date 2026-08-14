@@ -5,6 +5,7 @@ import pytest
 from lxml import etree
 
 from config import PL_WORKFLOW_REGISTRY, pl_workflow_template_dir
+from document_profiles import strip_static_headers
 from setup_paket_baru import _setup_folder
 from word_merge import _prepare_dokpil_equipment_docx
 
@@ -120,3 +121,26 @@ def test_equipment_markers_fill_all_nested_tables(tmp_path):
     merged_text = "".join(result.itertext())
     assert merged_text.count("Generator Set") == 2
     assert merged_text.count("Pick Up") == 2
+
+
+def test_strip_static_headers_preserves_docx_structure(tmp_path):
+    ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    w = "{" + ns + "}"
+    target = tmp_path / "1. BA Reviu DPP PLJKK - Paket.docx"
+    document_xml = etree.Element(w + "document", nsmap={"w": ns})
+    etree.SubElement(document_xml, w + "body")
+    header_xml = etree.Element(w + "hdr", nsmap={"w": ns})
+    paragraph = etree.SubElement(header_xml, w + "p")
+    run = etree.SubElement(paragraph, w + "r")
+    etree.SubElement(run, w + "t").text = "DINAS PEKERJAAN UMUM DAN PENATAAN RUANG"
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", etree.tostring(document_xml))
+        archive.writestr("word/header1.xml", etree.tostring(header_xml))
+
+    strip_static_headers(target)
+
+    with zipfile.ZipFile(target) as archive:
+        result = etree.fromstring(archive.read("word/header1.xml"))
+        assert "".join(result.itertext()) == ""
+        assert archive.testzip() is None
+        assert archive.read("word/document.xml") == etree.tostring(document_xml)

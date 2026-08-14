@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import posixpath
 import re
+import tempfile
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -74,6 +75,53 @@ def is_official_header_document(path: str | os.PathLike[str]) -> bool:
         or "ba dengan timpang plpk" in name
         or "full dokumen ba plpk" in name
     )
+
+
+def strip_static_headers(
+    template_copy: str | os.PathLike[str],
+    output_path: str | os.PathLike[str] | None = None,
+) -> Path:
+    """Kosongkan header statis donor pada salinan dokumen paket.
+
+    Donor V2 masih membawa header PUPR sebagai placeholder historis. Header
+    resmi dipasang saat export melalui :func:`apply_header_to_copy`, sehingga
+    salinan DOCX paket harus netral juga ketika dibuka langsung oleh operator.
+    Struktur ZIP, section, relationship, field, dan media tetap dipertahankan.
+    """
+    target = Path(template_copy)
+    result = Path(output_path) if output_path else target
+    changed = False
+    with zipfile.ZipFile(target, "r") as source_zip:
+        items = source_zip.infolist()
+        files = {item.filename: source_zip.read(item.filename) for item in items}
+        for name in tuple(files):
+            if not (name.startswith("word/header") and name.endswith(".xml")):
+                continue
+            root = ET.fromstring(files[name])
+            for child in list(root):
+                root.remove(child)
+            files[name] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            changed = True
+    if not changed:
+        return result
+    if result != target:
+        result.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(result, "w", zipfile.ZIP_DEFLATED) as output_zip:
+            for item in items:
+                output_zip.writestr(item, files[item.filename])
+        return result
+    temp_fd, temp_name = tempfile.mkstemp(prefix="h_", suffix=".tmp", dir=target.parent)
+    os.close(temp_fd)
+    temp = Path(temp_name)
+    try:
+        with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as output_zip:
+            for item in items:
+                output_zip.writestr(item, files[item.filename])
+        os.replace(temp, target)
+    finally:
+        if temp.exists():
+            temp.unlink()
+    return target
 
 
 def _rewrite_header_relationships(rels: bytes, media_map: dict[str, str]) -> bytes:

@@ -253,6 +253,12 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
         dst_path = os.path.join(target_dir, wf_dst)
         if not os.path.exists(dst_path):
             shutil.copy2(os.path.join(template_dir, wf_tpl), dst_path)
+            # V2 donor masih membawa header PUPR sebagai placeholder historis.
+            # Salinan paket harus netral; profile instansi dipasang saat export.
+            from document_profiles import is_official_header_document, strip_static_headers
+
+            if is_official_header_document(dst_path):
+                strip_static_headers(dst_path)
             print(f"  [OK] {wf_tpl} -> {wf_dst}")
         else:
             print(f"  [SKIP] {wf_dst} (sudah ada)")

@@ -1045,6 +1045,35 @@ def _next_available_pdf_path(target_path):
         version += 1
 
 
+def _strip_pl_ba_signature_header(wd_doc) -> bool:
+    """Hapus header ter-link pada section lembar tanda tangan BA Reviu PL.
+
+    Template BA Reviu PLJKK memakai section baru untuk lembar 3, tetapi header
+    section tersebut masih ``LinkToPrevious``. Akibatnya header instansi dari
+    halaman 1-2 ikut tercetak di halaman tanda tangan. Perubahan hanya berlaku
+    pada salinan Word sementara yang akan diekspor/print.
+    """
+    try:
+        if int(wd_doc.ComputeStatistics(2)) < 3 or wd_doc.Sections.Count < 2:
+            return False
+        page_two = wd_doc.GoTo(1, 1, 2)  # wdGoToPage, wdGoToAbsolute
+        page_three = wd_doc.GoTo(1, 1, 3)
+        section_two = int(page_two.Information(2))  # wdActiveEndSectionNumber
+        section_three = int(page_three.Information(2))
+        if section_three <= section_two:
+            return False
+
+        header_section = wd_doc.Sections(section_three)
+        for header_kind in (1, 2, 3):  # primary, first-page, even-page
+            header = header_section.Headers(header_kind)
+            header.LinkToPrevious = False
+            header.Range.Text = ""
+        return True
+    except Exception as exc:
+        print(f"Warning: header lembar tanda tangan PL tidak dihapus: {exc}")
+        return False
+
+
 def _word_process_id(word_app, word_doc=None):
     """Ambil PID instance Word yang dibuat DispatchEx; None jika gagal."""
     import ctypes
@@ -1814,6 +1843,9 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             from_page = int(sys.argv[6]) if len(sys.argv) > 6 else 0
             to_page = int(sys.argv[7]) if len(sys.argv) > 7 else 0
 
+            if data.get("_source_sheet") == "satu_data":
+                _strip_pl_ba_signature_header(wdDoc)
+
             wdDoc.Save()
             wdApp.ScreenUpdating = True
             wdApp.Visible = False
@@ -1909,13 +1941,14 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 )
                 _deferred_pdf_success = pdf_path
             elif mode == "pdf_bareviu_pl":
+                _strip_pl_ba_signature_header(wdDoc)
                 pdf_path = _fit_path(folder, f"BA_REVIU_PL_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,
                     ExportFormat=17,
                     Range=3,  # wdExportFromTo
                     From=1,
-                    To=2,
+                    To=3,
                 )
                 _deferred_pdf_success = pdf_path
             elif mode == "pdf_bapljkk":

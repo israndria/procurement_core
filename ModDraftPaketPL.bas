@@ -1424,8 +1424,8 @@ Public Sub CetakReviuPlJkkPDF()
 End Sub
 
 Public Sub CetakBAReviuPLPDF()
-    ' Cetak BA Reviu PL halaman 1-2 ke PDF.
-    ' Halaman 3 hanya header/overflow dan tidak termasuk BA Reviu.
+    ' Cetak BA Reviu PL halaman 1-3 ke PDF.
+    ' Halaman 3 memuat lanjutan tanda tangan PPK dan PP.
     Dim wordFile As String
     wordFile = FindWordFilePL(WM_PAT_REVIU)
     If wordFile = "" Then Exit Sub
@@ -1463,7 +1463,7 @@ Public Sub CetakBAReviuPLPDF()
               Chr(34) & wordPath & Chr(34) & " " & _
               Chr(34) & ThisWorkbook.FullName & Chr(34) & " " & _
               Chr(34) & WM_SHEET_BA & Chr(34) & " " & _
-              Chr(34) & printerName & Chr(34) & " 1 2"
+              Chr(34) & printerName & Chr(34) & " 1 3"
         wsh.Run cmd, 0, False
         Application.StatusBar = "Printing BA Reviu PL ke " & printerName & " ..."
     Else
