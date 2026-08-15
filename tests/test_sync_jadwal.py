@@ -95,21 +95,33 @@ def test_reconcile_updates_existing_legacy_event_without_delete_first():
     assert service.api.items["old-1"]["extendedProperties"]["private"]["source_tender"] == "123"
 
 
-def test_merge_discovered_tenders_adds_folder_packages_to_legacy_csv(monkeypatch):
+def test_owned_tender_rows_only_contains_allowlisted_codes(monkeypatch):
     db = pd.DataFrame([{
         "url": "https://spse.inaproc.id/tapinkab/lelang/1/jadwal",
         "members": "001",
         "nama_paket": "Lama",
         "last_sync": "",
         "content_hash": "",
+    }, {
+        "url": "https://spse.inaproc.id/tapinkab/lelang/2/jadwal",
+        "members": "002",
+        "nama_paket": "Bukan target",
+        "last_sync": "",
+        "content_hash": "",
     }])
-    monkeypatch.setattr(sync_jadwal, "_load_supabase_tender_rows", lambda: [{
-        "url": "https://spse.inaproc.id/tapinkab/lelang/10156445000/jadwal",
-        "members": "045",
-        "nama_paket": "Karangan Putih",
+    monkeypatch.setattr(sync_jadwal, "_load_supabase_tender_rows", lambda codes=None: [{
+        "kode_tender": "1",
+        "kode_pokja": "045",
+        "nama_tender": "Target",
     }])
 
-    result = sync_jadwal.merge_discovered_tenders(db)
+    result = sync_jadwal._owned_tender_rows(db, [{
+        "jenis_paket": "tender",
+        "kode_paket": "1",
+        "nama_paket": "Target",
+    }])
 
-    assert "10156445000" in " ".join(result["url"].tolist())
-    assert len(result) == 2
+    assert result["url"].tolist() == [
+        "https://spse.inaproc.id/tapinkab/lelang/1/jadwal"
+    ]
+    assert result.iloc[0]["nama_paket"] == "Target"

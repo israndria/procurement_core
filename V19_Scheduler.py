@@ -131,6 +131,28 @@ def compute_hash(df_jadwal: pd.DataFrame) -> str:
     content = df_jadwal[['Tahap', 'Mulai', 'Sampai', 'Perubahan']].to_csv(index=False)
     return hashlib.md5(content.encode()).hexdigest()
 
+
+def register_tender_calendar_targets(df_result) -> list[str]:
+    """Daftarkan hanya Tender yang dipilih user ke allowlist scheduler GCal."""
+    from calendar_sync_targets import TargetRegistryError, upsert_target
+
+    errors = []
+    for url, group in df_result.groupby('Source'):
+        match = re.search(r'/lelang/(\d+)', str(url))
+        if not match:
+            errors.append(f"URL Tender tidak valid: {url}")
+            continue
+        try:
+            upsert_target(
+                'tender',
+                match.group(1),
+                name=str(group.iloc[0].get('Nama_Paket') or '').strip(),
+                source='v19-ui',
+            )
+        except (TargetRegistryError, ValueError) as exc:
+            errors.append(f"{match.group(1)}: {exc}")
+    return errors
+
 def update_local_database(df_result, hash_map: dict = None):
     new_data = []
     now_str = get_indonesian_timestamp()
@@ -439,6 +461,9 @@ def run_single_update(url_target, members_target):
     if res:
         df_res = pd.concat(res, ignore_index=True)
         update_local_database(df_res, hash_map)
+        _target_errors = register_tender_calendar_targets(df_res)
+        if _target_errors:
+            st.warning("⚠️ Allowlist GCal belum diperbarui: " + " | ".join(_target_errors))
 
         # Auto-commit ke GitHub agar Actions bisa track perubahan
         st.info("🔄 Menyinkronkan database ke GitHub...")
@@ -640,6 +665,9 @@ with tab_tambah:
                 if res:
                     df_res = pd.concat(res, ignore_index=True)
                     update_local_database(df_res, hash_map)
+                    _target_errors = register_tender_calendar_targets(df_res)
+                    if _target_errors:
+                        st.warning("⚠️ Allowlist GCal belum diperbarui: " + " | ".join(_target_errors))
 
                     # Commit ke GitHub agar GH Actions bisa track perubahan
                     s.write("🔄 Menyinkronkan database ke GitHub...")

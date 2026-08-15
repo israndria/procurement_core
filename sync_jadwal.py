@@ -22,6 +22,14 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
+from calendar_sync_targets import (
+    TargetRegistryError,
+    folder_identity_matches,
+    load_targets,
+    upsert_target,
+)
+from spse_public_http import get_public as _get_public_spse
+
 # ============================================================
 # KONFIGURASI
 # ============================================================
@@ -131,11 +139,15 @@ def _get_spse_session():
 
 
 def _get_spse(url: str, headers: dict, timeout: int = 30):
-    response = _get_spse_session().get(url, headers=headers, timeout=timeout)
-    # cloudscraper kadang tidak tersedia/berhasil di host tertentu.
-    if response.status_code in (403, 429) and _get_spse_session() is not requests:
-        response = requests.get(url, headers=headers, timeout=timeout)
-    return response
+    session = _get_spse_session()
+    return _get_public_spse(
+        session,
+        url,
+        headers=headers,
+        timeout=timeout,
+        fallback=requests,
+        log_fn=log,
+    )
 
 
 def fetch_jadwal(url: str) -> pd.DataFrame | None:
@@ -589,8 +601,8 @@ def _read_env_file(path: str) -> dict[str, str]:
     return values
 
 
-def _load_supabase_tender_rows() -> list[dict]:
-    """Ambil paket tender yang sudah punya folder dari draft_paket sebagai discovery source."""
+def _load_supabase_tender_rows(codes: list[str] | None = None) -> list[dict]:
+    """Ambil metadata Tender untuk kode yang sudah diizinkan registry."""
     roots = [
         os.environ.get('POKJA_SECRET_ROOT', ''),
         SECRET_ROOT,
@@ -606,12 +618,15 @@ def _load_supabase_tender_rows() -> list[dict]:
         log('  ⚠️ Discovery Supabase dilewati: secret_supabase.env tidak ditemukan/lengkap.')
         return []
     try:
+        params = {
+            'select': 'kode_tender,nama_tender,kode_pokja,folder_dibuat',
+            'limit': str(max(len(codes), 1)) if codes else '1000',
+        }
+        if codes:
+            params['kode_tender'] = f"in.({','.join(codes)})"
         response = requests.get(
             f'{supabase_url}/rest/v1/draft_paket',
-            params={
-                'select': 'kode_tender,nama_tender,kode_pokja,folder_dibuat',
-                'limit': '1000',
-            },
+            params=params,
             headers={'apikey': supabase_key, 'Authorization': f'Bearer {supabase_key}'},
             timeout=30,
         )
@@ -624,18 +639,118 @@ def _load_supabase_tender_rows() -> list[dict]:
     result = []
     for row in rows if isinstance(rows, list) else []:
         code = str(row.get('kode_tender') or '').strip()
-        if not code or not str(row.get('folder_dibuat') or '').strip():
+        if not code:
             continue
         result.append({
             'url': f'{SPSE_BASE_URL}/lelang/{code}/jadwal',
             'members': str(row.get('kode_pokja') or '').strip(),
             'nama_paket': str(row.get('nama_tender') or code).strip(),
+            'folder_name': str(row.get('folder_dibuat') or '').strip(),
         })
     return result
 
 
-def merge_discovered_tenders(db: pd.DataFrame) -> pd.DataFrame:
-    """Tambahkan paket berfolder dari Supabase tanpa menghapus subscription CSV lama."""
+def _pokja_drive_roots() -> list[str]:
+    configured = os.environ.get('POKJA_DRIVE_ROOT', '').strip().strip('"')
+    return list(dict.fromkeys(os.path.normpath(root) for root in (
+        configured,
+        r'D:\Dokumen\@ POKJA 2026',
+        r'G:\Other computers\My Laptop\@ POKJA 2026',
+    ) if root))
+
+
+def _tender_folder_identity_valid(folder_name: str, kode_tender: str) -> bool:
+    return folder_identity_matches(
+        folder_name,
+        kode_tender,
+        [os.path.join(root, '@ Tender 2026') for root in _pokja_drive_roots()],
+        '@ Master Data',
+        ('C4',),
+    )
+
+
+def _auto_enroll_folder_tenders(existing_targets: list[dict]) -> None:
+    """Enroll friend-created SPSE packages after user creates a local folder."""
+    known = {
+        str(row.get('kode_paket') or '').strip(): row
+        for row in existing_targets
+    }
+    for row in _load_supabase_tender_rows():
+        code = str(row.get('url', '')).split('/lelang/')[-1].split('/')[0]
+        folder_name = str(row.get('folder_name') or '').strip()
+        if not code.isdigit() or not folder_name or code in known:
+            continue
+        if not _tender_folder_identity_valid(folder_name, code):
+            continue
+        upsert_target(
+            'tender', code,
+            name=row.get('nama_paket', code),
+            folder_name=folder_name,
+            source='folder-auto',
+            note='Auto-enrolled karena folder paket ada di root POKJA lokal.',
+        )
+
+
+def _owned_tender_rows(db: pd.DataFrame, targets: list[dict]) -> pd.DataFrame:
+    """Bangun kandidat hanya dari allowlist aktif, bukan dari seluruh sumber."""
+    csv_by_code = {}
+    for _, row in db.iterrows():
+        code = _tender_code_from_url(row.get('url', ''))
+        if code:
+            csv_by_code[code] = row.to_dict()
+
+    codes = [str(target.get('kode_paket') or '').strip() for target in targets]
+    metadata = {
+        str(row.get('kode_tender') or '').strip(): row
+        for row in _load_supabase_tender_rows(codes)
+    }
+    rows = []
+    for target in targets:
+        code = str(target.get('kode_paket') or '').strip()
+        if not code:
+            continue
+        if (
+            str(target.get('source') or '').strip() == 'folder-auto'
+            and not _tender_folder_identity_valid(
+                target.get('folder_name', ''), code
+            )
+        ):
+            log(f'  ⏭️ Tender {code} dilewati: folder POKJA tidak terbaca.')
+            continue
+        old = dict(csv_by_code.get(code, {}))
+        source = metadata.get(code, {})
+        rows.append({
+            **old,
+            'url': f'{SPSE_BASE_URL}/lelang/{code}/jadwal',
+            'members': str(target.get('kode_pokja') or source.get('kode_pokja') or old.get('members') or '').strip(),
+            'nama_paket': str(target.get('nama_paket') or source.get('nama_tender') or old.get('nama_paket') or code).strip(),
+            'last_sync': old.get('last_sync', ''),
+            'content_hash': old.get('content_hash', ''),
+        })
+    return pd.DataFrame(rows)
+
+
+def _merge_database_updates(original: pd.DataFrame, synced: pd.DataFrame) -> pd.DataFrame:
+    """Pertahankan CSV legacy; hanya update/append baris target aktif."""
+    if original.empty:
+        return synced
+    result = original.copy()
+    result = result.set_index('url')
+    for _, row in synced.iterrows():
+        url = str(row.get('url', '')).strip()
+        if not url:
+            continue
+        if url not in result.index:
+            result.loc[url, list(row.index)] = row
+        else:
+            for column in ('members', 'nama_paket', 'last_sync', 'content_hash'):
+                if column in row.index:
+                    result.loc[url, column] = row[column]
+    return result.reset_index()
+
+
+def _legacy_merge_discovered_tenders(db: pd.DataFrame) -> pd.DataFrame:
+    """Legacy helper; scheduler tidak lagi memakai discovery implisit."""
     discovered = _load_supabase_tender_rows()
     if not discovered:
         return db
@@ -673,9 +788,18 @@ def sync_all():
     log("=" * 60)
     log("🚀 Mulai sync jadwal tender...")
 
-    db = merge_discovered_tenders(load_db())
+    try:
+        all_targets = load_targets('tender', enabled_only=False)
+        _auto_enroll_folder_tenders(all_targets)
+        targets = load_targets('tender')
+    except TargetRegistryError as exc:
+        log(f'  ❌ Allowlist Tender tidak tersedia — fail-closed: {exc}')
+        return {'updated': 0, 'unchanged': 0, 'failed': 1}
+
+    db_source = load_db()
+    db = _owned_tender_rows(db_source, targets)
     if db.empty:
-        log("📭 Database kosong — tidak ada URL untuk disync.")
+        log("📭 Tidak ada target Tender aktif — tidak ada URL untuk discrape.")
         return {'updated': 0, 'unchanged': 0, 'failed': 0}
 
     service     = get_service()
@@ -740,7 +864,7 @@ def sync_all():
         db.at[idx, 'nama_paket']   = nama_paket
         updated += 1
 
-    save_db(db)
+    save_db(_merge_database_updates(db_source, db))
     log(f"\n📊 Selesai — Updated: {updated} | Unchanged: {unchanged} | Failed: {failed}")
     log("=" * 60)
     return {'updated': updated, 'unchanged': unchanged, 'failed': failed}
