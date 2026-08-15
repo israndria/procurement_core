@@ -46,6 +46,9 @@ CALENDAR_ID = 'primary'
 SCOPES      = ['https://www.googleapis.com/auth/calendar']
 # LPSE Tapin memakai WITA (UTC+8), bukan WIB/Asia-Jakarta.
 CALENDAR_TIMEZONE = 'Asia/Makassar'
+SPSE_BASE_URL = os.environ.get('POKJA_SPSE_BASE_URL', 'https://spse.inaproc.id/tapinkab').rstrip('/')
+
+_SPSE_SESSION = None
 
 BULAN_MAP = {
     'Januari':'01','Februari':'02','Maret':'03','April':'04',
@@ -112,6 +115,29 @@ def get_service():
 # ============================================================
 # SCRAPING (tanpa Selenium)
 # ============================================================
+def _get_spse_session():
+    """Pakai cloudscraper bila tersedia; fallback requests untuk environment minimal."""
+    global _SPSE_SESSION
+    if _SPSE_SESSION is not None:
+        return _SPSE_SESSION
+    try:
+        import cloudscraper
+        _SPSE_SESSION = cloudscraper.create_scraper(
+            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+        )
+    except ImportError:
+        _SPSE_SESSION = requests
+    return _SPSE_SESSION
+
+
+def _get_spse(url: str, headers: dict, timeout: int = 30):
+    response = _get_spse_session().get(url, headers=headers, timeout=timeout)
+    # cloudscraper kadang tidak tersedia/berhasil di host tertentu.
+    if response.status_code in (403, 429) and _get_spse_session() is not requests:
+        response = requests.get(url, headers=headers, timeout=timeout)
+    return response
+
+
 def fetch_jadwal(url: str) -> pd.DataFrame | None:
     """
     Ambil tabel jadwal dari halaman publik SPSE (/lelang/{id}/jadwal).
@@ -125,7 +151,7 @@ def fetch_jadwal(url: str) -> pd.DataFrame | None:
     }
     
     try:
-        resp = requests.get(url, headers=headers, timeout=30)
+        resp = _get_spse(url, headers=headers, timeout=30)
         resp.raise_for_status()
         html = resp.text
     except Exception as e:
@@ -178,7 +204,8 @@ def fetch_jadwal(url: str) -> pd.DataFrame | None:
 
 def compute_hash(df: pd.DataFrame) -> str:
     """Hash konten jadwal — dipakai untuk deteksi perubahan."""
-    content = df[['Tahap', 'Mulai', 'Sampai', 'Perubahan']].to_csv(index=False)
+    cols = ['Tahap', 'Mulai', 'Sampai', 'Perubahan', 'Nama_Paket']
+    content = df[cols].fillna('').astype(str).to_csv(index=False)
     return hashlib.md5(content.encode()).hexdigest()
 
 
@@ -235,26 +262,43 @@ def format_desc(url: str, perubahan, pokja: str, diff_info: str = '') -> str:
     return f"🔗 Link: {url}\n\n{status}{diff_block}{pokja_str}"
 
 
+def _tender_code_from_url(url: str) -> str:
+    match = re.search(r'/lelang/(\d+)', str(url or ''))
+    return match.group(1) if match else ''
+
+
+def _list_tender_events(service, url: str) -> list[dict]:
+    """Ambil event paket baru (extended property) dan event legacy (URL di deskripsi)."""
+    code = _tender_code_from_url(url)
+    found = {}
+    queries = [{'q': url}, {'privateExtendedProperty': f'source_tender={code}'}] if code else [{'q': url}]
+    for query in queries:
+        page_token = None
+        while True:
+            result = service.events().list(
+                calendarId=CALENDAR_ID,
+                singleEvents=True,
+                pageToken=page_token,
+                **query,
+            ).execute()
+            for ev in result.get('items', []):
+                private = ev.get('extendedProperties', {}).get('private', {})
+                if url in (ev.get('description', '') or '') or private.get('source_tender') == code:
+                    found[ev.get('id')] = ev
+            page_token = result.get('nextPageToken')
+            if not page_token:
+                break
+    return [ev for ev in found.values() if ev.get('id')]
+
+
 def fetch_old_events(service, url: str) -> dict:
     """Ambil event lama dari GCal sebelum dihapus, return {summary: start_time}."""
     old_events = {}
-    page_token = None
-    while True:
-        result = service.events().list(
-            calendarId=CALENDAR_ID,
-            q=url,
-            singleEvents=True,
-            pageToken=page_token
-        ).execute()
-        for ev in result.get('items', []):
-            if url in ev.get('description', ''):
-                summary = ev.get('summary', '')
-                start = ev.get('start', {}).get('dateTime', '')
-                if summary and start:
-                    old_events[summary] = start
-        page_token = result.get('nextPageToken')
-        if not page_token:
-            break
+    for ev in _list_tender_events(service, url):
+        summary = ev.get('summary', '')
+        start = ev.get('start', {}).get('dateTime', '')
+        if summary and start:
+            old_events[summary] = start
     return old_events
 
 
@@ -271,7 +315,7 @@ def fetch_jadwal_history(url: str) -> dict:
             'Referer': ref,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         }
-        resp = requests.get(target_url, headers=headers, timeout=20)
+        resp = _get_spse(target_url, headers=headers, timeout=20)
         resp.raise_for_status()
         return resp.text
 
@@ -374,23 +418,11 @@ def build_diff_info(old_events: dict, df_new: pd.DataFrame) -> str:
 
 def delete_events_by_url(service, url: str):
     """Hapus semua event GCal yang mengandung URL ini di description."""
-    page_token = None
-    while True:
-        result = service.events().list(
-            calendarId=CALENDAR_ID,
-            q=url,
-            singleEvents=True,
-            pageToken=page_token
-        ).execute()
-        for ev in result.get('items', []):
-            if url in ev.get('description', ''):
-                try:
-                    service.events().delete(calendarId=CALENDAR_ID, eventId=ev['id']).execute()
-                except Exception:
-                    pass
-        page_token = result.get('nextPageToken')
-        if not page_token:
-            break
+    for ev in _list_tender_events(service, url):
+        try:
+            service.events().delete(calendarId=CALENDAR_ID, eventId=ev['id']).execute()
+        except Exception:
+            pass
 
 
 def insert_events(service, df: pd.DataFrame, url: str, members: str, stage_history: dict = None):
@@ -422,6 +454,109 @@ def insert_events(service, df: pd.DataFrame, url: str, members: str, stage_histo
     return inserted
 
 
+def _tender_event_body(row, index: int, url: str, members: str, stage_history: dict) -> dict | None:
+    ds = parse_date(row['Mulai'])
+    de = parse_date(row['Sampai'])
+    if not ds:
+        return None
+    if not de:
+        de = ds + datetime.timedelta(hours=1)
+    stage_key = str(row['Tahap']).strip().lower()
+    return {
+        'summary': f"{row['Tahap']} - {row['Nama_Paket']}",
+        'description': format_desc(
+            url, row['Perubahan'], members,
+            diff_info=stage_history.get(stage_key, ''),
+        ),
+        'start': {'dateTime': ds.isoformat(), 'timeZone': CALENDAR_TIMEZONE},
+        'end': {'dateTime': de.isoformat(), 'timeZone': CALENDAR_TIMEZONE},
+        'reminders': get_reminders(row['Tahap']),
+        'extendedProperties': {
+            'private': {
+                'source_tender': _tender_code_from_url(url),
+                'source_stage_index': str(index),
+            }
+        },
+    }
+
+
+def reconcile_tender_events(
+    service, df: pd.DataFrame, url: str, members: str, stage_history: dict | None = None,
+) -> dict:
+    """Reconcile event per tahap; tidak delete-before-insert sehingga partial failure aman."""
+    stage_history = stage_history or {}
+    existing = _list_tender_events(service, url)
+    by_index = {}
+    by_summary = {}
+    for ev in existing:
+        private = ev.get('extendedProperties', {}).get('private', {})
+        if private.get('source_stage_index') is not None:
+            by_index.setdefault(str(private['source_stage_index']), []).append(ev)
+        if ev.get('summary'):
+            by_summary.setdefault(ev['summary'], []).append(ev)
+
+    valid_rows = []
+    for index, (_, row) in enumerate(df.iterrows()):
+        body = _tender_event_body(row, index, url, members, stage_history)
+        if body is not None:
+            valid_rows.append((index, row, body))
+    if not valid_rows:
+        return {'ok': False, 'inserted': 0, 'updated': 0, 'deleted': 0, 'error': 'Tidak ada tahap dengan tanggal valid.'}
+
+    used_ids = set()
+    inserted = updated = 0
+    errors = []
+    for index, row, body in valid_rows:
+        candidates = by_index.get(str(index), []) or by_summary.get(body['summary'], [])
+        event = next((ev for ev in candidates if ev.get('id') not in used_ids), None)
+        try:
+            if event:
+                service.events().update(
+                    calendarId=CALENDAR_ID, eventId=event['id'], body=body,
+                ).execute()
+                used_ids.add(event['id'])
+                updated += 1
+            else:
+                response = service.events().insert(calendarId=CALENDAR_ID, body=body).execute()
+                if isinstance(response, dict) and response.get('id'):
+                    used_ids.add(response['id'])
+                inserted += 1
+        except Exception as exc:
+            errors.append(f"Tahap {index + 1} ({row['Tahap']}) gagal: {exc}")
+
+    # Jangan menghapus event lama bila ada insert/update yang gagal.
+    deleted = 0
+    if not errors:
+        for ev in existing:
+            if ev.get('id') in used_ids:
+                continue
+            try:
+                service.events().delete(calendarId=CALENDAR_ID, eventId=ev['id']).execute()
+                deleted += 1
+            except Exception as exc:
+                errors.append(f"Hapus event stale gagal: {exc}")
+
+    return {
+        'ok': not errors and inserted + updated == len(valid_rows),
+        'inserted': inserted,
+        'updated': updated,
+        'deleted': deleted,
+        'error': ' | '.join(errors)[:1000],
+    }
+
+
+def _tender_events_complete(service, url: str, df: pd.DataFrame) -> bool:
+    expected = {
+        f"{row['Tahap']} - {row['Nama_Paket']}"
+        for _, row in df.iterrows()
+        if parse_date(row['Mulai']) is not None
+    }
+    if not expected:
+        return False
+    actual = {ev.get('summary') for ev in _list_tender_events(service, url)}
+    return expected.issubset(actual)
+
+
 # ============================================================
 # DATABASE
 # ============================================================
@@ -437,6 +572,86 @@ def load_db() -> pd.DataFrame:
         except Exception:
             pass
     return pd.DataFrame(columns=cols)
+
+
+def _read_env_file(path: str) -> dict[str, str]:
+    values = {}
+    try:
+        with open(path, encoding='utf-8') as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                values[key.strip()] = value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return values
+
+
+def _load_supabase_tender_rows() -> list[dict]:
+    """Ambil paket tender yang sudah punya folder dari draft_paket sebagai discovery source."""
+    roots = [
+        os.environ.get('POKJA_SECRET_ROOT', ''),
+        SECRET_ROOT,
+        os.path.join(os.environ.get('LOCALAPPDATA', ''), 'POKJA2026', 'Secrets'),
+        os.path.join(os.path.dirname(BASE_DIR), 'Secrets'),
+    ]
+    env = {}
+    for root in dict.fromkeys(os.path.normpath(r) for r in roots if r):
+        env.update(_read_env_file(os.path.join(root, 'secret_supabase.env')))
+    supabase_url = (env.get('SUPABASE_URL') or os.environ.get('SUPABASE_URL', '')).strip().rstrip('/')
+    supabase_key = (env.get('SUPABASE_KEY') or os.environ.get('SUPABASE_KEY', '')).strip()
+    if not supabase_url or not supabase_key:
+        log('  ⚠️ Discovery Supabase dilewati: secret_supabase.env tidak ditemukan/lengkap.')
+        return []
+    try:
+        response = requests.get(
+            f'{supabase_url}/rest/v1/draft_paket',
+            params={
+                'select': 'kode_tender,nama_tender,kode_pokja,folder_dibuat',
+                'limit': '1000',
+            },
+            headers={'apikey': supabase_key, 'Authorization': f'Bearer {supabase_key}'},
+            timeout=30,
+        )
+        response.raise_for_status()
+        rows = response.json()
+    except Exception as exc:
+        log(f'  ⚠️ Discovery Supabase gagal: {exc}')
+        return []
+
+    result = []
+    for row in rows if isinstance(rows, list) else []:
+        code = str(row.get('kode_tender') or '').strip()
+        if not code or not str(row.get('folder_dibuat') or '').strip():
+            continue
+        result.append({
+            'url': f'{SPSE_BASE_URL}/lelang/{code}/jadwal',
+            'members': str(row.get('kode_pokja') or '').strip(),
+            'nama_paket': str(row.get('nama_tender') or code).strip(),
+        })
+    return result
+
+
+def merge_discovered_tenders(db: pd.DataFrame) -> pd.DataFrame:
+    """Tambahkan paket berfolder dari Supabase tanpa menghapus subscription CSV lama."""
+    discovered = _load_supabase_tender_rows()
+    if not discovered:
+        return db
+    existing = {str(url).strip() for url in db.get('url', pd.Series(dtype=str)).tolist()}
+    added = 0
+    additions = []
+    for row in discovered:
+        if row['url'] in existing:
+            continue
+        additions.append(row)
+        existing.add(row['url'])
+        added += 1
+    if additions:
+        db = pd.concat([db, pd.DataFrame(additions)], ignore_index=True)
+    log(f'  🔎 Discovery Supabase: {len(discovered)} paket berfolder, {added} baru.')
+    return db
 
 
 def save_db(df: pd.DataFrame):
@@ -458,7 +673,7 @@ def sync_all():
     log("=" * 60)
     log("🚀 Mulai sync jadwal tender...")
 
-    db = load_db()
+    db = merge_discovered_tenders(load_db())
     if db.empty:
         log("📭 Database kosong — tidak ada URL untuk disync.")
         return {'updated': 0, 'unchanged': 0, 'failed': 0}
@@ -485,9 +700,16 @@ def sync_all():
         nama_paket = df_jadwal['Nama_Paket'].iloc[0]
 
         if new_hash == old_hash:
-            log("  ✅ Tidak ada perubahan.")
-            unchanged += 1
-            continue
+            try:
+                if _tender_events_complete(service, url, df_jadwal):
+                    log("  ✅ Tidak ada perubahan; event GCal terverifikasi.")
+                    unchanged += 1
+                    continue
+                log("  ⚠️ Hash sama tetapi event GCal hilang/tidak lengkap — reconcile.")
+            except Exception as exc:
+                log(f"  ❌ Gagal verifikasi event GCal: {exc}")
+                failed += 1
+                continue
 
         # Ada perubahan (atau pertama kali) — update calendar
         if old_hash:
@@ -500,9 +722,17 @@ def sync_all():
         if old_hash:
             stage_history = fetch_jadwal_history(url)
 
-        delete_events_by_url(service, url)
-        n = insert_events(service, df_jadwal, url, members, stage_history=stage_history)
-        log(f"  📅 {n} event berhasil dimasukkan.")
+        cal_result = reconcile_tender_events(
+            service, df_jadwal, url, members, stage_history=stage_history,
+        )
+        if not cal_result['ok']:
+            log(f"  ❌ Reconcile GCal gagal: {cal_result['error']}")
+            failed += 1
+            continue
+        log(
+            f"  📅 GCal: {cal_result['inserted']} baru, "
+            f"{cal_result['updated']} diperbarui, {cal_result['deleted']} stale dihapus."
+        )
 
         # Update database
         db.at[idx, 'content_hash'] = new_hash
