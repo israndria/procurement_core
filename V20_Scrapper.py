@@ -49,11 +49,21 @@ st.markdown("""
             background: #fff3cd !important;
             color: #5c4300 !important;
         }
+        .spse-cek-table .spse-row-winner-review {
+            background: #ffe0b2 !important;
+            color: #6d3b00 !important;
+        }
+        .spse-cek-table .spse-row-winner-pending {
+            background: #e2e8f0 !important;
+            color: #334155 !important;
+        }
         .spse-cek-table .spse-row-winner-done {
             background: #d4edda !important;
             color: #155724 !important;
         }
         .spse-cek-table .spse-row-winner-running td,
+        .spse-cek-table .spse-row-winner-review td,
+        .spse-cek-table .spse-row-winner-pending td,
         .spse-cek-table .spse-row-winner-done td {
             background: inherit !important;
             color: inherit !important;
@@ -70,6 +80,14 @@ st.markdown("""
             .spse-cek-table .spse-row-winner-running {
                 background: #594b14 !important;
                 color: #fff4b8 !important;
+            }
+            .spse-cek-table .spse-row-winner-review {
+                background: #663d12 !important;
+                color: #ffd9a0 !important;
+            }
+            .spse-cek-table .spse-row-winner-pending {
+                background: #334155 !important;
+                color: #dbeafe !important;
             }
             .spse-cek-table .spse-row-winner-done {
                 background: #123c27 !important;
@@ -933,16 +951,43 @@ with tab_cek:
         st.markdown("<br>", unsafe_allow_html=True)
         cek_btn = st.button("🔍 Cari", type="primary", use_container_width=True, key="cek_btn")
 
+    SKP_LIMIT = 5
+    _TERMINAL_STAGE_MARKERS = (
+        "selesai",
+        "dibatalkan",
+        "batal",
+        "gagal",
+        "tidak ada jadwal",
+    )
+    _DEFAULT_PROVIDER_NAMES = {
+        "",
+        "belum ada pemenang",
+        "belum ada kontrak",
+        "-",
+        "nan",
+        "none",
+    }
+
+    def _text(value):
+        return str(value or "").strip()
+
+    def _query_pattern(query):
+        return f"%{re.sub(r'[%_]', '', _text(query))}%"
+
+    def _provider_key(name, npwp=""):
+        digits = re.sub(r"\D", "", _text(npwp))
+        if digits and len(set(digits)) > 1:
+            return ("npwp", digits)
+        compact_name = re.sub(r"[^a-z0-9]+", " ", _text(name).lower()).strip()
+        return ("nama", compact_name)
+
     def _is_berjalan(tahapan):
-        if not tahapan:
-            return False
-        t = str(tahapan).strip().lower()
-        if any(status in t for status in ("selesai", "dibatalkan", "batal", "gagal", "tidak ada jadwal")):
-            return False
-        return True
+        tahap = _text(tahapan).lower()
+        return bool(tahap) and not any(marker in tahap for marker in _TERMINAL_STAGE_MARKERS)
 
     def _is_konstruksi(jenis_pengadaan):
-        return str(jenis_pengadaan or "").strip().lower().startswith("pekerjaan konstruksi")
+        value = _text(jenis_pengadaan).lower()
+        return value.startswith("pekerjaan konstruksi") or value == "konstruksi"
 
     def _is_pemenang(value):
         """Normalisasi flag Supabase agar None/string False tidak dianggap menang."""
@@ -952,20 +997,35 @@ with tab_cek:
             return value.strip().lower() in {"1", "true", "t", "yes", "y"}
         return bool(value)
 
+    def _is_contract_holder(provider_name, contract_name):
+        if _text(contract_name).lower() in _DEFAULT_PROVIDER_NAMES:
+            return False
+        return _provider_key(provider_name)[1] == _provider_key(contract_name)[1]
+
+    def _skp_row_status(row):
+        if not row.get("_is_pemenang"):
+            return "Tidak — peserta bukan pemenang"
+        if not row.get("_is_berkontrak"):
+            return "Tidak — pemenang belum berkontrak"
+        if row.get("_berjalan"):
+            return "Ya — berkontrak, tahap SPSE aktif"
+        return "Perlu verifikasi — kontrak ada, status selesai fisik belum terbukti"
+
     @st.cache_data(ttl=120)
     def _cari_penyedia(query):
-        """Cari pemenang Tender + Non-Tender, lalu gabungkan metadata paket."""
+        """Cari keterlibatan Tender + Non-Tender dan metadata paket."""
         try:
             sb = _sb()
+            pattern = _query_pattern(query)
             peserta_select = (
                 "kode_tender,urutan,nama_peserta,npwp,harga_penawaran,harga_negosiasi,"
                 "skor_akhir,alasan_gugur,is_pemenang"
             )
             r1 = sb.table("tender_peserta").select(peserta_select) \
-                .ilike("nama_peserta", f"%{query}%").limit(200).execute()
+                .ilike("nama_peserta", pattern).limit(200).execute()
 
             r2 = sb.table("tender_peserta").select(peserta_select) \
-                .ilike("npwp", f"%{query}%").limit(200).execute()
+                .ilike("npwp", pattern).limit(200).execute()
 
             semua = []
             seen = set()
@@ -987,15 +1047,19 @@ with tab_cek:
                 nt_rows.extend(
                     (row, kolom)
                     for row in sb.table("non_tender").select(nt_select)
-                    .ilike(kolom, f"%{query}%").limit(200).execute().data
+                    .ilike(kolom, pattern).limit(200).execute().data
                 )
 
-            default_names = {"", "belum ada pemenang", "belum ada kontrak", "-", "nan", "none"}
+            seen_non_tender_codes = set()
             for row, kolom_match in nt_rows:
                 provider = str(row.get(kolom_match) or "").strip()
-                if provider.lower() in default_names:
+                if provider.lower() in _DEFAULT_PROVIDER_NAMES:
                     continue
-                key = ("Non Tender", row.get("kode_tender"), provider)
+                nt_code = _text(row.get("kode_tender"))
+                if not nt_code or nt_code in seen_non_tender_codes:
+                    continue
+                seen_non_tender_codes.add(nt_code)
+                key = ("Non Tender", nt_code, provider)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -1019,7 +1083,7 @@ with tab_cek:
 
             info_select = (
                 "kode_tender,nama_paket,instansi,tahapan,jenis_pengadaan,"
-                "kontrak_mulai,kontrak_selesai,link_detail"
+                "nama_pemenang,pemenang_berkontrak,kontrak_mulai,kontrak_selesai,link_detail"
             )
             info_rows = []
             tender_codes = [r["kode_tender"] for r in semua if r.get("__source") == "Tender"]
@@ -1061,27 +1125,56 @@ with tab_cek:
 
             df_merged["_is_pemenang"] = df_merged["is_pemenang"].apply(_is_pemenang)
             df_merged["_berjalan"] = df_merged["tahapan"].apply(_is_berjalan)
-            df_merged["_pemenang_berjalan"] = df_merged["_is_pemenang"] & df_merged["_berjalan"]
+            df_merged["_is_berkontrak"] = df_merged.apply(
+                lambda row: _is_contract_holder(
+                    row.get("nama_peserta"), row.get("pemenang_berkontrak")
+                ),
+                axis=1,
+            )
+            df_merged["_pemenang_berjalan"] = (
+                df_merged["_is_pemenang"]
+                & df_merged["_berjalan"]
+                & df_merged["_is_berkontrak"]
+            )
+            df_merged["_skp_perlu_verifikasi"] = (
+                df_merged["_is_pemenang"]
+                & df_merged["_is_berkontrak"]
+                & ~df_merged["_berjalan"]
+            )
+            df_merged["skp_status"] = df_merged.apply(_skp_row_status, axis=1)
             df_merged["status_peran"] = df_merged["_is_pemenang"].map({
                 True: "🏆 Pemenang",
                 False: "👤 Peserta — bukan pemenang",
             })
 
-            nama_unik = df_merged["nama_peserta"].dropna().unique()
+            df_merged["_provider_key"] = df_merged.apply(
+                lambda row: "|".join(
+                    _provider_key(row.get("nama_peserta"), row.get("npwp"))
+                ),
+                axis=1,
+            )
+            nama_unik = df_merged["_provider_key"].dropna().unique()
 
-            for nama_psd in sorted(nama_unik):
-                df_nama = df_merged[df_merged["nama_peserta"] == nama_psd]
+            for provider_key in sorted(nama_unik):
+                df_nama = df_merged[df_merged["_provider_key"] == provider_key]
+                nama_psd = _text(df_nama["nama_peserta"].iloc[0]) or "Penyedia"
                 total_ikut = len(df_nama)
                 menang = int(df_nama["_is_pemenang"].sum())
                 peserta_bukan_pemenang = total_ikut - menang
                 berjalan = df_nama["_berjalan"].sum()
                 menang_berjalan = int(df_nama["_pemenang_berjalan"].sum())
+                perlu_verifikasi = int(df_nama["_skp_perlu_verifikasi"].sum())
+                konservatif = menang_berjalan + perlu_verifikasi
                 npwp_val = df_nama["npwp"].dropna().iloc[0] if not df_nama["npwp"].dropna().empty else "-"
 
-                skp_limit = 5
+                skp_limit = SKP_LIMIT
                 skp_over = menang_berjalan > skp_limit
                 card_accent = "#dc3545" if skp_over else ("#d89b00" if menang_berjalan >= 4 else "#28a745")
                 flag = "🔴 OVER LIMIT!" if skp_over else ("🟡 Mendekati Limit" if menang_berjalan >= 4 else "🟢 Aman")
+
+                if perlu_verifikasi:
+                    card_accent = "#d89b00"
+                    flag = "PERLU VERIFIKASI"
 
                 st.markdown(f"""
 <div class="spse-provider-card" style="--spse-accent:{card_accent};border-radius:8px;padding:12px 16px;margin-bottom:8px;">
@@ -1093,7 +1186,8 @@ with tab_cek:
     <div style="text-align:right;">
       <span style="font-size:18px;font-weight:bold;">{flag}</span><br>
       <span style="font-size:12px;">Paket dimenangkan: <strong>{menang}</strong></span><br>
-      <span style="font-size:12px;">SKP aktif sebagai pemenang: <strong>{menang_berjalan}</strong> dari batas {skp_limit}</span>
+      <span style="font-size:12px;">SKP aktif terverifikasi: <strong>{menang_berjalan}</strong> dari batas {skp_limit}</span>
+      <span style="font-size:12px;">Kontrak perlu verifikasi: <strong>{perlu_verifikasi}</strong>; konservatif: <strong>{konservatif}/{skp_limit}</strong></span>
     </div>
   </div>
   <div style="display:flex;gap:24px;margin-top:8px;font-size:13px;">
@@ -1110,9 +1204,23 @@ with tab_cek:
             st.markdown(f"**📋 Detail Semua Keterlibatan ({len(df_merged)} baris)**")
             st.caption("🏆 Pemenang dihitung sebagai kemenangan. 👤 Peserta — bukan pemenang hanya menunjukkan ikut tender dan tidak dihitung sebagai kemenangan/SKP.")
 
-            kolom_cek = ["nama_peserta", "npwp", "nama_paket", "instansi", "jenis_pengadaan", "tahapan",
-                         "harga_penawaran", "harga_negosiasi", "skor_akhir",
-                         "alasan_gugur", "status_peran", "kontrak_mulai", "kontrak_selesai", "link_detail"]
+            st.info(
+                "SKP hanya menghitung pemenang yang sudah berkontrak dan tahap SPSE-nya aktif. "
+                "Kontrak pada tahap terminal perlu verifikasi manual karena data PHO/selesai fisik "
+                "belum tersedia di scraper. Jadwal kontrak adalah jendela penandatanganan."
+            )
+
+            kolom_cek = [
+                "nama_peserta",
+                "nama_paket",
+                "instansi",
+                "jenis_pengadaan",
+                "tahapan",
+                "status_peran",
+                "skp_status",
+                "kontrak_mulai",
+                "kontrak_selesai",
+            ]
             kolom_ada = [c for c in kolom_cek if c in df_merged.columns]
             df_cek_tampil = df_merged.sort_values(
                 ["nama_peserta", "_is_pemenang"], ascending=[True, False]
@@ -1120,15 +1228,32 @@ with tab_cek:
 
             def _render_cek_html(df_c):
                 cols = df_c.columns.tolist()
+                display_headers = {
+                    "nama_peserta": "Penyedia",
+                    "nama_paket": "Paket",
+                    "instansi": "Instansi",
+                    "jenis_pengadaan": "Jenis Pengadaan",
+                    "tahapan": "Tahapan",
+                    "status_peran": "Status Peran",
+                    "skp_status": "SKP dihitung",
+                    "kontrak_mulai": "Jadwal TTD Kontrak Mulai",
+                    "kontrak_selesai": "Jadwal TTD Kontrak Akhir",
+                }
                 header = "".join(
-                    f'<th style="padding:6px 10px;text-align:left;border-bottom:2px solid #ddd;font-size:11px;white-space:nowrap;background:#f8f9fa;">{c}</th>'
+                    f'<th style="padding:6px 10px;text-align:left;border-bottom:2px solid #ddd;font-size:11px;white-space:nowrap;background:#f8f9fa;">{display_headers.get(c, c)}</th>'
                     for c in cols
                 )
                 rows_html = ""
                 for _, row in df_c.iterrows():
-                    is_win = _is_pemenang(row.get("_is_pemenang", row.get("is_pemenang", False)))
-                    berjalan_row = _is_berjalan(row.get("tahapan", ""))
-                    if is_win and berjalan_row:
+                    is_win = "Pemenang" in _text(row.get("status_peran"))
+                    berjalan_row = "tahap SPSE aktif" in _text(row.get("skp_status"))
+                    perlu_verifikasi_row = _text(row.get("skp_status")).startswith("Perlu verifikasi")
+                    belum_berkontrak_row = "belum berkontrak" in _text(row.get("skp_status"))
+                    if is_win and perlu_verifikasi_row:
+                        row_class = "spse-row-winner-review"
+                    elif is_win and belum_berkontrak_row:
+                        row_class = "spse-row-winner-pending"
+                    elif is_win and berjalan_row:
                         row_class = "spse-row-winner-running"
                     elif is_win:
                         row_class = "spse-row-winner-done"
