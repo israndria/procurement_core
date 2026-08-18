@@ -1371,7 +1371,21 @@ def _sisip_2ba_pljkk(pdf_path, folder):
         pass  # best-effort, jangan gagalkan cetak utama
 
 
-def _export_sheet_pdf(excel_path, sheet_name, out_pdf, landscape=True, fit_wide=None, fit_tall=None):
+def _configure_inserted_excel_sheet(ws, landscape=True, fit_wide=1, fit_tall=False):
+    """Keep inserted Excel tables readable: fit width, let height flow."""
+    if landscape:
+        ws.PageSetup.Orientation = 2  # xlLandscape
+    setup = ws.PageSetup
+    setup.Zoom = False
+    if fit_wide is not None:
+        setup.FitToPagesWide = fit_wide
+    if fit_tall is not None:
+        # False means automatic height in Excel; forcing 1 makes 180-row
+        # negotiation sheets unreadably small.
+        setup.FitToPagesTall = fit_tall
+
+
+def _export_sheet_pdf(excel_path, sheet_name, out_pdf, landscape=True, fit_wide=1, fit_tall=False):
     """Export 1 sheet Excel -> PDF. Return True jika sukses, False jika sheet tak ada/gagal."""
     import win32com.client
     xlApp = None
@@ -1385,14 +1399,7 @@ def _export_sheet_pdf(excel_path, sheet_name, out_pdf, landscape=True, fit_wide=
             ws = wb_xl.Sheets(sheet_name)
         except Exception:
             return False
-        if landscape:
-            ws.PageSetup.Orientation = 2  # xlLandscape
-        if fit_wide is not None or fit_tall is not None:
-            ws.PageSetup.Zoom = False
-            if fit_wide is not None:
-                ws.PageSetup.FitToPagesWide = fit_wide
-            if fit_tall is not None:
-                ws.PageSetup.FitToPagesTall = fit_tall
+        _configure_inserted_excel_sheet(ws, landscape, fit_wide, fit_tall)
         ws.ExportAsFixedFormat(0, out_pdf)  # 0 = xlTypePDF
         return True
     except Exception:
@@ -1456,13 +1463,363 @@ def _stitch_excel_at_anchor(word_pdf, anchor_excel_pairs, out_pdf):
     return _safe_write_pdf(writer, out_pdf)
 
 
-def _build_bapljkk_final_pdf(wd_doc, folder, kode):
-    """Export BA Word + 2 copy sheet 7.2 lalu sisipkan Summary SPSE."""
+def _clean_runtime_value(value):
+    """Return a meaningful merge value; formula literals are not data."""
+    text = str(value or "").strip()
+    if not text or text.casefold() in {"none", "null", "0"} or text.startswith("="):
+        return ""
+    return text
+
+
+def _is_plpk_ba_path(word_path):
+    return "5. ba plpk" in os.path.basename(str(word_path)).casefold()
+
+
+def _normalize_plpk_merge_data(data):
+    """Normalize PK method values before unlinking MERGEFIELD results.
+
+    Nilai metode pada beberapa workbook lama sudah tersimpan sebagai donor
+    konsultansi. Karena nilai itu berasal dari hasil MERGEFIELD, mengganti
+    teks statis di body saja tidak cukup; normalisasi harus dilakukan sebelum
+    field di-unlink menjadi teks biasa.
+    """
+    if not data:
+        return
+    donor = re.compile(r"Pengadaan Langsung Jasa Konsultansi Konstruksi", re.I)
+    donor_short = re.compile(r"jasa konsultansi konstruksi", re.I)
+    for key, value in list(data.items()):
+        if not isinstance(value, str):
+            continue
+        updated = donor.sub("Pengadaan Langsung Pekerjaan Konstruksi", value)
+        updated = donor_short.sub("pekerjaan konstruksi", updated)
+        if updated != value:
+            data[key] = updated
+
+
+def _plpk_text(value):
+    return re.sub(r"\s+", " ", str(value or "").replace("\r", " ").replace("\a", " ")).strip()
+
+
+def _patch_plpk_layout_xml(docx_path, data=None):
+    """Remove PLPK navigation labels before Word opens the temporary copy.
+
+    COM deletion of paragraphs forces Word to repaginate after every delete and
+    can hang on this 26-page document. XML patching is deterministic and keeps
+    the official template untouched.
+    """
+    import html
+    import tempfile
+    import zipfile
+    from xml.sax.saxutils import escape as xml_escape
+
+    labels = {
+        ".1 daftar hadir pembuktian kualifikasi",
+        "5.1 daftar hadir pembuktian kualifikasi",
+        "5.2 daftar hadir pembuktian kualifikasi",
+        "6.a. ba klarifikasi skp, alat, personel",
+        "6.b. ba klarifikasi skp, alat, personel",
+        "8.a. ba klarifikasi & negosiasi (hs)",
+        "9. ba penetapan pemenang",
+    }
+    title_prefixes = (
+        "BERITA ACARA",
+        "DAFTAR HADIR",
+        "TANDA TERIMA",
+    )
+    paragraph_pattern = re.compile(r"<w:p\b[^>]*>.*?</w:p\s*>", re.S)
+
+    def paragraph_text(paragraph_xml):
+        text = "".join(re.findall(r"<w:t\b[^>]*>(.*?)</w:t\s*>", paragraph_xml, re.S))
+        return _plpk_text(html.unescape(text))
+
+    def set_spacing(paragraph_xml, before=None, after=None):
+        values = []
+        if before is not None:
+            values.append(("before", str(before)))
+        if after is not None:
+            values.append(("after", str(after)))
+        if not values:
+            return paragraph_xml
+
+        def patch_spacing(match):
+            tag = match.group(0)
+            for name, value in values:
+                attr = rf'(?P<prefix>w:{name}\s*=\s*")[^"]*(?P<suffix>")'
+                if re.search(attr, tag):
+                    tag = re.sub(attr, rf"\g<prefix>{value}\g<suffix>", tag, count=1)
+                else:
+                    tag = tag[:-2] + f' w:{name}="{value}"/>'
+            return tag
+
+        if re.search(r"<w:spacing\b[^>]*/>", paragraph_xml):
+            return re.sub(r"<w:spacing\b[^>]*/>", patch_spacing, paragraph_xml, count=1)
+        if re.search(r"<w:spacing\b[^>]*>.*?</w:spacing\s*>", paragraph_xml, re.S):
+            return re.sub(
+                r"<w:spacing\b[^>]*>.*?</w:spacing\s*>",
+                patch_spacing,
+                paragraph_xml,
+                count=1,
+                flags=re.S,
+            )
+        spacing = "<w:spacing" + "".join(f' w:{name}="{value}"' for name, value in values) + "/>"
+        if re.search(r"<w:pPr\b[^>]*>", paragraph_xml):
+            return re.sub(r"</w:pPr\s*>", spacing + "</w:pPr>", paragraph_xml, count=1)
+        return re.sub(r"(<w:p\b[^>]*>)", r"\1<w:pPr>" + spacing + "</w:pPr>", paragraph_xml, count=1)
+
+    def normalize_main_ba_heading(paragraph_xml):
+        """Match the main BA heading style used by the other PLPK sections."""
+        heading = '<w:pStyle w:val="BodyText"/><w:ind w:left="709" w:right="707"/><w:jc w:val="center"/>'
+
+        def patch_ppr(match):
+            ppr = match.group(0)
+            ppr = re.sub(r"<w:pStyle\b[^>]*/>", "", ppr, count=1)
+            ppr = re.sub(r"<w:ind\b[^>]*/>", "", ppr, count=1)
+            ppr = re.sub(r"<w:jc\b[^>]*/>", "", ppr, count=1)
+            return ppr.replace("<w:pPr>", "<w:pPr>" + heading, 1)
+
+        if re.search(r"<w:pPr\b[^>]*>.*?</w:pPr\s*>", paragraph_xml, re.S):
+            return re.sub(
+                r"<w:pPr\b[^>]*>.*?</w:pPr\s*>",
+                patch_ppr,
+                paragraph_xml,
+                count=1,
+                flags=re.S,
+            )
+        return re.sub(
+            r"(<w:p\b[^>]*>)",
+            r"\1<w:pPr>" + heading + "</w:pPr>",
+            paragraph_xml,
+            count=1,
+        )
+
+    try:
+        with zipfile.ZipFile(docx_path, "r") as source:
+            items = source.infolist()
+            files = {item.filename: source.read(item.filename) for item in items}
+        document_xml = files["word/document.xml"].decode("utf-8")
+        if data:
+            agency = (
+                _clean_runtime_value(data.get("SKPDOPD"))
+                or _clean_runtime_value(data.get("SKPD"))
+                or _clean_runtime_value(data.get("Nama_Dinas"))
+                or "Dinas terkait"
+            )
+            # Cached field results and ordinary text in the legacy donor can
+            # coexist in one paragraph. Normalize both before Word opens the
+            # file; COM Find cannot reliably cross that field boundary.
+            for old_text, new_text in (
+                (
+                    "Dinas Pekerjaan Umum dan Penataan Ruang Kabupaten Tapin",
+                    agency,
+                ),
+                ("Bidang Bina Marga ", ""),
+            ):
+                document_xml = document_xml.replace(
+                    xml_escape(old_text), xml_escape(str(new_text or ""))
+                )
+        for old_text, new_text in (
+            (
+                "Pengadaan Langsung Jasa Konsultansi Konstruksi",
+                "Pengadaan Langsung Pekerjaan Konstruksi",
+            ),
+            ("jasa konsultansi konstruksi", "pekerjaan konstruksi"),
+        ):
+            if old_text in document_xml:
+                document_xml = document_xml.replace(old_text, new_text)
+                changed = True
+        original_blocks = paragraph_pattern.findall(document_xml)
+        output_blocks = list(original_blocks)
+        changed = False
+        for index, block in enumerate(original_blocks):
+            if paragraph_text(block).casefold() in labels:
+                output_blocks[index] = ""
+                changed = True
+
+        for index, block in enumerate(output_blocks):
+            normalized = paragraph_text(block)
+            if not block or not normalized.upper().startswith(title_prefixes):
+                continue
+
+            # Salinan pertama daftar hadir klarifikasi memiliki paragraf kosong
+            # ekstra setelah BA sebelumnya. Spacing=0 saja tetap menyisakan
+            # tinggi baris; buang hanya paragraf kosong tepat sebelum heading
+            # ini agar dua salinan benar-benar punya jarak yang sama.
+            if normalized.upper().startswith("DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"):
+                previous = index - 1
+                while previous >= 0 and not paragraph_text(output_blocks[previous]):
+                    if re.search(
+                        r"<w:br\b[^>]*w:type\s*=\s*['\"]page['\"]|<w:lastRenderedPageBreak\b",
+                        output_blocks[previous],
+                    ):
+                        updated = set_spacing(output_blocks[previous], before=0, after=0)
+                        if updated != output_blocks[previous]:
+                            output_blocks[previous] = updated
+                            changed = True
+                        break
+                    if output_blocks[previous]:
+                        output_blocks[previous] = ""
+                        changed = True
+                    previous -= 1
+
+            if normalized == "BERITA ACARA HASIL PENGADAAN LANGSUNG":
+                updated = normalize_main_ba_heading(block)
+                if updated != block:
+                    output_blocks[index] = updated
+                    block = updated
+                    changed = True
+
+            updated = set_spacing(block, before=0)
+            if updated != block:
+                output_blocks[index] = updated
+                changed = True
+            previous = index - 1
+            while previous >= 0 and not output_blocks[previous]:
+                previous -= 1
+            while previous >= 0 and not paragraph_text(output_blocks[previous]):
+                updated = set_spacing(output_blocks[previous], before=0, after=0)
+                if updated != output_blocks[previous]:
+                    output_blocks[previous] = updated
+                    changed = True
+                previous -= 1
+
+        if not changed:
+            return
+        index = iter(output_blocks)
+        files["word/document.xml"] = paragraph_pattern.sub(lambda _match: next(index), document_xml).encode("utf-8")
+        temp_fd, temp_name = tempfile.mkstemp(
+            prefix="plpk_layout_", suffix=".tmp", dir=os.path.dirname(docx_path)
+        )
+        os.close(temp_fd)
+        try:
+            with zipfile.ZipFile(temp_name, "w", zipfile.ZIP_DEFLATED) as target:
+                for item in items:
+                    target.writestr(item, files[item.filename])
+            os.replace(temp_name, docx_path)
+        finally:
+            if os.path.exists(temp_name):
+                os.remove(temp_name)
+    except Exception:
+        pass
+
+
+def _normalize_plpk_static_content(wd_doc, data):
+    """Remove stale JKK donor text from the PLPK BA copy before export.
+
+    The historical PLPK donor contains a few ordinary-text sample values that
+    are not MERGEFIELDs (method and Nota Dinas). Replacing only those complete
+    paragraphs keeps the template layout and all real merge fields intact.
+    """
+    if not data:
+        return
+
+    def _agency():
+        return (
+            _clean_runtime_value(data.get("SKPDOPD"))
+            or _clean_runtime_value(data.get("SKPD"))
+            or _clean_runtime_value(data.get("Nama_Dinas"))
+            or "Dinas terkait"
+        )
+
+    def _find_value(*keys):
+        for key in keys:
+            value = _clean_runtime_value(data.get(key))
+            if value:
+                return value
+        return ""
+
+    nama_paket = _find_value("Nama_Paket", "NamaTender", "Nama_Tender")
+    nomor_nota = _find_value("Nomor_Nota_Dinas")
+    tanggal_nota = _find_value("Tanggal_Nota_Dinas")
+    nomor_rekom = _find_value("Nomor_Surat_Rekomendasi", "Nomor_Rekomendasi")
+    tanggal_rekom = _find_value("Tanggal_Surat_Rekomendasi", "Tanggal_Rekomendasi")
+
+    rekom_meta = ""
+    if nomor_rekom:
+        rekom_meta += f" Nomor: {nomor_rekom}"
+    if tanggal_rekom:
+        rekom_meta += f" tanggal {tanggal_rekom}"
+    rekom = (
+        f"Surat Rekomendasi Pejabat Pembuat Komitmen{rekom_meta}."
+        if rekom_meta
+        else "Surat Rekomendasi Pejabat Pembuat Komitmen terkait paket pekerjaan ini."
+    )
+
+    def _replace_all(old_text, new_text):
+        if not old_text or old_text == new_text:
+            return
+        # Content.Find mencakup body utama dan cell tabel tanpa memicu loop
+        # ReplaceAll pada setiap Table.Range (bug Word COM pada replacement
+        # kosong/teks yang terpecah). Nilai MERGEFIELD sudah dinormalisasi
+        # sebelum unlink, sehingga Find ini hanya menangani literal donor.
+        find = wd_doc.Content.Find
+        find.ClearFormatting()
+        find.Replacement.ClearFormatting()
+        find.Text = old_text
+        find.Replacement.Text = str(new_text or "-")
+        find.Forward = True
+        find.Wrap = 1  # wdFindContinue
+        find.Format = False
+        find.MatchCase = False
+        find.MatchWholeWord = False
+        find.Execute(Replace=2)  # wdReplaceAll
+
+    provider = (
+        _find_value("Nama_Perusahaan", "Nama_Penyedia", "Nama_Peserta")
+        or "Penyedia"
+    )
+    npwp = _find_value("NPWP_Perusahaan", "Nomor_NPWP", "NPWP") or "-"
+    address = _find_value("Alamat_Perusahaan", "Alamat_Kantor") or "-"
+    kode_paket = _find_value("Kode_Paket", "KodePaket", "kode_paket") or "-"
+    opening_no = _find_value("No_BA_Pembukaan_Penawaran")
+    qualification_no = _find_value("No_BA_Pembuktian_Kualifikasi")
+    clarification_no = _find_value(
+        "No_BA_Klarifikasi_Negosiasi",
+        "No_BA_Klarifikasi__Negosiasi",
+        "No_BA_Klarifikasi_&_Negosiasi",
+    )
+    result_no = _find_value(
+        "No_BA_Hasil_Pengadaan_Langsung", "Nomor_BA_Hasil_Pengadaan_Langsung"
+    )
+    cover_no = _find_value("Nomor_BA_Pengantar")
+    dokpil_no = _find_value("Nomor_Dokpil")
+    opening_date = _find_value("Tanggal_Pembukaan_Penawaran")
+
+    # The PLPK source is a legacy donor. These are ordinary text, not fields,
+    # and therefore survive normal mail merge. Replace only known donor
+    # literals, preserving layout and all actual MERGEFIELDs.
+    replacements = {
+        "Konsultan Perencanaan Paket 30": nama_paket or "Paket pekerjaan ini",
+        "Dinas Pekerjaan Umum dan Penataan Ruang Kabupaten Tapin": _agency(),
+        "Pengadaan Langsung Jasa Konsultansi Konstruksi": "Pengadaan Langsung Pekerjaan Konstruksi",
+        "jasa konsultansi konstruksi": "pekerjaan konstruksi",
+        "CV.SATRIATAMA TEKNIK": provider,
+        "12.889.344.3-732.000": npwp,
+        "JALAN SIDOMULYO 1 RT 003 RW 001 , GUNTUNG PAYUNG LANDASAN ULIN, KOTA BANJARBARU": address,
+        "10930000000": kode_paket,
+        "000.3.3/01/PL/PP-25/KPP30/DPUPR/2026": dokpil_no or "-",
+        "000.3.3/03/PL/PP-25/KPP30/DPUPR/2026": opening_no or "-",
+        "000.3.3/04/PL/PP-25/KPP30/DPUPR/2026": qualification_no or "-",
+        "000.3.3/06/PL/PP-25/KPP30/DPUPR/2026": clarification_no or "-",
+        "000.3.3/08/PL/PP-25/KPP30/DPUPR/2026": result_no or "-",
+        "000.3.3/09/PL/PP-25/KPP30/DPUPR/2026": cover_no or "-",
+        "10 Juli 2026": opening_date or "-",
+        "Bidang Bina Marga ": "",
+        "Nomor: tanggal 12 Mei 2026": f"Nomor: {nomor_nota or '-'} tanggal {tanggal_nota or '-'}",
+        "Surat Rekomendasi Pejabat Pembuat Komitmen Nomor: 600.1.15.4/009/Srt-Rekom/PPK/BM/V/2026 tanggal 12 Mei 2026.": rekom,
+    }
+    # Longer donor phrases must win before their shorter components.
+    for old_text, new_text in sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True):
+        _replace_all(old_text, new_text)
+
+
+def _build_ba_pl_final_pdf(wd_doc, folder, kode, jenis="PLJKK"):
+    """Export BA Word + sheet 7.2 copies, then insert matching PL summary."""
     from pypdf import PdfReader, PdfWriter
     import pdfplumber
     import win32com.client
 
-    pdf_path = _fit_path(folder, f"BA_PLJKK_{kode}.pdf")
+    jenis = "PLPK" if str(jenis).upper() == "PLPK" else "PLJKK"
+    pdf_path = _fit_path(folder, f"BA_{jenis}_{kode}.pdf")
     tmp_word = pdf_path + "_tmpword.pdf"
     tmp_72 = pdf_path + "_tmp72.pdf"
     xlsm_paths = glob.glob(os.path.join(folder, "*.xlsm"))
@@ -1482,7 +1839,9 @@ def _build_bapljkk_final_pdf(wd_doc, folder, kode):
                 xl_app = win32com.client.DispatchEx("Excel.Application")
                 xl_app.Visible = False
                 wb = xl_app.Workbooks.Open(xlsm_path, ReadOnly=True)
-                wb.Sheets("7.2 Dengan Nego").ExportAsFixedFormat(
+                _sheet72 = wb.Sheets("7.2 Dengan Nego")
+                _configure_inserted_excel_sheet(_sheet72)
+                _sheet72.ExportAsFixedFormat(
                     Type=0, Filename=tmp_72, Quality=0,
                     IncludeDocProperties=True, IgnorePrintAreas=False,
                     OpenAfterPublish=False,
@@ -1525,13 +1884,18 @@ def _build_bapljkk_final_pdf(wd_doc, folder, kode):
             except Exception: pass
 
     try:
-        from gabung_ba_pljkk import gabung as gabung_ba_pljkk
-        result = gabung_ba_pljkk(folder)
+        from gabung_ba_pljkk import gabung as gabung_ba_pl
+        result = gabung_ba_pl(folder, jenis)
         if result.get("ok"):
             return result["output"]
     except Exception:
         pass
     return pdf_path
+
+
+def _build_bapljkk_final_pdf(wd_doc, folder, kode):
+    """Backward-compatible PLJKK wrapper."""
+    return _build_ba_pl_final_pdf(wd_doc, folder, kode, "PLJKK")
 
 
 def merge_word(word_path, data, mode="buka", pdf_name=""):
@@ -1549,7 +1913,10 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
 
     # Mode bapljkk: copy template -> (Merged), replace MERGEFIELD dari Excel, baru export.
     # (sebelumnya buka ReadOnly tanpa merge -> PDF tampil cached hasil merge lama/template)
-    if mode in ("pdf_bapljkk", "printer_bapljkk"):
+    if mode in ("pdf_bapljkk", "printer_bapljkk", "pdf_baplp", "printer_baplp"):
+        jenis_ba = "PLPK" if mode in ("pdf_baplp", "printer_baplp") else "PLJKK"
+        if jenis_ba == "PLPK":
+            _normalize_plpk_merge_data(data)
         _word_path_win = os.path.abspath(os.path.normpath(word_path))
         _folder = os.path.dirname(_word_path_win)
         _base_b, _ext_b = os.path.splitext(os.path.basename(_word_path_win))
@@ -1568,6 +1935,8 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         _blank_empty_participant_rows_xml(_merged_b, data)
         _strip_mailmerge_datasource(_merged_b)
         normalize_word_document_xml_in_zip(_merged_b)
+        if jenis_ba == "PLPK":
+            _patch_plpk_layout_xml(_merged_b, data)
         pythoncom.CoInitialize()
         wdApp = win32com.client.DispatchEx("Word.Application")
         wdApp.DisplayAlerts = 0
@@ -1586,9 +1955,11 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 _trim_blank_participant_rows(wdDoc)
                 _blank_empty_participant_rows(wdDoc, data)
                 _protect_signature_layout(wdDoc)
+                if jenis_ba == "PLPK":
+                    _normalize_plpk_static_content(wdDoc, data)
                 wdDoc.Save()
-            if mode == "pdf_bapljkk":
-                _kode_pljkk = pdf_name if pdf_name else "PL"
+            if mode in ("pdf_bapljkk", "pdf_baplp"):
+                _kode_ba = pdf_name if pdf_name else "PL"
                 _xlsm_path = None
                 try:
                     import glob as _glob_pl
@@ -1598,14 +1969,14 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                         _xl_pl = win32com.client.DispatchEx("Excel.Application")
                         _xl_pl.Visible = False
                         _wb_pl = _xl_pl.Workbooks.Open(_xlsm_path, ReadOnly=True)
-                        _ku_pl = str(_wb_pl.Sheets("@ Master Data").Range("G2").Value).strip()
+                        _ku_pl = str(_wb_pl.Sheets("@ Master Data").Range("F2").Value).strip()
                         _wb_pl.Close(False)
                         _xl_pl.Quit()
                         if _ku_pl and _ku_pl not in ("", "None", "null"):
-                            _kode_pljkk = _ku_pl
+                            _kode_ba = _ku_pl
                 except Exception:
                     pass
-                _pdf_path = _fit_path(_folder, f"BA_PLJKK_{_kode_pljkk}.pdf")
+                _pdf_path = _fit_path(_folder, f"BA_{jenis_ba}_{_kode_ba}.pdf")
                 _tmp_word = _pdf_path + "_tmpword.pdf"
                 _tmp_72   = _pdf_path + "_tmp72.pdf"
                 # Export Word -> tmp
@@ -1628,6 +1999,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                         except Exception:
                             pass
                         if _ws72 is not None:
+                            _configure_inserted_excel_sheet(_ws72)
                             _ws72.ExportAsFixedFormat(
                                 Type=0,  # xlTypePDF
                                 Filename=_tmp_72,
@@ -1688,22 +2060,22 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     # Tidak ada sheet 7.2, rename tmp -> final
                     import shutil as _sh
                     _sh.move(_tmp_word, _pdf_path)
-                # Bentuk BA final sama seperti tombol "Gabung BA PLJKK".
+                # Bentuk BA final sama seperti tombol "Gabung BA PLPK/PLJKK".
                 # File Summary SPSE tersimpan di subfolder 7, bukan di root,
                 # sehingga helper lama tidak pernah menemukannya saat Cetak BA.
                 try:
-                    from gabung_ba_pljkk import gabung as _gabung_ba_pljkk
-                    _gabung_result = _gabung_ba_pljkk(_folder)
+                    from gabung_ba_pljkk import gabung as _gabung_ba_pl
+                    _gabung_result = _gabung_ba_pl(_folder, jenis_ba)
                     if _gabung_result.get("ok"):
                         _pdf_path = _gabung_result["output"]
                 except Exception:
                     pass
                 show_success(_pdf_path)
-            elif mode == "printer_bapljkk":
+            elif mode in ("printer_bapljkk", "printer_baplp"):
                 # Printer harus memakai PDF final, bukan Word mentah.
                 # Word mentah melewati Summary SPSE dan dua copy sheet 7.2.
                 _printer_name = pdf_name
-                _final_pdf = _build_bapljkk_final_pdf(wdDoc, _folder, "PL")
+                _final_pdf = _build_ba_pl_final_pdf(wdDoc, _folder, "PL", jenis_ba)
                 import win32api
                 _result = win32api.ShellExecute(
                     0, "printto", _final_pdf, f'"{_printer_name}"', _folder, 0
@@ -1714,7 +2086,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 show_print_success(_printer_name)
             wdDoc.Close(False)
         except Exception as e:
-            show_error(f"Error cetak BA PLJKK:\n{e}")
+            show_error(f"Error cetak BA {jenis_ba}:\n{e}")
         finally:
             wdApp.Quit()
             pythoncom.CoUninitialize()
