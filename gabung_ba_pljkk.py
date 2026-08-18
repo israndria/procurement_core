@@ -1,9 +1,9 @@
 """
-gabung_ba_pljkk.py — Gabung BA Utama PLJKK + Sisipan BA Evaluasi & BA Hasil Non Tender.
+gabung_ba_pljkk.py — Gabung BA Utama PLJKK/PLPK + sisipan BA evaluasi/hasil.
 
 Logic:
 1. Deteksi file input:
-   - BA Utama: BA_PLJKK_*.pdf
+   - BA Utama: BA_PLJKK_*.pdf atau BA_PLPK_*.pdf
    - BA Evaluasi: 7. Berita Acara + Summary Non Tender/5. BA Evaluasi Penawaran PL-*.pdf
    - BA Hasil: 7. Berita Acara + Summary Non Tender/7. BA Hasil Non Tender PL-*.pdf
 2. Gunakan pdfplumber untuk mencari:
@@ -14,15 +14,16 @@ Logic:
    - Sisipkan BA Evaluasi sebelum daftar hadir pembuktian occurrence ke-2.
    - Duplikasi halaman akhir BA Klarifikasi sebelum sheet 7.2.
    - Sisipkan BA Hasil setelah daftar hadir klarifikasi occurrence ke-1.
-4. Output ke "7. Berita Acara + Summary Non Tender/BA_PLJKK_{kode}.pdf"
+4. Output ke "7. Berita Acara + Summary Non Tender/BA_{jenis}_{kode}.pdf"
 
 Usage:
-    python gabung_ba_pljkk.py <folder_paket>
+    python gabung_ba_pljkk.py <folder_paket> [PLJKK|PLPK]
 """
 import os
 import sys
 import glob
 import ctypes
+import shutil
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
 
@@ -30,8 +31,14 @@ from pypdf import PdfReader, PdfWriter
 SUBFOLDER = "7. Berita Acara + Summary Non Tender"
 
 
-def deteksi_file(folder_paket: str) -> dict:
+def _normalize_jenis(jenis: str) -> str:
+    return "PLPK" if str(jenis or "").upper() == "PLPK" else "PLJKK"
+
+
+def deteksi_file(folder_paket: str, jenis: str = "PLJKK") -> dict:
     """Deteksi file-file input di root folder_paket."""
+    jenis = _normalize_jenis(jenis)
+    prefix = f"BA_{jenis}_"
     res = {
         'ba_utama': None,
         'ba_pembuktian': None,
@@ -41,11 +48,11 @@ def deteksi_file(folder_paket: str) -> dict:
         'err': None
     }
     
-    # 1. BA Utama (BA_PLJKK_*.pdf)
-    ba_utama_pattern = os.path.join(folder_paket, "BA_PLJKK_*.pdf")
+    # 1. BA Utama sesuai konteks workflow (PLJKK atau PLPK).
+    ba_utama_pattern = os.path.join(folder_paket, f"{prefix}*.pdf")
     ba_utama_files = glob.glob(ba_utama_pattern)
     if not ba_utama_files:
-        res['err'] = "File BA_PLJKK_*.pdf tidak ditemukan di root folder paket."
+        res['err'] = f"File {prefix}*.pdf tidak ditemukan di root folder paket."
         return res
     
     # Pilih yang terbaru jika ada lebih dari 1
@@ -56,11 +63,11 @@ def deteksi_file(folder_paket: str) -> dict:
     if len(ba_utama_files_sorted) > 1:
         res['ba_pembuktian'] = ba_utama_files_sorted[1]
     
-    # Ekstrak kode dari nama file (BA_PLJKK_{kode}.pdf)
+    # Ekstrak kode dari nama file (BA_{jenis}_{kode}.pdf)
     base_name = os.path.basename(res['ba_utama'])
     name_no_ext, _ = os.path.splitext(base_name)
-    if name_no_ext.startswith("BA_PLJKK_"):
-        res['kode'] = name_no_ext[len("BA_PLJKK_"):]
+    if name_no_ext.startswith(prefix):
+        res['kode'] = name_no_ext[len(prefix):]
     else:
         res['kode'] = "FULL"
         
@@ -121,8 +128,9 @@ def cari_halaman_sisipan(pdf_path: str) -> tuple:
     return p1, p2, q1, q2
 
 
-def gabung(folder_paket: str) -> dict:
-    files = deteksi_file(folder_paket)
+def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
+    jenis = _normalize_jenis(jenis)
+    files = deteksi_file(folder_paket, jenis)
     if files['err']:
         return {'ok': False, 'output': '', 'pesan': files['err'], 'warning': None}
         
@@ -136,8 +144,22 @@ def gabung(folder_paket: str) -> dict:
     out_dir = os.path.join(folder_paket, SUBFOLDER)
     os.makedirs(out_dir, exist_ok=True)
     
-    output_filename = f"BA_PLJKK_{kode}.pdf"
+    output_filename = f"BA_{jenis}_{kode}.pdf"
     output_path = os.path.join(out_dir, output_filename)
+
+    # Tanpa BA evaluasi/hasil dan tanpa BA lama, tidak ada halaman yang perlu
+    # dicari atau disisipkan. Salin BA utama langsung ke output final.
+    if not ba_eval and not ba_hasil and not ba_pembuktian:
+        try:
+            shutil.copy2(ba_utama, output_path)
+            return {
+                'ok': True,
+                'output': output_path,
+                'pesan': f"BA_{jenis} berhasil disalin: {os.path.basename(output_path)}",
+                'warning': None,
+            }
+        except Exception as e:
+            return {'ok': False, 'output': '', 'pesan': f"Gagal menyalin PDF: {e}", 'warning': None}
     
     warning_msgs = []
     if not ba_eval:
@@ -228,7 +250,7 @@ def gabung(folder_paket: str) -> dict:
         return {
             'ok': True,
             'output': path,
-            'pesan': f"BA_PLJKK berhasil digabung: {os.path.basename(path)} ({len(writer.pages)} halaman)",
+            'pesan': f"BA_{jenis} berhasil digabung: {os.path.basename(path)} ({len(writer.pages)} halaman)",
             'warning': warning_str
         }
         
@@ -239,7 +261,7 @@ def gabung(folder_paket: str) -> dict:
 def main():
     args = sys.argv[1:]
     if not args:
-        print("Usage: python gabung_ba_pljkk.py <folder_paket>")
+        print("Usage: python gabung_ba_pljkk.py <folder_paket> [PLJKK|PLPK]")
         sys.exit(1)
         
     folder_paket = os.path.abspath(args[0])
@@ -251,7 +273,8 @@ def main():
             pass
         sys.exit(1)
         
-    result = gabung(folder_paket)
+    jenis = args[1] if len(args) > 1 else "PLJKK"
+    result = gabung(folder_paket, jenis)
     
     if result['ok']:
         print(f"[OK] {result['pesan']}")
@@ -263,7 +286,7 @@ def main():
             msg += f"\n\n⚠️ Peringatan:\n{result['warning']}"
             
         try:
-            ctypes.windll.user32.MessageBoxW(0, msg, "Gabung BA PLJKK - Selesai", 0x40)
+            ctypes.windll.user32.MessageBoxW(0, msg, f"Gabung BA {_normalize_jenis(jenis)} - Selesai", 0x40)
         except Exception:
             pass
             

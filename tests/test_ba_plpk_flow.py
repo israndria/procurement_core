@@ -37,6 +37,7 @@ def test_gabung_plpk_writes_plpk_output_name(tmp_path):
     assert result["ok"] is True
     assert Path(result["output"]).name == "BA_PLPK_GPR_P.Bng.pdf"
     assert Path(result["output"]).parent.name == "7. Berita Acara + Summary Non Tender"
+    assert Path(result["output"]).read_bytes() == (tmp_path / "BA_PLPK_GPR_P.Bng.pdf").read_bytes()
 
 
 def test_headerless_docx_gets_header_part_relationship_and_content_type(tmp_path):
