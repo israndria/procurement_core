@@ -40,6 +40,29 @@ def _pdf_output_suffix(pdf_name: str = "", package_name: str = "") -> str:
     return _safe_filename(package_name) if package_name else safe_name
 
 
+def _resolve_ba_kind(mode: str, word_path: str = "", excel_path: str = "") -> str:
+    """Resolve PLJKK/PLPK from the command and the actual package files.
+
+    Existing workbooks can still contain an older macro that calls
+    ``pdf_bapljkk`` for a PLPK package. The file context is authoritative in
+    that case: a PLPK Word template/workbook must receive the PLPK layout
+    patch and ``BA_PLPK_`` output name.
+    """
+    mode_upper = str(mode or "").upper()
+    if mode_upper in {"PDF_BAPLP", "PRINTER_BAPLP"}:
+        return "PLPK"
+
+    if mode_upper not in {"PDF_BAPLJKK", "PRINTER_BAPLJKK"}:
+        return "PLJKK"
+
+    for candidate in (word_path, excel_path):
+        marker = os.path.basename(os.path.normpath(str(candidate or ""))).upper()
+        full_path = os.path.normpath(str(candidate or "")).upper()
+        if "BAPLPK" in marker or re.search(r"(?:^|[^A-Z0-9])PLPK(?:[^A-Z0-9]|$)", full_path):
+            return "PLPK"
+    return "PLJKK"
+
+
 def format_value(value):
     if value is None:
         return ""
@@ -1263,6 +1286,16 @@ def _protect_signature_layout(wdDoc):
             )):
                 continue
 
+            # The marker may live in the final signature rows of the main BA
+            # body table. Its row collection can also contain vertically
+            # merged cells. XML preprocessing protects that trailing block;
+            # COM must only handle the small standalone signature table here.
+            try:
+                if int(table.Rows.Count) > 12:
+                    continue
+            except Exception:
+                continue
+
             # Nama tenaga ahli/pimpinan bisa membuat blok ini tinggi. Jangan
             # izinkan Word memecah baris atau mendorong label dan nama ke page
             # berbeda; Word akan memindahkan blok utuh ke halaman berikutnya.
@@ -1500,6 +1533,146 @@ def _plpk_text(value):
     return re.sub(r"\s+", " ", str(value or "").replace("\r", " ").replace("\a", " ")).strip()
 
 
+def _patch_plpk_signature_rows_xml(document_xml):
+    """Protect only signature rows and remove stale Word pagination hints.
+
+    A PLPK BA body table can also contain its signature rows at the end. The
+    old COM guard detected ``DIREKTUR/PIMPINAN`` anywhere in that table and
+    accidentally locked all body rows, producing a header-only page before a
+    long BA table. Handle the signature block before Word opens the document:
+    mark only the trailing signature rows as non-splittable and keep them
+    together with one another.
+    """
+    from lxml import etree as LET
+
+    ns_uri = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    ns = {"w": ns_uri}
+    w = lambda name: f"{{{ns_uri}}}{name}"
+
+    try:
+        root = LET.fromstring(document_xml.encode("utf-8"))
+    except Exception:
+        return document_xml, False
+
+    changed = False
+
+    # lastRenderedPageBreak is Word's cached pagination result, not a manual
+    # page break. It becomes stale after merge-field replacement and manual
+    # edits, so never let it dictate the next export.
+    for node in list(root.xpath(".//w:lastRenderedPageBreak", namespaces=ns)):
+        parent = node.getparent()
+        if parent is not None:
+            parent.remove(node)
+            changed = True
+
+    def row_text(row):
+        return "".join(
+            node.text or ""
+            for node in row.iter()
+            if node.tag in (w("t"), w("instrText"), w("delText"))
+        ).upper()
+
+    def add_keep_next(paragraph):
+        ppr = paragraph.find(w("pPr"))
+        if ppr is None:
+            ppr = LET.Element(w("pPr"))
+            paragraph.insert(0, ppr)
+        if ppr.find(w("keepNext")) is not None:
+            return False
+
+        # keepNext belongs immediately after pStyle when present; this keeps
+        # the paragraph-property order Word expects.
+        insert_at = 0
+        for index, child in enumerate(list(ppr)):
+            if child.tag == w("pStyle"):
+                insert_at = index + 1
+                break
+        ppr.insert(insert_at, LET.Element(w("keepNext")))
+        return True
+
+    def add_signature_gap(row):
+        """Reserve handwritten-signature space before the name row."""
+        tr_pr = row.find(w("trPr"))
+        if tr_pr is None:
+            tr_pr = LET.Element(w("trPr"))
+            row.insert(0, tr_pr)
+        height = tr_pr.find(w("trHeight"))
+        if height is None:
+            height = LET.Element(w("trHeight"))
+            tr_pr.append(height)
+        height.set(w("val"), "1200")  # about 0.83 inch
+        height.set(w("hRule"), "atLeast")
+
+        for cell in [child for child in list(row) if child.tag == w("tc")]:
+            tc_pr = cell.find(w("tcPr"))
+            if tc_pr is None:
+                tc_pr = LET.Element(w("tcPr"))
+                cell.insert(0, tc_pr)
+            valign = tc_pr.find(w("vAlign"))
+            if valign is None:
+                valign = LET.Element(w("vAlign"))
+                tc_pr.append(valign)
+            valign.set(w("val"), "bottom")
+        return True
+
+    for table in root.xpath(".//w:body//w:tbl", namespaces=ns):
+        rows = [child for child in list(table) if child.tag == w("tr")]
+        if not rows:
+            continue
+        # Let the innermost table own its signature rows. This avoids marking
+        # an outer wrapper row when a future template uses nested tables.
+        if any(row.xpath(".//w:tbl", namespaces=ns) for row in rows):
+            continue
+
+        marker_rows = [
+            index
+            for index, row in enumerate(rows)
+            if "DIREKTUR/PIMPINAN" in row_text(row)
+            or "KELOMPOK KERJA PEMILIHAN" in row_text(row)
+        ]
+        if not marker_rows:
+            continue
+
+        start = min(marker_rows)
+        end = len(rows) - 1
+
+        # Keep the closing sentence attached to the signature block when it
+        # is the row immediately before the first signature row.
+        for index in range(start, end + 1):
+            row = rows[index]
+            tr_pr = row.find(w("trPr"))
+            if tr_pr is None:
+                tr_pr = LET.Element(w("trPr"))
+                row.insert(0, tr_pr)
+            if tr_pr.find(w("cantSplit")) is None:
+                tr_pr.insert(0, LET.Element(w("cantSplit")))
+                changed = True
+
+            # Do not chain the previous closing sentence to arbitrary content
+            # after the table; chain only through the signature rows.
+            if index >= start and index < end:
+                for paragraph in row.xpath(".//w:p", namespaces=ns):
+                    changed = add_keep_next(paragraph) or changed
+
+        if start > 0:
+            for paragraph in rows[start - 1].xpath(".//w:p", namespaces=ns):
+                changed = add_keep_next(paragraph) or changed
+
+        # Main BA tables normally place names directly after the role row;
+        # reserve a usable handwritten-signature gap there. Standalone
+        # signature tables already contain blank rows and are left unchanged.
+        name_row_index = start + 1
+        if (
+            name_row_index < len(rows)
+            and row_text(rows[name_row_index]).strip()
+        ):
+            changed = add_signature_gap(rows[name_row_index]) or changed
+
+    if not changed:
+        return document_xml, False
+    return LET.tostring(root, encoding="unicode"), True
+
+
 def _patch_plpk_layout_xml(docx_path, data=None):
     """Remove PLPK navigation labels before Word opens the temporary copy.
 
@@ -1597,6 +1770,7 @@ def _patch_plpk_layout_xml(docx_path, data=None):
             items = source.infolist()
             files = {item.filename: source.read(item.filename) for item in items}
         document_xml = files["word/document.xml"].decode("utf-8")
+        document_xml, xml_changed = _patch_plpk_signature_rows_xml(document_xml)
         if data:
             agency = (
                 _clean_runtime_value(data.get("SKPDOPD"))
@@ -1629,7 +1803,7 @@ def _patch_plpk_layout_xml(docx_path, data=None):
                 changed = True
         original_blocks = paragraph_pattern.findall(document_xml)
         output_blocks = list(original_blocks)
-        changed = False
+        changed = xml_changed
         for index, block in enumerate(original_blocks):
             if paragraph_text(block).casefold() in labels:
                 output_blocks[index] = ""
@@ -1914,7 +2088,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
     # Mode bapljkk: copy template -> (Merged), replace MERGEFIELD dari Excel, baru export.
     # (sebelumnya buka ReadOnly tanpa merge -> PDF tampil cached hasil merge lama/template)
     if mode in ("pdf_bapljkk", "printer_bapljkk", "pdf_baplp", "printer_baplp"):
-        jenis_ba = "PLPK" if mode in ("pdf_baplp", "printer_baplp") else "PLJKK"
+        jenis_ba = _resolve_ba_kind(mode, word_path, excel_path)
         if jenis_ba == "PLPK":
             _normalize_plpk_merge_data(data)
         _word_path_win = os.path.abspath(os.path.normpath(word_path))

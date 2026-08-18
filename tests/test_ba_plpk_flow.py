@@ -6,7 +6,7 @@ from pypdf import PdfWriter
 
 from gabung_ba_pljkk import deteksi_file, gabung
 from document_profiles import inject_header_profile
-from word_merge import _patch_plpk_layout_xml
+from word_merge import _patch_plpk_layout_xml, _resolve_ba_kind
 
 
 def _blank_pdf(path: Path):
@@ -38,6 +38,14 @@ def test_gabung_plpk_writes_plpk_output_name(tmp_path):
     assert Path(result["output"]).name == "BA_PLPK_GPR_P.Bng.pdf"
     assert Path(result["output"]).parent.name == "7. Berita Acara + Summary Non Tender"
     assert Path(result["output"]).read_bytes() == (tmp_path / "BA_PLPK_GPR_P.Bng.pdf").read_bytes()
+
+
+def test_old_pljkk_command_is_upgraded_for_a_plpk_package():
+    word_path = r"D:\Paket\29. PLPK - Pemasangan\5. BA PLPK - Pemasangan.docx"
+    excel_path = r"D:\Paket\29. PLPK - Pemasangan\0. BAPLPK- Pemasangan.xlsm"
+
+    assert _resolve_ba_kind("pdf_bapljkk", word_path, excel_path) == "PLPK"
+    assert _resolve_ba_kind("pdf_bapljkk", r"D:\Paket\BA PLJKK.docx", r"D:\Paket\BAPLJKK.xlsm") == "PLJKK"
 
 
 def test_headerless_docx_gets_header_part_relationship_and_content_type(tmp_path):
@@ -127,3 +135,32 @@ def test_plpk_layout_patch_normalizes_attendance_gap_and_result_heading(tmp_path
     assert '<w:jc w:val="center"/>' in result_block
     assert "Dinas Pekerjaan Umum dan Penataan Ruang Kabupaten Tapin" not in xml
     assert "Dinas Perdagangan Kabupaten Tapin" in xml
+
+
+def test_plpk_layout_patch_only_locks_signature_rows_and_drops_cached_break(tmp_path):
+    document = (
+        b'<?xml version="1.0"?>'
+        b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        b'<w:body><w:tbl>'
+        b'<w:tr><w:tc><w:p><w:r><w:t>Isi BA yang boleh mengalir</w:t></w:r></w:p></w:tc></w:tr>'
+        b'<w:tr><w:tc><w:p><w:r><w:t>DIREKTUR/PIMPINAN</w:t><w:lastRenderedPageBreak/></w:r></w:p></w:tc></w:tr>'
+        b'<w:tr><w:tc><w:p><w:r><w:t>Nama Penandatangan</w:t></w:r></w:p></w:tc></w:tr>'
+        b'<w:tr><w:tc><w:p><w:r><w:t>NIP</w:t></w:r></w:p></w:tc></w:tr>'
+        b'</w:tbl><w:sectPr/></w:body></w:document>'
+    )
+    template = tmp_path / "plpk-signature-rows.docx"
+    with ZipFile(template, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", document)
+
+    _patch_plpk_layout_xml(template, {})
+
+    with ZipFile(template) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+
+    rows = re.findall(r"<w:tr\b[^>]*>.*?</w:tr\s*>", xml, re.S)
+    assert "w:cantSplit" not in rows[0]
+    assert all("w:cantSplit" in row for row in rows[1:])
+    assert "lastRenderedPageBreak" not in xml
+    assert all("w:keepNext" in row for row in rows[1:-1])
+    assert 'w:trHeight w:val="1200" w:hRule="atLeast"' in rows[2]
+    assert '<w:vAlign w:val="bottom"/>' in rows[2]
