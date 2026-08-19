@@ -137,6 +137,35 @@ def test_plpk_layout_patch_normalizes_attendance_gap_and_result_heading(tmp_path
     assert "Dinas Perdagangan Kabupaten Tapin" in xml
 
 
+def test_plpk_layout_patch_adds_break_when_first_attendance_heading_has_none(tmp_path):
+    document = (
+        b'<?xml version="1.0"?>'
+        b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        b'<w:body>'
+        b'<w:p><w:r><w:t>Lanjutan tanda tangan BA</w:t></w:r></w:p>'
+        b'<w:p><w:pPr><w:spacing w:after="200"/></w:pPr></w:p>'
+        b'<w:p><w:pPr><w:spacing w:after="200"/></w:pPr>'
+        b'<w:r><w:t>DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI TEKNIS DAN HARGA</w:t></w:r></w:p>'
+        b'<w:p><w:r><w:t>Salinan daftar hadir</w:t></w:r></w:p>'
+        b'<w:sectPr/></w:body></w:document>'
+    )
+    template = tmp_path / "plpk-layout-no-break.docx"
+    with ZipFile(template, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", document)
+
+    _patch_plpk_layout_xml(template, {})
+
+    with ZipFile(template) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+
+    blocks = re.findall(r"<w:p\b[^>]*>.*?</w:p\s*>", xml, re.S)
+    attendance = [
+        block for block in blocks if "DAFTAR HADIR KLARIFIKASI" in block
+    ][0]
+    assert "<w:pageBreakBefore/>" in attendance
+    assert xml.count("<w:pageBreakBefore/>") == 1
+
+
 def test_plpk_layout_patch_only_locks_signature_rows_and_drops_cached_break(tmp_path):
     document = (
         b'<?xml version="1.0"?>'

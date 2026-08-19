@@ -1778,6 +1778,65 @@ def _patch_plpk_layout_xml(docx_path, data=None):
             return re.sub(r"</w:pPr\s*>", spacing + "</w:pPr>", paragraph_xml, count=1)
         return re.sub(r"(<w:p\b[^>]*>)", r"\1<w:pPr>" + spacing + "</w:pPr>", paragraph_xml, count=1)
 
+    def has_page_break(paragraph_xml):
+        """Return only an explicit Word page break, not cached pagination."""
+        return bool(
+            re.search(
+                r"<w:br\b[^>]*w:type\s*=\s*['\"]page['\"]",
+                paragraph_xml,
+            )
+        )
+
+    def set_page_break_before(paragraph_xml):
+        """Force a heading onto the next page without adding a blank paragraph."""
+        page_break = "<w:pageBreakBefore/>"
+
+        def patch_ppr(match):
+            ppr = match.group(0)
+            existing = re.search(r"<w:pageBreakBefore\b[^>]*/>", ppr)
+            if existing:
+                tag = existing.group(0)
+                if re.search(r'w:val\s*=\s*["\']0["\']', tag):
+                    ppr = ppr.replace(tag, '<w:pageBreakBefore w:val="1"/>', 1)
+                return ppr
+
+            # Keep CT_PPr order acceptable to Word: pageBreakBefore belongs
+            # before frame/spacing/indent/alignment properties.
+            anchor = (
+                r"<w:(?:framePr|widowControl|numPr|suppressLineNumbers|"
+                r"pBdr|shd|tabs|spacing|ind|jc|textDirection|textAlignment|"
+                r"textboxTight|outlineLvl|divId|cnfStyle|rPr)\b"
+            )
+            if re.search(anchor, ppr):
+                return re.sub(anchor, page_break + r"\g<0>", ppr, count=1)
+            return ppr.replace("</w:pPr>", page_break + "</w:pPr>", 1)
+
+        if re.search(r"<w:pPr\b[^>]*>.*?</w:pPr\s*>", paragraph_xml, re.S):
+            return re.sub(
+                r"<w:pPr\b[^>]*>.*?</w:pPr\s*>",
+                patch_ppr,
+                paragraph_xml,
+                count=1,
+                flags=re.S,
+            )
+        return re.sub(
+            r"(<w:p\b[^>]*>)",
+            r"\1<w:pPr>" + page_break + "</w:pPr>",
+            paragraph_xml,
+            count=1,
+        )
+
+    def preceding_has_page_break(blocks, index):
+        """Check existing break immediately before a heading."""
+        previous = index - 1
+        while previous >= 0:
+            if has_page_break(blocks[previous]):
+                return True
+            if paragraph_text(blocks[previous]):
+                return False
+            previous -= 1
+        return False
+
     def normalize_main_ba_heading(paragraph_xml):
         """Match the main BA heading style used by the other PLPK sections."""
         style = '<w:pStyle w:val="BodyText"/>'
@@ -1908,6 +1967,7 @@ def _patch_plpk_layout_xml(docx_path, data=None):
                     output_blocks[index] = ""
                 changed = True
 
+        attendance_heading_seen = False
         for index, block in enumerate(output_blocks):
             normalized = paragraph_text(block)
             if not block or not normalized.upper().startswith(title_prefixes):
@@ -1931,6 +1991,20 @@ def _patch_plpk_layout_xml(docx_path, data=None):
                         break
                     changed = blank_or_remove_paragraph(previous) or changed
                     previous -= 1
+
+                # Some manually edited templates have no explicit break here.
+                # Add a paragraph-level break only to the first attendance
+                # heading; preserve existing breaks and do not split the copy.
+                if (
+                    not attendance_heading_seen
+                    and not preceding_has_page_break(output_blocks, index)
+                ):
+                    updated = set_page_break_before(output_blocks[index])
+                    if updated != output_blocks[index]:
+                        output_blocks[index] = updated
+                        block = updated
+                        changed = True
+                attendance_heading_seen = True
 
             if normalized == "BERITA ACARA HASIL PENGADAAN LANGSUNG":
                 updated = normalize_main_ba_heading(block)
