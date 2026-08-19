@@ -2139,7 +2139,9 @@ Private Function FindWordFilePL(ByVal pattern As String) As String
     For Each ext In Array("*.docx", "*.docm")
         f = Dir(folder & "\" & ext)
         Do While f <> ""
-            If Left(f, Len(pattern)) = pattern Then
+            If Left(f, Len(pattern)) = pattern And _
+               InStr(1, f, "(Merged)", vbTextCompare) = 0 And _
+               InStr(1, f, "(Dengan Header", vbTextCompare) = 0 Then
                 FindWordFilePL = f
                 Exit Function
             End If

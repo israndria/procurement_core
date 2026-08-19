@@ -166,6 +166,14 @@ def test_plpk_layout_patch_adds_break_when_first_attendance_heading_has_none(tmp
     assert xml.count("<w:pageBreakBefore/>") == 1
 
 
+def test_plpk_vba_word_resolver_skips_generated_merged_copy():
+    source = Path(__file__).resolve().parents[1] / "ModDraftPaketPL.bas"
+    content = source.read_text(encoding="utf-8")
+
+    assert 'InStr(1, f, "(Merged)", vbTextCompare) = 0' in content
+    assert 'InStr(1, f, "(Dengan Header", vbTextCompare) = 0' in content
+
+
 def test_plpk_layout_patch_only_locks_signature_rows_and_drops_cached_break(tmp_path):
     document = (
         b'<?xml version="1.0"?>'
