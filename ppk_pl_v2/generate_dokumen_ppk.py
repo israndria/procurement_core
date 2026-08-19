@@ -232,9 +232,10 @@ DOCUMENT_STAGE_LABELS = {
 }
 
 # Output PPK dipisahkan per tahap agar hasil Upload Awal tidak pernah tertimpa
-# oleh generate Berkontrak. Folder package lama tetap dibiarkan sebagai legacy
-# dan hanya dipakai sebagai fallback saat mode ``pdf`` membaca docx lama.
-DOCUMENT_OUTPUT_ROOT = "0. Draft Dokumen PPK"
+# oleh generate Berkontrak. Mulai format baru, folder tahap langsung berada di
+# root paket. Wrapper lama tetap dikenali saat mode ``pdf`` membaca paket lama.
+DOCUMENT_OUTPUT_ROOT = ""
+LEGACY_DOCUMENT_OUTPUT_ROOT = "0. Draft Dokumen PPK"
 DOCUMENT_STAGE_MARKER = "._ppk_stage.txt"
 DOCUMENT_STAGE_DIRS = {
     "UPLOAD AWAL": "01. Upload Awal",
@@ -299,10 +300,16 @@ def document_output_dir(excel_data: dict, base_dir: str = BASE_DIR,
     """
     package_dir = document_package_dir(excel_data, base_dir)
     stage = normalize_document_stage(excel_data.get("Tahap Dokumen"))
-    phase_dir = os.path.join(
-        package_dir, DOCUMENT_OUTPUT_ROOT, DOCUMENT_STAGE_DIRS[stage]
-    )
+    phase_dir = os.path.join(package_dir, DOCUMENT_STAGE_DIRS[stage])
     if mode == "pdf" and not os.path.isdir(phase_dir) and os.path.isdir(package_dir):
+        legacy_phase_dir = os.path.join(
+            package_dir,
+            LEGACY_DOCUMENT_OUTPUT_ROOT,
+            DOCUMENT_STAGE_DIRS[stage],
+        )
+        if os.path.isdir(legacy_phase_dir):
+            return legacy_phase_dir
+        # Format legacy paling awal menyimpan dokumen langsung di root paket.
         return package_dir
     return phase_dir
 
@@ -2736,7 +2743,7 @@ def main():
                     except Exception as _ex:
                         print(f"    [WARN] PDF gagal ({_df}): {_ex}")
                 total_pdf += n_ok
-                print(f"  OK: {_package_folder_name(_ed)}/{DOCUMENT_OUTPUT_ROOT}/"
+                print(f"  OK: {_package_folder_name(_ed)}/"
                       f"{DOCUMENT_STAGE_DIRS[_stage]} — {n_ok} PDF")
 
         finally:

@@ -125,3 +125,66 @@ def test_owned_tender_rows_only_contains_allowlisted_codes(monkeypatch):
         "https://spse.inaproc.id/tapinkab/lelang/1/jadwal"
     ]
     assert result.iloc[0]["nama_paket"] == "Target"
+
+
+def test_sync_all_skips_empty_schedule_without_aborting_other_targets(monkeypatch):
+    valid = _frame()
+    db = pd.DataFrame([
+        {
+            "url": "https://spse.inaproc.id/tapinkab/lelang/empty/jadwal",
+            "members": "001",
+            "nama_paket": "Kosong",
+            "last_sync": "",
+            "content_hash": "",
+        },
+        {
+            "url": "https://spse.inaproc.id/tapinkab/lelang/valid/jadwal",
+            "members": "002",
+            "nama_paket": "Valid",
+            "last_sync": "",
+            "content_hash": sync_jadwal.compute_hash(valid),
+        },
+    ])
+    empty = pd.DataFrame(columns=valid.columns)
+
+    monkeypatch.setattr(sync_jadwal, "load_targets", lambda *args, **kwargs: [])
+    monkeypatch.setattr(sync_jadwal, "_auto_enroll_folder_tenders", lambda *_args: None)
+    monkeypatch.setattr(sync_jadwal, "load_db", lambda: db.copy())
+    monkeypatch.setattr(sync_jadwal, "_owned_tender_rows", lambda *_args: db.copy())
+    monkeypatch.setattr(sync_jadwal, "get_service", lambda: object())
+    monkeypatch.setattr(
+        sync_jadwal,
+        "fetch_jadwal",
+        lambda url: empty if "/empty/" in url else valid.copy(),
+    )
+    monkeypatch.setattr(sync_jadwal, "_tender_events_complete", lambda *_args: True)
+    monkeypatch.setattr(sync_jadwal, "save_db", lambda *_args: None)
+
+    result = sync_jadwal.sync_all()
+
+    assert result == {"updated": 0, "unchanged": 1, "empty": 1, "failed": 0}
+
+
+def test_merge_database_updates_appends_new_url_without_duplicate_url_column():
+    original = pd.DataFrame([{
+        "url": "https://spse.inaproc.id/tapinkab/lelang/old/jadwal",
+        "members": "001",
+        "nama_paket": "Lama",
+        "last_sync": "",
+        "content_hash": "old",
+    }])
+    synced = pd.DataFrame([{
+        "url": "https://spse.inaproc.id/tapinkab/lelang/new/jadwal",
+        "members": "061",
+        "nama_paket": "Baru",
+        "last_sync": "2026-08-18 07:00:00",
+        "content_hash": "new",
+    }])
+
+    result = sync_jadwal._merge_database_updates(original, synced)
+
+    assert list(result.columns).count("url") == 1
+    assert result["url"].tolist() == [
+        "https://spse.inaproc.id/tapinkab/lelang/old/jadwal",
+        "https://spse.inaproc.id/tapinkab/lelang/new/jadwal",
+    ]

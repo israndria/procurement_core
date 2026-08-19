@@ -401,6 +401,11 @@ def inject_pl(filepath: str):
                 }
                 print('  Layout tombol: PLJKK')
 
+            ba_label = "Cetak BA PLPK" if is_pk else "Cetak BA PLJKK"
+            ba_macro = "CetakBAPLPKPDF" if is_pk else "CetakBAPLJKKPDF"
+            gabung_label = "Gabung BA PLPK" if is_pk else "Gabung BA PLJKK"
+            gabung_macro = "GabungBAPLPK" if is_pk else "GabungBAPLJKK"
+
             def add_btn(name, label, macro, rgb):
                 left, top, width, height = button_geometry[name]
                 shp = ws.Shapes.AddShape(5, left, top, width, height)
@@ -437,9 +442,10 @@ def inject_pl(filepath: str):
             add_btn("btnGabungReviu_PL",  "Gabung BA Reviu",   "GabungBAReviu",             (0, 128, 96))
             add_btn("btnMuatHPS_PL",      "Muat HPS",          "MuatHPSPL",                 (200, 100, 0))
             add_btn("btnIsiEvaluasiPL",   "Isi Evaluasi PL",   "IsiEvaluasiPLStandalone",   (160, 60, 0))
-            # Baris 4: Cetak BA PLJKK (col 0) | Gabung BA PLJKK (col 1)
-            add_btn("btnCetakBAPLJKK",    "Cetak BA PLJKK",    "CetakBAPLJKKPDF",           (140, 20, 20))
-            add_btn("btnGabungBAPLJKK",   "Gabung BA PLJKK",   "GabungBAPLJKK",             (100, 20, 80))
+            # Baris 4: BA mengikuti konteks workbook, shape legacy tetap
+            # dipertahankan agar injector tidak meninggalkan tombol duplikat.
+            add_btn("btnCetakBAPLJKK",    ba_label,    ba_macro,    (140, 20, 20))
+            add_btn("btnGabungBAPLJKK",   gabung_label, gabung_macro, (100, 20, 80))
 
             # Sengaja TIDAK re-protect @ Master Data — user butuh edit bebas
             # (Aturan PL: sheet @ Master Data harus selalu unprotected)

@@ -164,3 +164,31 @@ def test_plpk_layout_patch_only_locks_signature_rows_and_drops_cached_break(tmp_
     assert all("w:keepNext" in row for row in rows[1:-1])
     assert 'w:trHeight w:val="1200" w:hRule="atLeast"' in rows[2]
     assert '<w:vAlign w:val="bottom"/>' in rows[2]
+
+
+def test_plpk_layout_patch_preserves_empty_table_cell_paragraphs(tmp_path):
+    document = (
+        b'<?xml version="1.0"?>'
+        b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        b'<w:body><w:tbl><w:tr>'
+        b'<w:tc><w:p><w:pPr><w:spacing w:before="100"/></w:pPr></w:p></w:tc>'
+        b'<w:tc><w:p><w:pPr><w:spacing w:before="100"/></w:pPr></w:p></w:tc>'
+        b'<w:tc><w:p><w:pPr><w:spacing w:before="100"/></w:pPr></w:p></w:tc>'
+        b'</w:tr></w:tbl>'
+        b'<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
+        b'<w:p><w:r><w:t>DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI TEKNIS DAN HARGA</w:t></w:r></w:p>'
+        b'<w:sectPr/></w:body></w:document>'
+    )
+    template = tmp_path / "plpk-table-empty-paragraphs.docx"
+    with ZipFile(template, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", document)
+
+    _patch_plpk_layout_xml(template, {})
+
+    with ZipFile(template) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+
+    cells = re.findall(r"<w:tc\b[^>]*>.*?</w:tc\s*>", xml, re.S)
+    assert len(cells) == 3
+    assert all(re.search(r"<w:p\b", cell) for cell in cells)
+    assert "w:type=\"page\"" in xml

@@ -142,6 +142,93 @@ def _rewrite_header_relationships(rels: bytes, media_map: dict[str, str]) -> byt
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+def _next_relationship_id(root: ET.Element) -> str:
+    """Return a document relationship id not used by the target document."""
+    used = {node.get("Id", "") for node in root}
+    index = 1
+    while f"rId{index}" in used:
+        index += 1
+    return f"rId{index}"
+
+
+def _ensure_header_reference(document_xml: bytes, relationship_id: str) -> bytes:
+    """Attach the supplied default header to every section in the document.
+
+    The V2 PL templates are intentionally headerless. Replacing a header part
+    alone therefore has no visible effect: Word has no ``headerReference`` to
+    render. This helper adds/updates only the default reference and preserves
+    all other section properties.
+    """
+    ns_w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    ns_r = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    ET.register_namespace("w", ns_w)
+    ET.register_namespace("r", ns_r)
+    root = ET.fromstring(document_xml)
+    sect_prs = root.findall(f".//{{{ns_w}}}sectPr")
+    for sect_pr in sect_prs:
+        reference = None
+        for candidate in sect_pr.findall(f"{{{ns_w}}}headerReference"):
+            if candidate.get(f"{{{ns_w}}}type") == "default":
+                reference = candidate
+                break
+        if reference is None:
+            reference = ET.Element(f"{{{ns_w}}}headerReference")
+            reference.set(f"{{{ns_w}}}type", "default")
+            # headerReference belongs before footerReference/pgSz in sectPr.
+            insert_at = len(sect_pr)
+            for i, child in enumerate(list(sect_pr)):
+                if child.tag in {
+                    f"{{{ns_w}}}footerReference",
+                    f"{{{ns_w}}}pgSz",
+                    f"{{{ns_w}}}pgMar",
+                }:
+                    insert_at = i
+                    break
+            sect_pr.insert(insert_at, reference)
+        reference.set(f"{{{ns_r}}}id", relationship_id)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _ensure_content_type(files: dict[str, bytes], extension: str, content_type: str) -> None:
+    """Add a media default only when the target package does not have one."""
+    content_types_name = "[Content_Types].xml"
+    if content_types_name not in files:
+        return
+    ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+    root = ET.fromstring(files[content_types_name])
+    if any(node.get("Extension", "").lower() == extension.lower() for node in root):
+        return
+    ET.SubElement(root, f"{{{ns}}}Default", Extension=extension, ContentType=content_type)
+    files[content_types_name] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _ensure_part_content_type(
+    files: dict[str, bytes], part_name: str, content_type: str
+) -> None:
+    """Register an added OPC part in ``[Content_Types].xml``.
+
+    Headerless V2 templates do not have a ``header`` override. Adding the XML
+    part and relationship without this override makes Word treat the package
+    as incomplete even though the relationship itself is valid.
+    """
+    content_types_name = "[Content_Types].xml"
+    if content_types_name not in files:
+        return
+    ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+    root = ET.fromstring(files[content_types_name])
+    normalized = "/" + part_name.lstrip("/")
+    for node in root:
+        if node.get("PartName", "").lstrip("/") == normalized.lstrip("/"):
+            return
+    ET.SubElement(
+        root,
+        f"{{{ns}}}Override",
+        PartName=normalized,
+        ContentType=content_type,
+    )
+    files[content_types_name] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
 def inject_header_profile(template_path: str | os.PathLike[str], profile_path: str | os.PathLike[str], output_path: str | os.PathLike[str]) -> Path:
     """Copy a DOCX and replace its existing header sections with one profile.
 
@@ -191,6 +278,59 @@ def inject_header_profile(template_path: str | os.PathLike[str], profile_path: s
                 destination = media_map[name]
                 if destination not in files:
                     files[destination] = header_zip.read(name)
+
+        # Headerless templates need a real part + document relationship +
+        # section reference. Existing headers keep their original part names;
+        # otherwise create the conventional header1.xml pair.
+        header_parts = sorted(
+            name for name in body_infos
+            if name.startswith("word/header") and name.endswith(".xml")
+        )
+        header_name = header_parts[0] if header_parts else "word/header1.xml"
+        header_rels_name = "word/_rels/" + Path(header_name).name + ".rels"
+        files[header_name] = profile_header
+        if profile_header_rels is not None:
+            files[header_rels_name] = _rewrite_header_relationships(
+                profile_header_rels, media_map
+            )
+
+        rels_name = "word/_rels/document.xml.rels"
+        rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+        rels_root = ET.fromstring(files[rels_name])
+        header_rel = None
+        header_type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
+        for relationship in rels_root:
+            if relationship.get("Type") == header_type:
+                header_rel = relationship
+                break
+        if header_rel is None:
+            relationship_id = _next_relationship_id(rels_root)
+            header_rel = ET.SubElement(
+                rels_root,
+                f"{{{rels_ns}}}Relationship",
+                Id=relationship_id,
+                Type=header_type,
+                Target=Path(header_name).name,
+            )
+        else:
+            relationship_id = header_rel.get("Id")
+            header_rel.set("Target", Path(header_name).name)
+        files[rels_name] = ET.tostring(rels_root, encoding="utf-8", xml_declaration=True)
+        files["word/document.xml"] = _ensure_header_reference(
+            files["word/document.xml"], relationship_id
+        )
+        _ensure_part_content_type(
+            files,
+            header_name,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml",
+        )
+
+        for media_name in media_map.values():
+            suffix = Path(media_name).suffix.lower().lstrip(".")
+            if suffix == "png":
+                _ensure_content_type(files, "png", "image/png")
+            elif suffix in {"jpg", "jpeg"}:
+                _ensure_content_type(files, suffix, f"image/{suffix}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as out_zip:
             for name, data in files.items():

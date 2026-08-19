@@ -1590,6 +1590,39 @@ def _patch_plpk_signature_rows_xml(document_xml):
         ppr.insert(insert_at, LET.Element(w("keepNext")))
         return True
 
+    # CT_TrPr is an ordered OOXML sequence. In particular, ``cantSplit``
+    # must follow existing ``gridAfter``/``wAfter`` properties. Inserting it
+    # at index zero makes Word report the manually edited DOCX as corrupted.
+    tr_pr_order = {
+        w("cnfStyle"): 10,
+        w("divId"): 20,
+        w("gridBefore"): 30,
+        w("gridAfter"): 40,
+        w("wBefore"): 50,
+        w("wAfter"): 60,
+        w("cantSplit"): 70,
+        w("tblHeader"): 80,
+        w("tblCellSpacing"): 90,
+        w("jc"): 100,
+        w("hidden"): 110,
+        w("trHeight"): 120,
+        w("trWBefore"): 130,
+        w("trWAfter"): 140,
+        w("ins"): 150,
+        w("del"): 160,
+        w("cellIns"): 170,
+        w("cellDel"): 180,
+        w("tblPrEx"): 190,
+    }
+
+    def insert_tr_pr_child(tr_pr, child):
+        child_order = tr_pr_order.get(child.tag, 1000)
+        for index, existing in enumerate(list(tr_pr)):
+            if tr_pr_order.get(existing.tag, 1000) > child_order:
+                tr_pr.insert(index, child)
+                return
+        tr_pr.append(child)
+
     def add_signature_gap(row):
         """Reserve handwritten-signature space before the name row."""
         tr_pr = row.find(w("trPr"))
@@ -1599,7 +1632,7 @@ def _patch_plpk_signature_rows_xml(document_xml):
         height = tr_pr.find(w("trHeight"))
         if height is None:
             height = LET.Element(w("trHeight"))
-            tr_pr.append(height)
+            insert_tr_pr_child(tr_pr, height)
         height.set(w("val"), "1200")  # about 0.83 inch
         height.set(w("hRule"), "atLeast")
 
@@ -1645,7 +1678,7 @@ def _patch_plpk_signature_rows_xml(document_xml):
                 tr_pr = LET.Element(w("trPr"))
                 row.insert(0, tr_pr)
             if tr_pr.find(w("cantSplit")) is None:
-                tr_pr.insert(0, LET.Element(w("cantSplit")))
+                insert_tr_pr_child(tr_pr, LET.Element(w("cantSplit")))
                 changed = True
 
             # Do not chain the previous closing sentence to arbitrary content
@@ -1736,19 +1769,40 @@ def _patch_plpk_layout_xml(docx_path, data=None):
             )
         spacing = "<w:spacing" + "".join(f' w:{name}="{value}"' for name, value in values) + "/>"
         if re.search(r"<w:pPr\b[^>]*>", paragraph_xml):
+            # CT_PPr is ordered; spacing must precede indentation, alignment,
+            # and run properties. Appending after ``w:rPr`` leaves a valid
+            # XML tree that Word nevertheless rejects as corrupted.
+            anchor = r"<w:(?:ind|jc|rPr)\b"
+            if re.search(anchor, paragraph_xml):
+                return re.sub(anchor, spacing + r"\g<0>", paragraph_xml, count=1)
             return re.sub(r"</w:pPr\s*>", spacing + "</w:pPr>", paragraph_xml, count=1)
         return re.sub(r"(<w:p\b[^>]*>)", r"\1<w:pPr>" + spacing + "</w:pPr>", paragraph_xml, count=1)
 
     def normalize_main_ba_heading(paragraph_xml):
         """Match the main BA heading style used by the other PLPK sections."""
-        heading = '<w:pStyle w:val="BodyText"/><w:ind w:left="709" w:right="707"/><w:jc w:val="center"/>'
+        style = '<w:pStyle w:val="BodyText"/>'
+        indent = '<w:ind w:left="709" w:right="707"/>'
+        alignment = '<w:jc w:val="center"/>'
 
         def patch_ppr(match):
             ppr = match.group(0)
-            ppr = re.sub(r"<w:pStyle\b[^>]*/>", "", ppr, count=1)
-            ppr = re.sub(r"<w:ind\b[^>]*/>", "", ppr, count=1)
-            ppr = re.sub(r"<w:jc\b[^>]*/>", "", ppr, count=1)
-            return ppr.replace("<w:pPr>", "<w:pPr>" + heading, 1)
+            ppr, style_count = re.subn(r"<w:pStyle\b[^>]*/>", style, ppr, count=1)
+            if not style_count:
+                ppr = ppr.replace("<w:pPr>", "<w:pPr>" + style, 1)
+
+            ppr, indent_count = re.subn(r"<w:ind\b[^>]*/>", indent, ppr, count=1)
+            if not indent_count:
+                ppr = re.sub(r"(<w:jc\b[^>]*>)", indent + r"\1", ppr, count=1)
+                if indent not in ppr:
+                    ppr = re.sub(r"(<w:rPr\b[^>]*>)", indent + r"\1", ppr, count=1)
+                if indent not in ppr:
+                    ppr = ppr.replace("</w:pPr>", indent + "</w:pPr>", 1)
+            ppr, alignment_count = re.subn(r"<w:jc\b[^>]*/>", alignment, ppr, count=1)
+            if not alignment_count:
+                ppr = re.sub(r"(<w:rPr\b[^>]*>)", alignment + r"\1", ppr, count=1)
+                if alignment not in ppr:
+                    ppr = ppr.replace("</w:pPr>", alignment + "</w:pPr>", 1)
+            return ppr
 
         if re.search(r"<w:pPr\b[^>]*>.*?</w:pPr\s*>", paragraph_xml, re.S):
             return re.sub(
@@ -1760,7 +1814,7 @@ def _patch_plpk_layout_xml(docx_path, data=None):
             )
         return re.sub(
             r"(<w:p\b[^>]*>)",
-            r"\1<w:pPr>" + heading + "</w:pPr>",
+            r"\1<w:pPr>" + style + indent + alignment + "</w:pPr>",
             paragraph_xml,
             count=1,
         )
@@ -1771,6 +1825,7 @@ def _patch_plpk_layout_xml(docx_path, data=None):
             files = {item.filename: source.read(item.filename) for item in items}
         document_xml = files["word/document.xml"].decode("utf-8")
         document_xml, xml_changed = _patch_plpk_signature_rows_xml(document_xml)
+        changed = xml_changed
         if data:
             agency = (
                 _clean_runtime_value(data.get("SKPDOPD"))
@@ -1801,12 +1856,56 @@ def _patch_plpk_layout_xml(docx_path, data=None):
             if old_text in document_xml:
                 document_xml = document_xml.replace(old_text, new_text)
                 changed = True
-        original_blocks = paragraph_pattern.findall(document_xml)
+        paragraph_matches = list(paragraph_pattern.finditer(document_xml))
+        original_blocks = [match.group(0) for match in paragraph_matches]
+        table_tokens = list(
+            re.finditer(r"<w:tc(?:\s[^>]*)?>|</w:tc>", document_xml)
+        )
+        table_depths = []
+        table_token_index = 0
+        table_depth = 0
+        for match in paragraph_matches:
+            while (
+                table_token_index < len(table_tokens)
+                and table_tokens[table_token_index].start() < match.start()
+            ):
+                token = table_tokens[table_token_index].group(0)
+                table_depth += -1 if token.startswith("</") else 1
+                table_token_index += 1
+            table_depths.append(table_depth)
+
+        def paragraph_in_table_cell(index):
+            """Return whether paragraph belongs to a table cell.
+
+            A table cell must contain at least one block-level paragraph. The
+            manually edited Paket 28 template has several intentionally empty
+            cell paragraphs; deleting those paragraphs makes Word reject the
+            temporary DOCX as corrupted.
+            """
+            if index < 0 or index >= len(paragraph_matches):
+                return False
+            return table_depths[index] > 0
+
+        def blank_or_remove_paragraph(index):
+            block = output_blocks[index]
+            if paragraph_in_table_cell(index):
+                updated = set_spacing(block, before=0, after=0)
+                if updated != block:
+                    output_blocks[index] = updated
+                    return True
+                return False
+            if block:
+                output_blocks[index] = ""
+                return True
+            return False
+
         output_blocks = list(original_blocks)
-        changed = xml_changed
         for index, block in enumerate(original_blocks):
             if paragraph_text(block).casefold() in labels:
-                output_blocks[index] = ""
+                if paragraph_in_table_cell(index):
+                    output_blocks[index] = set_spacing(block, before=0, after=0)
+                else:
+                    output_blocks[index] = ""
                 changed = True
 
         for index, block in enumerate(output_blocks):
@@ -1830,9 +1929,7 @@ def _patch_plpk_layout_xml(docx_path, data=None):
                             output_blocks[previous] = updated
                             changed = True
                         break
-                    if output_blocks[previous]:
-                        output_blocks[previous] = ""
-                        changed = True
+                    changed = blank_or_remove_paragraph(previous) or changed
                     previous -= 1
 
             if normalized == "BERITA ACARA HASIL PENGADAAN LANGSUNG":
@@ -1850,10 +1947,18 @@ def _patch_plpk_layout_xml(docx_path, data=None):
             while previous >= 0 and not output_blocks[previous]:
                 previous -= 1
             while previous >= 0 and not paragraph_text(output_blocks[previous]):
-                updated = set_spacing(output_blocks[previous], before=0, after=0)
-                if updated != output_blocks[previous]:
-                    output_blocks[previous] = updated
-                    changed = True
+                if re.search(
+                    r"<w:br\b[^>]*w:type\s*=\s*['\"]page['\"]|<w:lastRenderedPageBreak\b",
+                    output_blocks[previous],
+                ):
+                    updated = set_spacing(
+                        output_blocks[previous], before=0, after=0
+                    )
+                    if updated != output_blocks[previous]:
+                        output_blocks[previous] = updated
+                        changed = True
+                    break
+                changed = blank_or_remove_paragraph(previous) or changed
                 previous -= 1
 
         if not changed:

@@ -2,9 +2,14 @@
 gabung_ba_reviu.py — Gabung BA Reviu Lengkap dari 2 file PDF.
 
 Flow urutan halaman:
-  Hal 1-2   : hasil_scan.pdf halaman 1-2 (lembar ttd basah + absensi awal)
-  Hal 3+    : isi_reviu.pdf semua halaman
-  Hal akhir : hasil_scan.pdf halaman 3 dst. (lembar absensi/ttd akhir)
+  Scan 3 halaman PLJKK:
+    halaman 1 + halaman 3 : pembuka BA + daftar hadir
+    Isi Reviu              : semua halaman
+    halaman 2              : lanjutan tanda tangan tanpa header
+  Scan 4+ halaman tender:
+    halaman 1-2            : pembuka scan
+    Isi Reviu              : semua halaman
+    halaman 3 dst.         : scan lanjutan
 
 Output: 6. BA Reviu Lengkap/BA_REVIU_FULL_{suffix}.pdf
 
@@ -40,6 +45,18 @@ def _nama_paket_dari_folder(folder_paket: str) -> str:
     nama = re.sub(r'^\d+\.\s*(PLJKK|PLPK)\s*-\s*', '', nama).strip()
     nama = re.sub(r'\s*\(PL\s*-?\s*Ulang\)\s*$', '', nama, flags=re.IGNORECASE).strip()
     return nama
+
+
+def _scan_page_groups(n_scan: int) -> tuple[list[int], list[int]]:
+    """Return (pages_before_review, pages_after_review) as zero-based indexes.
+
+    BA Reviu PLJKK 3-page scans have the attendance sheet as page 3 and the
+    continuation of the signed BA as page 2.  Keep the established 4+ page
+    tender layout unchanged.
+    """
+    if n_scan == 3:
+        return [0, 2], [1]
+    return list(range(min(2, n_scan))), list(range(2, n_scan))
 
 
 def deteksi_file(subfolder_path: str) -> dict:
@@ -139,17 +156,18 @@ def gabung(folder_paket: str, dry_run: bool = False, suffix: str = "") -> dict:
 
         writer = PdfWriter()
 
-        # Hal 1-2: scan halaman 1 dan 2 (index 0 dan 1)
-        for i in range(min(2, n_scan)):
+        scan_before_review, scan_after_review = _scan_page_groups(n_scan)
+
+        # Halaman pembuka scan.
+        for i in scan_before_review:
             writer.add_page(rdr_scan.pages[i])
 
         # Hal 3+: semua halaman Isi Reviu
         for i in range(n_reviu):
             writer.add_page(rdr_reviu.pages[i])
 
-        # Hal akhir: semua halaman scan setelah dua halaman pembuka,
-        # termasuk halaman 3 dan 4, tetap dalam urutan aslinya.
-        for i in range(2, n_scan):
+        # Halaman lanjutan scan.
+        for i in scan_after_review:
             writer.add_page(rdr_scan.pages[i])
 
         # Tulis output (fallback suffix kalau locked)

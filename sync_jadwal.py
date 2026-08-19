@@ -741,7 +741,8 @@ def _merge_database_updates(original: pd.DataFrame, synced: pd.DataFrame) -> pd.
         if not url:
             continue
         if url not in result.index:
-            result.loc[url, list(row.index)] = row
+            columns = [column for column in row.index if column != 'url']
+            result.loc[url, columns] = row[columns].to_dict()
         else:
             for column in ('members', 'nama_paket', 'last_sync', 'content_hash'):
                 if column in row.index:
@@ -794,17 +795,18 @@ def sync_all():
         targets = load_targets('tender')
     except TargetRegistryError as exc:
         log(f'  ❌ Allowlist Tender tidak tersedia — fail-closed: {exc}')
-        return {'updated': 0, 'unchanged': 0, 'failed': 1}
+        return {'updated': 0, 'unchanged': 0, 'empty': 0, 'failed': 1}
 
     db_source = load_db()
     db = _owned_tender_rows(db_source, targets)
     if db.empty:
         log("📭 Tidak ada target Tender aktif — tidak ada URL untuk discrape.")
-        return {'updated': 0, 'unchanged': 0, 'failed': 0}
+        return {'updated': 0, 'unchanged': 0, 'empty': 0, 'failed': 0}
 
     service     = get_service()
     updated     = 0
     unchanged   = 0
+    empty       = 0
     failed      = 0
 
     for idx, row in db.iterrows():
@@ -817,6 +819,14 @@ def sync_all():
         df_jadwal = fetch_jadwal(url)
         if df_jadwal is None:
             log("  ❌ Gagal fetch — skip.")
+            failed += 1
+            continue
+        if df_jadwal.empty:
+            log("  ⚠️ Jadwal kosong di SPSE — skip sementara.")
+            empty += 1
+            continue
+        if 'Nama_Paket' not in df_jadwal.columns:
+            log("  ❌ Tabel jadwal tidak valid — skip.")
             failed += 1
             continue
 
@@ -865,9 +875,12 @@ def sync_all():
         updated += 1
 
     save_db(_merge_database_updates(db_source, db))
-    log(f"\n📊 Selesai — Updated: {updated} | Unchanged: {unchanged} | Failed: {failed}")
+    log(
+        f"\n📊 Selesai — Updated: {updated} | Unchanged: {unchanged} | "
+        f"Empty: {empty} | Failed: {failed}"
+    )
     log("=" * 60)
-    return {'updated': updated, 'unchanged': unchanged, 'failed': failed}
+    return {'updated': updated, 'unchanged': unchanged, 'empty': empty, 'failed': failed}
 
 
 # ============================================================

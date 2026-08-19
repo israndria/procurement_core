@@ -55,6 +55,7 @@ def run() -> int:
             "Tender selesai: "
             f"updated={tender.get('updated', 0)}, "
             f"unchanged={tender.get('unchanged', 0)}, "
+            f"jadwal_kosong={tender.get('empty', 0)}, "
             f"failed={tender.get('failed', 0)}"
         )
     except Exception as exc:
