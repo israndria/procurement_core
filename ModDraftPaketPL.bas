@@ -1484,7 +1484,12 @@ Public Sub CetakBAReviuPLPDF()
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
 
+    ' Recalculate before saving. Python reads saved cached values from
+    ' satu_data via openpyxl(data_only=True); without this, Tanggal_acara_reviu
+    ' can remain on the previous cached date even when @ Master Data is current.
     On Error Resume Next
+    ThisWorkbook.Worksheets(MD_SHEET).Calculate
+    ThisWorkbook.Worksheets(WM_SHEET_BA).Calculate
     ThisWorkbook.Save
     On Error GoTo 0
 
