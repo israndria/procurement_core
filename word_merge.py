@@ -1100,8 +1100,18 @@ def _strip_pl_ba_signature_header(wd_doc) -> bool:
 def _word_process_id(word_app, word_doc=None):
     """Ambil PID instance Word yang dibuat DispatchEx; None jika gagal."""
     import ctypes
-    for owner in (word_app, getattr(word_app, "ActiveWindow", None), word_doc,
-                  getattr(word_doc, "ActiveWindow", None) if word_doc is not None else None):
+    owners = [word_app, word_doc]
+    for obj in (word_app, word_doc):
+        if obj is None:
+            continue
+        try:
+            owners.append(obj.ActiveWindow)
+        except Exception:
+            # Word hidden tanpa window aktif adalah kondisi normal saat export PDF.
+            pass
+    for owner in owners:
+        if owner is None:
+            continue
         try:
             hwnd = int(getattr(owner, "Hwnd"))
             pid = ctypes.c_ulong(0)
