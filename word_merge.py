@@ -1069,32 +1069,16 @@ def _next_available_pdf_path(target_path):
 
 
 def _strip_pl_ba_signature_header(wd_doc) -> bool:
-    """Hapus header ter-link pada section lembar tanda tangan BA Reviu PL.
+    """Best-effort header cleanup yang tidak boleh mengganggu export PDF.
 
-    Template BA Reviu PLJKK memakai section baru untuk lembar 3, tetapi header
-    section tersebut masih ``LinkToPrevious``. Akibatnya header instansi dari
-    halaman 1-2 ikut tercetak di halaman tanda tangan. Perubahan hanya berlaku
-    pada salinan Word sementara yang akan diekspor/print.
+    ``Document.GoTo(wdGoToPage, ...)`` dan perubahan ``Header.LinkToPrevious``
+    pada salinan BA Reviu hasil create-folder dapat membuat Word 2013/365
+    crash. COM lalu mengembalikan ``RPC server unavailable`` dan PDF gagal
+    dibuat. Header resmi sudah diproses sebelum Word dibuka oleh
+    ``apply_header_to_copy``; cleanup kosmetik ini karena itu sengaja dibuat
+    no-op sampai ada jalur XML yang aman.
     """
-    try:
-        if int(wd_doc.ComputeStatistics(2)) < 3 or wd_doc.Sections.Count < 2:
-            return False
-        page_two = wd_doc.GoTo(1, 1, 2)  # wdGoToPage, wdGoToAbsolute
-        page_three = wd_doc.GoTo(1, 1, 3)
-        section_two = int(page_two.Information(2))  # wdActiveEndSectionNumber
-        section_three = int(page_three.Information(2))
-        if section_three <= section_two:
-            return False
-
-        header_section = wd_doc.Sections(section_three)
-        for header_kind in (1, 2, 3):  # primary, first-page, even-page
-            header = header_section.Headers(header_kind)
-            header.LinkToPrevious = False
-            header.Range.Text = ""
-        return True
-    except Exception as exc:
-        print(f"Warning: header lembar tanda tangan PL tidak dihapus: {exc}")
-        return False
+    return False
 
 
 def _word_process_id(word_app, word_doc=None):
