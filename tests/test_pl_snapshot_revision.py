@@ -5,8 +5,13 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from pl_snapshot_revision import (
+    FAMILY_PLPK,
+    FAMILY_PLJKK,
     FORMULA_ADDRESSES,
     IMMUTABLE_ADDRESSES,
+    LAYOUT_VERSION_PLPK,
+    PLPK_FORMULA_ADDRESSES,
+    PLPK_WHITELIST_ADDRESSES,
     CELL_METADATA,
     SnapshotError,
     WHITELIST_ADDRESSES,
@@ -33,6 +38,32 @@ def _write_snapshot(path: Path, *, code: str = "11000000000", overrides=None, om
         if address in omit:
             continue
         default = ("formula", f"={address}") if address in FORMULA_ADDRESSES else ("text", f"old-{address}")
+        cell_type, text = overrides.get(address, default)
+        node = ET.SubElement(cells, "cell", address=address, type=cell_type)
+        node.text = text
+    path.write_bytes(ET.tostring(root, encoding="utf-8", xml_declaration=True))
+
+
+def _write_profile_snapshot(path: Path, family: str, *, code: str = "11000000000", overrides=None, omit=()):
+    overrides = overrides or {}
+    whitelist = PLPK_WHITELIST_ADDRESSES if family == FAMILY_PLPK else WHITELIST_ADDRESSES
+    formulas = PLPK_FORMULA_ADDRESSES if family == FAMILY_PLPK else FORMULA_ADDRESSES
+    layout = LAYOUT_VERSION_PLPK if family == FAMILY_PLPK else "PLJKK-MASTER-DATA-v1"
+    root = ET.Element(
+        "snapshot",
+        schema="pokja-pl-master-data",
+        version="2",
+        family=family,
+        layout_version=layout,
+        saved_at="2026-08-21 00:00:00",
+        workbook="test.xlsm",
+        kode_paket=code,
+    )
+    cells = ET.SubElement(root, "cells")
+    for address in sorted(whitelist):
+        if address in omit:
+            continue
+        default = ("formula", f"={address}") if address in formulas else ("text", f"old-{address}")
         cell_type, text = overrides.get(address, default)
         node = ET.SubElement(cells, "cell", address=address, type=cell_type)
         node.text = text
@@ -152,6 +183,34 @@ def test_snapshot_rejects_empty_or_mismatched_package_code(tmp_path):
         validate_snapshot(empty)
     with pytest.raises(SnapshotError, match="tidak cocok"):
         validate_snapshot(mismatched, expected_kode_paket="11000000000")
+
+
+def test_plpk_profile_contains_unique_fields_and_excludes_reserved_rows():
+    assert {"C28", "C39", "C45", "C51", "C56", "C63", "C64", "C66", "C75", "C77", "C82", "C89"} <= PLPK_WHITELIST_ADDRESSES
+    assert not {f"C{row}" for row in range(57, 63)} & PLPK_WHITELIST_ADDRESSES
+    assert {"H15", "H18", "I17", "I18"} <= PLPK_WHITELIST_ADDRESSES
+    assert {"H18", "I17", "I18"} <= PLPK_FORMULA_ADDRESSES
+
+
+def test_profile_collision_is_rejected_and_v1_stays_legacy(tmp_path):
+    plpk = tmp_path / "plpk.xml"
+    pljkk = tmp_path / "pljkk.xml"
+    _write_profile_snapshot(plpk, FAMILY_PLPK)
+    _write_profile_snapshot(pljkk, FAMILY_PLJKK)
+
+    assert parse_snapshot(plpk).family == FAMILY_PLPK
+    assert parse_snapshot(pljkk).family == FAMILY_PLJKK
+    with pytest.raises(SnapshotError, match="Family/layout"):
+        compare_snapshots(plpk, pljkk)
+
+
+def test_plpk_wrong_family_proposal_is_rejected(tmp_path):
+    current = tmp_path / "current.xml"
+    proposal = tmp_path / "proposal.xml"
+    _write_profile_snapshot(current, FAMILY_PLPK)
+    _write_profile_snapshot(proposal, FAMILY_PLJKK)
+    with pytest.raises(SnapshotError, match="Family/layout"):
+        promote_proposal(proposal, current)
 
 
 def test_vba_save_keeps_first_baseline_and_load_rejects_empty_code():

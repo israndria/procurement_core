@@ -18,6 +18,23 @@ Proposal yang dibuat melalui `seed-proposal` membawa atribut
 `source_sha256`. Atribut ini mencegah proposal lama menimpa snapshot current
 yang sudah berubah karena `Save Data` baru.
 
+## Kontrak profile/layout
+
+Snapshot baru memakai `version="2"` dan wajib menyimpan:
+
+- `family="PLJKK"`, `layout_version="PLJKK-MASTER-DATA-v1"`; atau
+- `family="PLPK"`, `layout_version="PLPK-MASTER-DATA-v1"`.
+
+Map PLJKK dan PLPK tidak boleh digabung. Alamat yang sama mempunyai arti
+berbeda pada kedua workbook, terutama `C51:C63`. Profile PLPK mencakup
+personil `C33:C38`, alat/kapasitas/jumlah `C39:C56`, risiko K3 `C63:C64`,
+uraian HPS `C66:C75`, peserta `C77:C80`, metadata Nota Dinas `C82:C89`,
+serta blok tanggal Dokpil `H15:H18` dan `I17:I18`.
+
+`C57:C62` pada PLPK adalah field helper/reserved dan sengaja tidak masuk
+snapshot. XML v1 tanpa atribut profile tetap dibaca sebagai legacy PLJKK;
+XML v1 tidak boleh dipakai untuk workbook PLPK.
+
 `Save Data` membuat baseline hanya bila baseline belum ada. Save berikutnya
 hanya memperbarui current dan tidak menimpa baseline.
 
@@ -53,6 +70,9 @@ hanya memperbarui current dan tidak menimpa baseline.
      --expected-kode-paket 11000000000
    ```
 
+   Validasi profile dapat diperketat dengan `--expected-family PLPK` atau
+   `--expected-family PLJKK`.
+
 7. Jalankan `Load Data` di Excel. VBA membaca current yang sudah divalidasi.
 
 ## Aturan AI
@@ -67,6 +87,7 @@ hanya memperbarui current dan tidak menimpa baseline.
   dilaporkan agar user dapat menilai substansinya.
 - Setiap perbedaan harus memiliki sumber dokumen dan halaman dalam laporan AI.
 - Jika kode paket kosong, berbeda, atau proposal tidak lengkap, promosi ditolak.
+- Proposal, current, dan baseline dengan family/layout berbeda ditolak.
 - Jika current berubah setelah proposal dibuat, promosi ditolak dan proposal
   harus dibuat ulang. Ini mencegah revisi stale menimpa koreksi terbaru.
 - File XML dapat dibaca, dibandingkan, dan diedit AI tanpa membuka Excel.

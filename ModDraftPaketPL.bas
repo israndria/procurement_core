@@ -95,7 +95,12 @@ Private m_SilentMode As Boolean
 
 ' Local data snapshot
 Private Const SNAPSHOT_SCHEMA_PL As String = "pokja-pl-master-data"
-Private Const SNAPSHOT_VERSION_PL As String = "1"
+Private Const SNAPSHOT_VERSION_PL As String = "2"
+Private Const SNAPSHOT_LEGACY_VERSION_PL As String = "1"
+Private Const SNAPSHOT_FAMILY_PLJKK As String = "PLJKK"
+Private Const SNAPSHOT_FAMILY_PLPK As String = "PLPK"
+Private Const SNAPSHOT_LAYOUT_PLJKK As String = "PLJKK-MASTER-DATA-v1"
+Private Const SNAPSHOT_LAYOUT_PLPK As String = "PLPK-MASTER-DATA-v1"
 Private Const SNAPSHOT_FILE_PL As String = "input_data_snapshot.xml"
 Private Const SNAPSHOT_BASELINE_FILE_PL As String = "input_data_baseline.xml"
 
@@ -2074,6 +2079,8 @@ Public Sub LoadDataPL()
     Dim snapshotCode As String
     Dim currentCode As String
     Dim address As String
+    Dim snapshotFamily As String
+    Dim workbookFamily As String
     Dim applied As Long
     Dim seen As Object
 
@@ -2101,8 +2108,25 @@ Public Sub LoadDataPL()
     If CStr(root.getAttribute("schema")) <> SNAPSHOT_SCHEMA_PL Then
         Err.Raise vbObjectError + 2104, , "Schema snapshot tidak cocok."
     End If
-    If CStr(root.getAttribute("version")) <> SNAPSHOT_VERSION_PL Then
+    If Not IsSupportedSnapshotVersionPL(CStr(root.getAttribute("version"))) Then
         Err.Raise vbObjectError + 2105, , "Versi snapshot belum didukung."
+    End If
+
+    workbookFamily = SnapshotFamilyPL(wsMD)
+    If CStr(root.getAttribute("version")) = SNAPSHOT_LEGACY_VERSION_PL Then
+        snapshotFamily = SNAPSHOT_FAMILY_PLJKK
+    Else
+        snapshotFamily = UCase$(Trim$(CStr(root.getAttribute("family"))))
+        If snapshotFamily = "" Then Err.Raise vbObjectError + 2116, , "Family snapshot kosong."
+        If snapshotFamily <> workbookFamily Then
+            Err.Raise vbObjectError + 2117, , "Family snapshot (" & snapshotFamily & ") tidak cocok dengan workbook (" & workbookFamily & ")."
+        End If
+        If CStr(root.getAttribute("layout_version")) <> SnapshotLayoutVersionPL(workbookFamily) Then
+            Err.Raise vbObjectError + 2118, , "Layout snapshot tidak cocok dengan workbook."
+        End If
+    End If
+    If snapshotFamily <> workbookFamily Then
+        Err.Raise vbObjectError + 2119, , "Snapshot legacy PLJKK tidak boleh dimuat ke workbook PLPK."
     End If
 
     snapshotCode = Trim$(CStr(root.getAttribute("kode_paket")))
@@ -2128,6 +2152,7 @@ Public Sub LoadDataPL()
     Set seen = CreateObject("Scripting.Dictionary")
     seen.CompareMode = 1
 
+    ' Pass 1: validasi seluruh node sebelum satu cell pun ditulis.
     Application.EnableEvents = False
     For Each node In nodes
         address = UCase$(Trim$(CStr(node.getAttribute("address"))))
@@ -2140,11 +2165,17 @@ Public Sub LoadDataPL()
                 Err.Raise vbObjectError + 2114, "LoadDataPL", "Alamat snapshot tidak diizinkan: " & address
             End If
         Else
-            If IsSnapshotReadOnlyAddressPL(address) Then
+            If IsSnapshotReadOnlyAddressPL(address, workbookFamily, wsMD) Then
                 If Not SnapshotNodeMatchesCurrentPL(wsMD.Range(address), node) Then
                     Err.Raise vbObjectError + 2115, "LoadDataPL", "Field read-only berubah: " & address
                 End If
             End If
+        End If
+    Next node
+    ' Pass 2: semua node sudah lolos kontrak profile, baru tulis.
+    For Each node In nodes
+        address = UCase$(Trim$(CStr(node.getAttribute("address"))))
+        If IsSafeSnapshotAddressPL(wsMD, address) Then
             ApplySnapshotCellPL wsMD.Range(address), node
             applied = applied + 1
         End If
@@ -2158,8 +2189,8 @@ Public Sub LoadDataPL()
     Exit Sub
 
 ErrLoadData:
-    If m_SilentMode Then Err.Raise vbObjectError + 2110, "LoadDataPL", Err.Description
     Application.EnableEvents = True
+    If m_SilentMode Then Err.Raise vbObjectError + 2110, "LoadDataPL", Err.Description
     If Not m_SilentMode Then MsgBox "Gagal Load Data: " & Err.Description, vbExclamation, "Load Data"
 End Sub
 
@@ -2173,11 +2204,17 @@ Private Sub WriteSnapshotXMLPL(ByVal path As String, ByVal wsMD As Worksheet)
     Dim cellType As String
     Dim parts() As String
     Dim partIndex As Long
+    Dim family As String
+    Dim layoutVersion As String
 
-    ReDim parts(0 To 128)
+    family = SnapshotFamilyPL(wsMD)
+    layoutVersion = SnapshotLayoutVersionPL(family)
+    ReDim parts(0 To 256)
     parts(0) = "<?xml version=""1.0"" encoding=""UTF-8""?>" & _
                "<snapshot schema=""" & XmlEscapePL(SNAPSHOT_SCHEMA_PL) & """" & _
                " version=""" & XmlEscapePL(SNAPSHOT_VERSION_PL) & """" & _
+               " family=""" & XmlEscapePL(family) & """" & _
+               " layout_version=""" & XmlEscapePL(layoutVersion) & """" & _
                " saved_at=""" & XmlEscapePL(Format$(Now, "yyyy-mm-dd hh:nn:ss")) & """" & _
                " workbook=""" & XmlEscapePL(ThisWorkbook.Name) & """" & _
                " kode_paket=""" & XmlEscapePL(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value)) & """>" & _
@@ -2187,9 +2224,9 @@ Private Sub WriteSnapshotXMLPL(ByVal path As String, ByVal wsMD As Worksheet)
     ' Snapshot hanya field data yang memang boleh dipulihkan. Jangan memakai
     ' UsedRange: formatting/label statis dapat membuat range sekitar 1.000 sel
     ' dan membuat Load Data lambat. Hindari pembuatan object DOM per cell.
-    For actualRow = 1 To 63
+    For actualRow = 1 To 106
         For actualCol = 1 To 9
-            If IsSnapshotCellWhitelistedPL(actualRow, actualCol) Then
+            If IsSnapshotCellWhitelistedPL(actualRow, actualCol, family) Then
                 Set currentCell = wsMD.Cells(actualRow, actualCol)
                 cellValue = currentCell.Value2
                 formulaValue = currentCell.Formula
@@ -2297,7 +2334,7 @@ Private Function IsSafeSnapshotAddressPL(ByVal wsMD As Worksheet, ByVal address 
         Exit Function
     End If
     IsSafeSnapshotAddressPL = (target.Parent.Name = MD_SHEET) And _
-                              IsSnapshotCellWhitelistedPL(target.Row, target.Column)
+                              IsSnapshotCellWhitelistedPL(target.Row, target.Column, SnapshotFamilyPL(wsMD))
 End Function
 
 Private Function IsIgnorableMergedSnapshotAddressPL(ByVal wsMD As Worksheet, ByVal address As String) As Boolean
@@ -2311,11 +2348,20 @@ Private Function IsIgnorableMergedSnapshotAddressPL(ByVal wsMD As Worksheet, ByV
     IsIgnorableMergedSnapshotAddressPL = (Len(Trim$(CStr(target.Value2))) = 0)
 End Function
 
-Private Function IsSnapshotReadOnlyAddressPL(ByVal address As String) As Boolean
+Private Function IsSnapshotReadOnlyAddressPL(ByVal address As String, _
+                                             Optional ByVal family As String = "PLJKK", _
+                                             Optional ByVal wsMD As Worksheet = Nothing) As Boolean
     Select Case UCase$(address)
         Case "C3", "F2", "C11", "C12", "C20", "C22", "C24", "C26", _
              "H10", "H11", "I8", "I9", "I10"
             IsSnapshotReadOnlyAddressPL = True
+        Case "H18", "I17", "I18"
+            IsSnapshotReadOnlyAddressPL = (UCase$(family) = SNAPSHOT_FAMILY_PLPK)
+        Case "C21"
+            ' PLPK dapat menyimpan tanggal manual; formula existing tetap protected.
+            If UCase$(family) = SNAPSHOT_FAMILY_PLPK And Not wsMD Is Nothing Then
+                IsSnapshotReadOnlyAddressPL = (Left$(CStr(wsMD.Range("C21").Formula), 1) = "=")
+            End If
     End Select
 End Function
 
@@ -2339,10 +2385,33 @@ Private Function SnapshotNodeMatchesCurrentPL(ByVal target As Range, ByVal node 
 ExitFunction:
 End Function
 
-Private Function IsSnapshotCellWhitelistedPL(ByVal rowNum As Long, ByVal colNum As Long) As Boolean
+Private Function IsSnapshotCellWhitelistedPL(ByVal rowNum As Long, ByVal colNum As Long, _
+                                             Optional ByVal family As String = "PLJKK") As Boolean
     ' Canonical snapshot field map @ Master Data.
     ' C = input utama/SBU/personil/peserta/metadata; F2 = kode unik;
     ' H = komponen tanggal; I = hasil tanggal yang tampil di form.
+    If UCase$(family) = SNAPSHOT_FAMILY_PLPK Then
+        Select Case colNum
+            Case 3
+                IsSnapshotCellWhitelistedPL = _
+                    (rowNum >= 3 And rowNum <= 28) Or _
+                    (rowNum >= 30 And rowNum <= 31) Or _
+                    (rowNum >= 33 And rowNum <= 38) Or _
+                    (rowNum >= 39 And rowNum <= 56) Or _
+                    (rowNum >= 63 And rowNum <= 64) Or _
+                    (rowNum >= 66 And rowNum <= 75) Or _
+                    (rowNum >= 77 And rowNum <= 80) Or _
+                    (rowNum >= 82 And rowNum <= 89)
+            Case 6
+                IsSnapshotCellWhitelistedPL = (rowNum = 2)
+            Case 8
+                IsSnapshotCellWhitelistedPL = (rowNum >= 8 And rowNum <= 11) Or (rowNum >= 15 And rowNum <= 18)
+            Case 9
+                IsSnapshotCellWhitelistedPL = (rowNum >= 8 And rowNum <= 10) Or (rowNum >= 17 And rowNum <= 18)
+        End Select
+        Exit Function
+    End If
+
     Select Case colNum
         Case 3 ' C
             IsSnapshotCellWhitelistedPL = _
@@ -2358,6 +2427,32 @@ Private Function IsSnapshotCellWhitelistedPL(ByVal rowNum As Long, ByVal colNum 
         Case 9 ' I8:I10: tanggal hasil/formula yang tampil
             IsSnapshotCellWhitelistedPL = (rowNum >= 8 And rowNum <= 10)
     End Select
+End Function
+
+Private Function IsSupportedSnapshotVersionPL(ByVal version As String) As Boolean
+    IsSupportedSnapshotVersionPL = (version = SNAPSHOT_VERSION_PL Or version = SNAPSHOT_LEGACY_VERSION_PL)
+End Function
+
+Private Function SnapshotFamilyPL(ByVal wsMD As Worksheet) As String
+    Dim marker As String
+    marker = LCase$(Trim$(CStr(wsMD.Cells(39, 2).Value2))) & " " & _
+             LCase$(Trim$(CStr(wsMD.Cells(63, 2).Value2))) & " " & _
+             LCase$(Trim$(CStr(wsMD.Cells(66, 2).Value2)))
+    If InStr(1, marker, "alat", vbTextCompare) > 0 Or _
+       InStr(1, marker, "resiko", vbTextCompare) > 0 Or _
+       InStr(1, marker, "uraian pekerjaan 1", vbTextCompare) > 0 Then
+        SnapshotFamilyPL = SNAPSHOT_FAMILY_PLPK
+    Else
+        SnapshotFamilyPL = SNAPSHOT_FAMILY_PLJKK
+    End If
+End Function
+
+Private Function SnapshotLayoutVersionPL(ByVal family As String) As String
+    If UCase$(family) = SNAPSHOT_FAMILY_PLPK Then
+        SnapshotLayoutVersionPL = SNAPSHOT_LAYOUT_PLPK
+    Else
+        SnapshotLayoutVersionPL = SNAPSHOT_LAYOUT_PLJKK
+    End If
 End Function
 
 Private Sub ApplySnapshotCellPL(ByVal target As Range, ByVal node As Object)
