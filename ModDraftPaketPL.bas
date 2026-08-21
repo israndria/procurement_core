@@ -97,6 +97,7 @@ Private m_SilentMode As Boolean
 Private Const SNAPSHOT_SCHEMA_PL As String = "pokja-pl-master-data"
 Private Const SNAPSHOT_VERSION_PL As String = "1"
 Private Const SNAPSHOT_FILE_PL As String = "input_data_snapshot.xml"
+Private Const SNAPSHOT_BASELINE_FILE_PL As String = "input_data_baseline.xml"
 
 ' Reset status bar secara sinkron.
 ' Callback Application.OnTime tidak dipakai: callback tertunda dapat
@@ -1969,9 +1970,12 @@ End Sub
 Public Sub SaveDataPL()
     Dim wsMD As Worksheet
     Dim snapshotPath As String
+    Dim baselinePath As String
     Dim tempPath As String
     Dim backupPath As String
     Dim fso As Object
+    Dim hadPreviousSnapshot As Boolean
+    Dim snapshotTouched As Boolean
     On Error GoTo ErrSaveData
 
     Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
@@ -1981,8 +1985,9 @@ Public Sub SaveDataPL()
     End If
 
     snapshotPath = ThisWorkbook.Path & "\" & SNAPSHOT_FILE_PL
+    baselinePath = ThisWorkbook.Path & "\" & SNAPSHOT_BASELINE_FILE_PL
     tempPath = snapshotPath & ".tmp"
-    backupPath = snapshotPath & ".bak-" & Format$(Now, "yyyymmdd-hhnnss")
+    backupPath = NextSnapshotBackupPathPL(snapshotPath)
     Set fso = CreateObject("Scripting.FileSystemObject")
     If fso.FileExists(tempPath) Then fso.DeleteFile tempPath, True
 
@@ -1993,14 +1998,25 @@ Public Sub SaveDataPL()
     ' Gunakan ADODB binary stream untuk backup dan finalisasi agar hasil
     ' benar-benar tersimpan, sementara temp tetap memisahkan proses build.
     If fso.FileExists(snapshotPath) Then
+        hadPreviousSnapshot = True
         CopyFileBinaryPL snapshotPath, backupPath
         If Not fso.FileExists(backupPath) Then Err.Raise vbObjectError + 2107, , "Backup snapshot tidak terbentuk."
+        snapshotTouched = True
         fso.DeleteFile snapshotPath, True
         If fso.FileExists(snapshotPath) Then Err.Raise vbObjectError + 2108, , "Snapshot lama tidak bisa dihapus."
+    Else
+        snapshotTouched = True
     End If
     CopyFileBinaryPL tempPath, snapshotPath
     If Not fso.FileExists(snapshotPath) Then Err.Raise vbObjectError + 2102, , "File snapshot final tidak terbentuk."
     fso.DeleteFile tempPath, True
+
+    ' Baseline pertama immutable: Save berikutnya hanya memperbarui current.
+    ' Ini menjadi acuan AI saat membandingkan dokumen PPK revisi.
+    If Not fso.FileExists(baselinePath) Then
+        CopyFileBinaryPL snapshotPath, baselinePath
+        If Not fso.FileExists(baselinePath) Then Err.Raise vbObjectError + 2112, , "Baseline snapshot tidak terbentuk."
+    End If
 
     If Not m_SilentMode Then MsgBox "Data berhasil disimpan." & vbCrLf & snapshotPath, vbInformation, "Save Data"
     Exit Sub
@@ -2017,11 +2033,36 @@ ErrSaveData:
     If tempPath <> "" Then
         If fso.FileExists(tempPath) Then fso.DeleteFile tempPath, True
     End If
+    ' Jika finalisasi atau pembuatan baseline gagal, pulihkan current lama.
+    ' Backup tetap dibiarkan sebagai artefak recoverable.
+    If snapshotTouched Then
+        If fso.FileExists(snapshotPath) Then fso.DeleteFile snapshotPath, True
+        If hadPreviousSnapshot And backupPath <> "" Then
+            If fso.FileExists(backupPath) Then CopyFileBinaryPL backupPath, snapshotPath
+        End If
+    End If
     On Error GoTo 0
     If m_SilentMode Then Err.Raise vbObjectError + 2106, "SaveDataPL", _
         "Gagal Save Data [" & CStr(errNo) & "]: " & errDesc
     If Not m_SilentMode Then MsgBox "Gagal Save Data [" & CStr(errNo) & "]: " & errDesc, vbExclamation, "Save Data"
 End Sub
+
+Private Function NextSnapshotBackupPathPL(ByVal snapshotPath As String) As String
+    Dim fso As Object
+    Dim stamp As String
+    Dim candidate As String
+    Dim suffix As Long
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    stamp = Format$(Now, "yyyymmdd-hhnnss")
+    candidate = snapshotPath & ".bak-" & stamp
+    suffix = 1
+    Do While fso.FileExists(candidate)
+        suffix = suffix + 1
+        candidate = snapshotPath & ".bak-" & stamp & "-" & CStr(suffix)
+    Loop
+    NextSnapshotBackupPathPL = candidate
+End Function
 
 Public Sub LoadDataPL()
     Dim wsMD As Worksheet
@@ -2034,6 +2075,7 @@ Public Sub LoadDataPL()
     Dim currentCode As String
     Dim address As String
     Dim applied As Long
+    Dim seen As Object
 
     On Error GoTo ErrLoadData
     Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
@@ -2065,6 +2107,13 @@ Public Sub LoadDataPL()
 
     snapshotCode = Trim$(CStr(root.getAttribute("kode_paket")))
     currentCode = Trim$(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))
+    If snapshotCode = "" Or currentCode = "" Then
+        If m_SilentMode Then Err.Raise vbObjectError + 2111, "LoadDataPL", _
+            "Load dibatalkan: kode paket snapshot/workbook kosong."
+        If Not m_SilentMode Then MsgBox "Load dibatalkan: kode paket snapshot/workbook kosong.", _
+               vbExclamation, "Load Data"
+        Exit Sub
+    End If
     If snapshotCode <> "" And currentCode <> "" And snapshotCode <> currentCode Then
         If Not m_SilentMode Then MsgBox "Snapshot milik kode paket " & snapshotCode & ", bukan " & currentCode & "." & _
                vbCrLf & "Load dibatalkan agar data tidak tertukar.", vbExclamation, "Load Data"
@@ -2076,11 +2125,26 @@ Public Sub LoadDataPL()
         If Not m_SilentMode Then MsgBox "Snapshot tidak berisi data sel.", vbInformation, "Load Data"
         Exit Sub
     End If
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = 1
 
     Application.EnableEvents = False
     For Each node In nodes
-        address = CStr(node.getAttribute("address"))
-        If IsSafeSnapshotAddressPL(wsMD, address) Then
+        address = UCase$(Trim$(CStr(node.getAttribute("address"))))
+        If seen.Exists(address) Then
+            Err.Raise vbObjectError + 2113, "LoadDataPL", "Alamat snapshot duplikat: " & address
+        End If
+        seen.Add address, True
+        If Not IsSafeSnapshotAddressPL(wsMD, address) Then
+            If Not IsIgnorableMergedSnapshotAddressPL(wsMD, address) Then
+                Err.Raise vbObjectError + 2114, "LoadDataPL", "Alamat snapshot tidak diizinkan: " & address
+            End If
+        Else
+            If IsSnapshotReadOnlyAddressPL(address) Then
+                If Not SnapshotNodeMatchesCurrentPL(wsMD.Range(address), node) Then
+                    Err.Raise vbObjectError + 2115, "LoadDataPL", "Field read-only berubah: " & address
+                End If
+            End If
             ApplySnapshotCellPL wsMD.Range(address), node
             applied = applied + 1
         End If
@@ -2234,6 +2298,45 @@ Private Function IsSafeSnapshotAddressPL(ByVal wsMD As Worksheet, ByVal address 
     End If
     IsSafeSnapshotAddressPL = (target.Parent.Name = MD_SHEET) And _
                               IsSnapshotCellWhitelistedPL(target.Row, target.Column)
+End Function
+
+Private Function IsIgnorableMergedSnapshotAddressPL(ByVal wsMD As Worksheet, ByVal address As String) As Boolean
+    Dim target As Range
+    On Error Resume Next
+    Set target = wsMD.Range(address)
+    On Error GoTo 0
+    If target Is Nothing Then Exit Function
+    If target.Cells.CountLarge <> 1 Or Not target.MergeCells Then Exit Function
+    If target.MergeArea.Cells(1, 1).Address(False, False) = target.Address(False, False) Then Exit Function
+    IsIgnorableMergedSnapshotAddressPL = (Len(Trim$(CStr(target.Value2))) = 0)
+End Function
+
+Private Function IsSnapshotReadOnlyAddressPL(ByVal address As String) As Boolean
+    Select Case UCase$(address)
+        Case "C3", "F2", "C11", "C12", "C20", "C22", "C24", "C26", _
+             "H10", "H11", "I8", "I9", "I10"
+            IsSnapshotReadOnlyAddressPL = True
+    End Select
+End Function
+
+Private Function SnapshotNodeMatchesCurrentPL(ByVal target As Range, ByVal node As Object) As Boolean
+    Dim cellType As String
+    Dim textValue As String
+    Dim currentValue As String
+    On Error GoTo ExitFunction
+
+    cellType = LCase$(CStr(node.getAttribute("type")))
+    textValue = CStr(node.Text)
+    Select Case cellType
+        Case "formula"
+            SnapshotNodeMatchesCurrentPL = (CStr(target.Formula) = textValue)
+        Case "empty"
+            SnapshotNodeMatchesCurrentPL = (Len(Trim$(CStr(target.Value2))) = 0)
+        Case Else
+            currentValue = CStr(target.Value2)
+            SnapshotNodeMatchesCurrentPL = (currentValue = textValue)
+    End Select
+ExitFunction:
 End Function
 
 Private Function IsSnapshotCellWhitelistedPL(ByVal rowNum As Long, ByVal colNum As Long) As Boolean
