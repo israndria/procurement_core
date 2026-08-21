@@ -336,7 +336,7 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnKodeUnik", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnRefreshDataPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK", "btnGabungBAReviu", "btnGabungBAPLJKK")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnKodeUnik", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnRefreshDataPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK", "btnGabungBAReviu", "btnGabungBAPLJKK", "btnSaveInputData", "btnLoadInputData")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
@@ -374,6 +374,8 @@ def inject_pl(filepath: str):
                     'btnGabungReviu_PL':  (790.5, 366.1, 129.9, 28.3),
                     'btnCetakBAPLJKK':    (655.2, 397.5, 130.2, 27.8),
                     'btnGabungBAPLJKK':  (790.5, 397.5, 129.9, 27.8),
+                    'btnSaveInputData':  (1060.0, 260.0, 130.0, 40.0),
+                    'btnLoadInputData':  (1195.0, 260.0, 130.0, 40.0),
                 }
                 print('  Layout tombol: PLPK (baseline manual)')
             else:
@@ -398,6 +400,8 @@ def inject_pl(filepath: str):
                     'btnIsiEvaluasiPL':   (931.0, 211.5, 130.5, 27.3),
                     'btnCetakBAPLJKK':    (_X[0], _Y[4], _W[0], _H[4]),
                     'btnGabungBAPLJKK':  (_X[1], _Y[4], _W[1], _H[4]),
+                    'btnSaveInputData':  (_X[3], _Y[0], _W[3], _H[0]),
+                    'btnLoadInputData':  (_X[3], _Y[1], _W[3], _H[1]),
                 }
                 print('  Layout tombol: PLJKK')
 
@@ -446,6 +450,8 @@ def inject_pl(filepath: str):
             # dipertahankan agar injector tidak meninggalkan tombol duplikat.
             add_btn("btnCetakBAPLJKK",    ba_label,    ba_macro,    (140, 20, 20))
             add_btn("btnGabungBAPLJKK",   gabung_label, gabung_macro, (100, 20, 80))
+            add_btn("btnSaveInputData",    "Save Data", "SaveDataPL", (0, 128, 96))
+            add_btn("btnLoadInputData",    "Load Data", "LoadDataPL", (0, 96, 160))
 
             # Sengaja TIDAK re-protect @ Master Data — user butuh edit bebas
             # (Aturan PL: sheet @ Master Data harus selalu unprotected)
@@ -476,10 +482,19 @@ def inject_pl(filepath: str):
 
 
 def find_bapljkk_files(root: str) -> list:
-    """Cari semua file BAPLJKK*.xlsm di bawah root."""
-    pattern = os.path.join(root, "**", "*BAPLJKK*.xlsm")
-    return [f for f in glob.glob(pattern, recursive=True)
-            if ".bak" not in f.lower() and "~$" not in os.path.basename(f)]
+    """Cari workbook PL JKK dan PL PK di bawah root.
+
+    Nama fungsi dipertahankan agar pemanggil lama tetap kompatibel.
+    """
+    patterns = (
+        os.path.join(root, "**", "*BAPLJKK*.xlsm"),
+        os.path.join(root, "**", "*BAPLPK*.xlsm"),
+    )
+    files = {
+        f for pattern in patterns for f in glob.glob(pattern, recursive=True)
+        if ".bak" not in f.lower() and "~$" not in os.path.basename(f)
+    }
+    return sorted(files)
 
 
 if __name__ == "__main__":

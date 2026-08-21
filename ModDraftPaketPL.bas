@@ -93,6 +93,11 @@ Private Const PLR_NOMOR_REKOM     As Integer = 63
 ' Silent mode: saat True, semua MsgBox di jalur fetch/isi di-skip (untuk trigger via COM headless)
 Private m_SilentMode As Boolean
 
+' Local data snapshot
+Private Const SNAPSHOT_SCHEMA_PL As String = "pokja-pl-master-data"
+Private Const SNAPSHOT_VERSION_PL As String = "1"
+Private Const SNAPSHOT_FILE_PL As String = "input_data_snapshot.xml"
+
 ' Reset status bar secara sinkron.
 ' Callback Application.OnTime tidak dipakai: callback tertunda dapat
 ' mengeksekusi macro saat konteks workbook/VBE sudah berubah dan memicu
@@ -1959,6 +1964,317 @@ End Sub
 
 
 ' ============================================================
+' LOCAL DATA SNAPSHOT: simpan/muat field data penting @ Master Data
+' ============================================================
+Public Sub SaveDataPL()
+    Dim wsMD As Worksheet
+    Dim snapshotPath As String
+    Dim tempPath As String
+    Dim backupPath As String
+    Dim fso As Object
+    On Error GoTo ErrSaveData
+
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+    If Len(Trim$(ThisWorkbook.Path)) = 0 Then
+        If Not m_SilentMode Then MsgBox "Workbook harus disimpan terlebih dahulu.", vbExclamation, "Save Data"
+        Exit Sub
+    End If
+
+    snapshotPath = ThisWorkbook.Path & "\" & SNAPSHOT_FILE_PL
+    tempPath = snapshotPath & ".tmp"
+    backupPath = snapshotPath & ".bak-" & Format$(Now, "yyyymmdd-hhnnss")
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FileExists(tempPath) Then fso.DeleteFile tempPath, True
+
+    WriteSnapshotXMLPL tempPath, wsMD
+    If Not fso.FileExists(tempPath) Then Err.Raise vbObjectError + 2101, , "File snapshot sementara tidak terbentuk."
+
+    ' FSO MoveFile dapat silent no-op pada file hasil ADODB di jalur Excel.
+    ' Gunakan ADODB binary stream untuk backup dan finalisasi agar hasil
+    ' benar-benar tersimpan, sementara temp tetap memisahkan proses build.
+    If fso.FileExists(snapshotPath) Then
+        CopyFileBinaryPL snapshotPath, backupPath
+        If Not fso.FileExists(backupPath) Then Err.Raise vbObjectError + 2107, , "Backup snapshot tidak terbentuk."
+        fso.DeleteFile snapshotPath, True
+        If fso.FileExists(snapshotPath) Then Err.Raise vbObjectError + 2108, , "Snapshot lama tidak bisa dihapus."
+    End If
+    CopyFileBinaryPL tempPath, snapshotPath
+    If Not fso.FileExists(snapshotPath) Then Err.Raise vbObjectError + 2102, , "File snapshot final tidak terbentuk."
+    fso.DeleteFile tempPath, True
+
+    If Not m_SilentMode Then MsgBox "Data berhasil disimpan." & vbCrLf & snapshotPath, vbInformation, "Save Data"
+    Exit Sub
+
+ErrSaveData:
+    Dim errNo As Long
+    Dim errDesc As String
+    Dim errSource As String
+    errNo = Err.Number
+    errDesc = Err.Description
+    errSource = Err.Source
+    On Error Resume Next
+    If fso Is Nothing Then Set fso = CreateObject("Scripting.FileSystemObject")
+    If tempPath <> "" Then
+        If fso.FileExists(tempPath) Then fso.DeleteFile tempPath, True
+    End If
+    On Error GoTo 0
+    If m_SilentMode Then Err.Raise vbObjectError + 2106, "SaveDataPL", _
+        "Gagal Save Data [" & CStr(errNo) & "]: " & errDesc
+    If Not m_SilentMode Then MsgBox "Gagal Save Data [" & CStr(errNo) & "]: " & errDesc, vbExclamation, "Save Data"
+End Sub
+
+Public Sub LoadDataPL()
+    Dim wsMD As Worksheet
+    Dim snapshotPath As String
+    Dim dom As Object
+    Dim root As Object
+    Dim nodes As Object
+    Dim node As Object
+    Dim snapshotCode As String
+    Dim currentCode As String
+    Dim address As String
+    Dim applied As Long
+
+    On Error GoTo ErrLoadData
+    Set wsMD = ThisWorkbook.Sheets(MD_SHEET)
+    If Len(Trim$(ThisWorkbook.Path)) = 0 Then
+        If Not m_SilentMode Then MsgBox "Workbook harus disimpan terlebih dahulu.", vbExclamation, "Load Data"
+        Exit Sub
+    End If
+
+    snapshotPath = ThisWorkbook.Path & "\" & SNAPSHOT_FILE_PL
+    If Dir(snapshotPath) = "" Then
+        If Not m_SilentMode Then MsgBox "Snapshot belum ada:" & vbCrLf & snapshotPath, vbInformation, "Load Data"
+        Exit Sub
+    End If
+
+    Set dom = CreateObject("MSXML2.DOMDocument.6.0")
+    dom.async = False
+    If Not dom.Load(snapshotPath) Then
+        Err.Raise vbObjectError + 2102, , "XML snapshot tidak valid."
+    End If
+
+    Set root = dom.SelectSingleNode("/snapshot")
+    If root Is Nothing Then Err.Raise vbObjectError + 2103, , "Root snapshot tidak ditemukan."
+    If CStr(root.getAttribute("schema")) <> SNAPSHOT_SCHEMA_PL Then
+        Err.Raise vbObjectError + 2104, , "Schema snapshot tidak cocok."
+    End If
+    If CStr(root.getAttribute("version")) <> SNAPSHOT_VERSION_PL Then
+        Err.Raise vbObjectError + 2105, , "Versi snapshot belum didukung."
+    End If
+
+    snapshotCode = Trim$(CStr(root.getAttribute("kode_paket")))
+    currentCode = Trim$(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))
+    If snapshotCode <> "" And currentCode <> "" And snapshotCode <> currentCode Then
+        If Not m_SilentMode Then MsgBox "Snapshot milik kode paket " & snapshotCode & ", bukan " & currentCode & "." & _
+               vbCrLf & "Load dibatalkan agar data tidak tertukar.", vbExclamation, "Load Data"
+        Exit Sub
+    End If
+
+    Set nodes = root.SelectNodes("./cells/cell")
+    If nodes.Length = 0 Then
+        If Not m_SilentMode Then MsgBox "Snapshot tidak berisi data sel.", vbInformation, "Load Data"
+        Exit Sub
+    End If
+
+    Application.EnableEvents = False
+    For Each node In nodes
+        address = CStr(node.getAttribute("address"))
+        If IsSafeSnapshotAddressPL(wsMD, address) Then
+            ApplySnapshotCellPL wsMD.Range(address), node
+            applied = applied + 1
+        End If
+    Next node
+    Application.EnableEvents = True
+
+    wsMD.Calculate
+    ThisWorkbook.Save
+    If Not m_SilentMode Then MsgBox applied & " sel berhasil dimuat dari snapshot." & vbCrLf & snapshotPath, _
+           vbInformation, "Load Data"
+    Exit Sub
+
+ErrLoadData:
+    If m_SilentMode Then Err.Raise vbObjectError + 2110, "LoadDataPL", Err.Description
+    Application.EnableEvents = True
+    If Not m_SilentMode Then MsgBox "Gagal Load Data: " & Err.Description, vbExclamation, "Load Data"
+End Sub
+
+Private Sub WriteSnapshotXMLPL(ByVal path As String, ByVal wsMD As Worksheet)
+    Dim currentCell As Range
+    Dim actualRow As Long
+    Dim actualCol As Long
+    Dim cellValue As Variant
+    Dim formulaValue As Variant
+    Dim textValue As String
+    Dim cellType As String
+    Dim parts() As String
+    Dim partIndex As Long
+
+    ReDim parts(0 To 128)
+    parts(0) = "<?xml version=""1.0"" encoding=""UTF-8""?>" & _
+               "<snapshot schema=""" & XmlEscapePL(SNAPSHOT_SCHEMA_PL) & """" & _
+               " version=""" & XmlEscapePL(SNAPSHOT_VERSION_PL) & """" & _
+               " saved_at=""" & XmlEscapePL(Format$(Now, "yyyy-mm-dd hh:nn:ss")) & """" & _
+               " workbook=""" & XmlEscapePL(ThisWorkbook.Name) & """" & _
+               " kode_paket=""" & XmlEscapePL(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value)) & """>" & _
+               "<cells>"
+    partIndex = 1
+
+    ' Snapshot hanya field data yang memang boleh dipulihkan. Jangan memakai
+    ' UsedRange: formatting/label statis dapat membuat range sekitar 1.000 sel
+    ' dan membuat Load Data lambat. Hindari pembuatan object DOM per cell.
+    For actualRow = 1 To 63
+        For actualCol = 1 To 9
+            If IsSnapshotCellWhitelistedPL(actualRow, actualCol) Then
+                Set currentCell = wsMD.Cells(actualRow, actualCol)
+                cellValue = currentCell.Value2
+                formulaValue = currentCell.Formula
+                cellType = SnapshotArrayCellTypePL(cellValue, formulaValue)
+                textValue = SnapshotArrayCellTextPL(cellValue, formulaValue, cellType)
+                If cellType = "error" Then textValue = CStr(currentCell.Text)
+                parts(partIndex) = SnapshotCellXMLPL(actualRow, actualCol, cellType, textValue)
+                partIndex = partIndex + 1
+            End If
+        Next actualCol
+    Next actualRow
+
+    parts(partIndex) = "</cells></snapshot>"
+    ReDim Preserve parts(0 To partIndex)
+    WriteUTF8PL path, Join(parts, "")
+End Sub
+
+Private Function SnapshotArrayCellTypePL(ByVal cellValue As Variant, ByVal formulaValue As Variant) As String
+    If VarType(formulaValue) = vbString Then
+        If Left$(CStr(formulaValue), 1) = "=" Then
+            SnapshotArrayCellTypePL = "formula"
+            Exit Function
+        End If
+    End If
+    If IsEmpty(cellValue) Then
+        SnapshotArrayCellTypePL = "empty"
+    ElseIf IsError(cellValue) Then
+        SnapshotArrayCellTypePL = "error"
+    ElseIf VarType(cellValue) = vbBoolean Then
+        SnapshotArrayCellTypePL = "boolean"
+    ElseIf IsNumeric(cellValue) Then
+        SnapshotArrayCellTypePL = "number"
+    Else
+        SnapshotArrayCellTypePL = "text"
+    End If
+End Function
+
+Private Function SnapshotArrayCellTextPL(ByVal cellValue As Variant, ByVal formulaValue As Variant, ByVal cellType As String) As String
+    Select Case cellType
+        Case "formula": SnapshotArrayCellTextPL = CStr(formulaValue)
+        Case "number":  SnapshotArrayCellTextPL = Trim$(Str$(CDbl(cellValue)))
+        Case "boolean"
+            If CBool(cellValue) Then
+                SnapshotArrayCellTextPL = "true"
+            Else
+                SnapshotArrayCellTextPL = "false"
+            End If
+        Case "error":   SnapshotArrayCellTextPL = "#ERROR"
+        Case Else:       SnapshotArrayCellTextPL = CStr(cellValue)
+    End Select
+End Function
+
+Private Function SnapshotCellXMLPL(ByVal rowNum As Long, ByVal colNum As Long, _
+                                    ByVal cellType As String, ByVal textValue As String) As String
+    On Error GoTo Fallback
+    If cellType = "empty" Then
+        SnapshotCellXMLPL = "<cell address=" & Chr$(34) & SnapshotAddressPL(rowNum, colNum) & _
+                            Chr$(34) & " type=" & Chr$(34) & "empty" & Chr$(34) & "></cell>"
+    Else
+        SnapshotCellXMLPL = "<cell address=" & Chr$(34) & SnapshotAddressPL(rowNum, colNum) & _
+                            Chr$(34) & " type=" & Chr$(34) & cellType & Chr$(34) & ">" & _
+                            XmlEscapePL(textValue) & "</cell>"
+    End If
+    Exit Function
+Fallback:
+    ' Satu cell anomali tidak boleh membatalkan snapshot seluruh sheet.
+    SnapshotCellXMLPL = "<cell address=" & Chr$(34) & CStr(rowNum) & "_" & CStr(colNum) & _
+                        Chr$(34) & " type=" & Chr$(34) & "text" & Chr$(34) & "></cell>"
+End Function
+
+Private Function SnapshotAddressPL(ByVal rowNum As Long, ByVal colNum As Long) As String
+    Dim letters As String
+    Dim n As Long
+    n = colNum
+    Do While n > 0
+        letters = Chr$(((n - 1) Mod 26) + 65) & letters
+        n = (n - 1) \ 26
+    Loop
+    SnapshotAddressPL = letters & CStr(rowNum)
+End Function
+
+Private Function XmlEscapePL(ByVal value As String) As String
+    Dim result As String
+    result = Replace(value, "&", "&amp;")
+    result = Replace(result, "<", "&lt;")
+    result = Replace(result, ">", "&gt;")
+    result = Replace(result, """", "&quot;")
+    result = Replace(result, "'", "&apos;")
+    XmlEscapePL = result
+End Function
+
+Private Function IsSafeSnapshotAddressPL(ByVal wsMD As Worksheet, ByVal address As String) As Boolean
+    Dim target As Range
+    If address = "" Or InStr(address, ":") > 0 Or InStr(address, "!") > 0 Then Exit Function
+    If InStr(address, "[") > 0 Or InStr(address, "]") > 0 Then Exit Function
+    Set target = Nothing
+    On Error Resume Next
+    Set target = wsMD.Range(address)
+    On Error GoTo 0
+    If target Is Nothing Then Exit Function
+    If target.Cells.CountLarge <> 1 Then Exit Function
+    If target.MergeCells Then
+        ' Jangan menulis anggota merged area. Field input @ Master Data
+        ' dipulihkan dari sel normal/top-left yang masuk whitelist.
+        Exit Function
+    End If
+    IsSafeSnapshotAddressPL = (target.Parent.Name = MD_SHEET) And _
+                              IsSnapshotCellWhitelistedPL(target.Row, target.Column)
+End Function
+
+Private Function IsSnapshotCellWhitelistedPL(ByVal rowNum As Long, ByVal colNum As Long) As Boolean
+    ' Canonical snapshot field map @ Master Data.
+    ' C = input utama/SBU/personil/peserta/metadata; F2 = kode unik;
+    ' H = komponen tanggal; I = hasil tanggal yang tampil di form.
+    Select Case colNum
+        Case 3 ' C
+            IsSnapshotCellWhitelistedPL = _
+                (rowNum >= 3 And rowNum <= 26) Or _
+                (rowNum >= 29 And rowNum <= 30) Or _
+                (rowNum >= 32 And rowNum <= 43) Or _
+                (rowNum >= 51 And rowNum <= 54) Or _
+                (rowNum >= 56 And rowNum <= 63)
+        Case 6 ' F2: kode unik
+            IsSnapshotCellWhitelistedPL = (rowNum = 2)
+        Case 8 ' H8:H11: tanggal/bulan/tahun/hari sumber/formula
+            IsSnapshotCellWhitelistedPL = (rowNum >= 8 And rowNum <= 11)
+        Case 9 ' I8:I10: tanggal hasil/formula yang tampil
+            IsSnapshotCellWhitelistedPL = (rowNum >= 8 And rowNum <= 10)
+    End Select
+End Function
+
+Private Sub ApplySnapshotCellPL(ByVal target As Range, ByVal node As Object)
+    Dim cellType As String
+    Dim textValue As String
+    cellType = LCase$(CStr(node.getAttribute("type")))
+    textValue = CStr(node.Text)
+
+    Select Case cellType
+        Case "empty": target.ClearContents
+        Case "formula": target.Formula = textValue
+        Case "number": target.Value2 = Val(Replace(textValue, ",", "."))
+        Case "boolean": target.Value2 = (LCase$(textValue) = "true")
+        Case "error": target.Value = textValue
+        Case Else: target.Value = textValue
+    End Select
+End Sub
+
+
+' ============================================================
 ' CLEAR HIGHLIGHT PL
 ' ============================================================
 Public Sub ClearHighlightPL(Optional wsMDArg As Worksheet = Nothing)
@@ -2032,21 +2348,57 @@ End Function
 ' ============================================================
 ' HELPERS I/O untuk Sync PL
 ' ============================================================
+Private Sub CopyFileBinaryPL(ByVal sourcePath As String, ByVal targetPath As String)
+    Dim ado As Object
+    Dim errNo As Long
+    Dim errDesc As String
+
+    On Error GoTo ErrCopyBinary
+    Set ado = CreateObject("ADODB.Stream")
+    ado.Type = 1  ' adTypeBinary
+    ado.Open
+    ado.LoadFromFile sourcePath
+    ado.SaveToFile targetPath, 2  ' adSaveCreateOverWrite
+    ado.Close
+    Set ado = Nothing
+    Exit Sub
+
+ErrCopyBinary:
+    errNo = Err.Number
+    errDesc = Err.Description
+    On Error Resume Next
+    If Not ado Is Nothing Then ado.Close
+    Set ado = Nothing
+    On Error GoTo 0
+    Err.Raise vbObjectError + 2130, "CopyFileBinaryPL", _
+              "Gagal menyalin file " & sourcePath & " ke " & targetPath & _
+              " [" & CStr(errNo) & "]: " & errDesc
+End Sub
+
 Private Sub WriteUTF8PL(path As String, content As String)
     Dim ado As Object
-    Dim tries As Integer
-    For tries = 1 To 5
-        On Error Resume Next
-        Set ado = CreateObject("ADODB.Stream")
-        ado.Type = 2: ado.Charset = "UTF-8": ado.Open
-        ado.WriteText content
-        ado.SaveToFile path, 2
-        ado.Close
-        If Err.Number = 0 Then Exit For
-        Err.Clear
-        Application.Wait Now + TimeSerial(0, 0, 1)  ' tunggu 1 detik, retry
-    Next tries
+    Dim errNo As Long
+    Dim errDesc As String
+    On Error GoTo ErrWriteUTF8
+    Set ado = CreateObject("ADODB.Stream")
+    ado.Type = 2
+    ado.Charset = "UTF-8"
+    ado.Open
+    ado.WriteText content
+    ado.SaveToFile path, 2
+    ado.Close
+    Set ado = Nothing
+    Exit Sub
+
+ErrWriteUTF8:
+    errNo = Err.Number
+    errDesc = Err.Description
+    On Error Resume Next
+    If Not ado Is Nothing Then ado.Close
+    Set ado = Nothing
     On Error GoTo 0
+    Err.Raise vbObjectError + 2120, "WriteUTF8PL", _
+              "Gagal menulis UTF-8 ke " & path & " [" & CStr(errNo) & "]: " & errDesc
 End Sub
 
 Private Function ReadUTF8PL(path As String) As String
