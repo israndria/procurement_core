@@ -65,6 +65,34 @@ def test_setup_preflight_does_not_create_partial_folder(tmp_path):
     assert not (output / "1. PLPK - Paket Uji").exists()
 
 
+@pytest.mark.parametrize(
+    ("workflow", "folder_name"),
+    [
+        ("PL_KONSTRUKSI", "1. PLPK - Paket Konstruksi"),
+        ("PL_PERENCANAAN", "1. PLJKK - Paket Perencanaan"),
+    ],
+)
+def test_setup_pl_provisions_revision_upload_folder(
+    tmp_path, monkeypatch, workflow, folder_name
+):
+    monkeypatch.setattr("document_profiles.is_official_header_document", lambda _path: False)
+    monkeypatch.setattr("template_scrub.scrub_excel_pl_copy", lambda *_args, **_kwargs: [])
+    source = _populate_template_dir(tmp_path / "template", workflow)
+    output = tmp_path / "output"
+    cfg = PL_WORKFLOW_REGISTRY[workflow]
+
+    _setup_folder(
+        folder_name,
+        source,
+        cfg["excel_template"],
+        cfg["word_map"],
+        output_base=output,
+        workflow=workflow,
+    )
+
+    assert (output / folder_name / "10. Revisi Uploadan PPK").is_dir()
+
+
 def test_equipment_markers_fill_all_nested_tables(tmp_path):
     ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     w = "{" + ns + "}"

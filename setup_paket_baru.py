@@ -195,6 +195,8 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
         "8. Dokumen Kualifikasi",
         _subfolder_9,
     ]
+    if workflow:
+        _subfolders.append("10. Revisi Uploadan PPK")
     for _sub in _subfolders:
         os.makedirs(os.path.join(target_dir, _sub), exist_ok=True)
 
