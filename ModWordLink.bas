@@ -31,6 +31,10 @@ Public Sub BukaBA()
     RunMerge "buka", FindWordFile(PATTERN_BAUTAMA), SHEET_BA
 End Sub
 
+Public Sub BukaBATimpang()
+    RunMerge "buka", FindWordFile(PATTERN_TIMPANG), SHEET_BA
+End Sub
+
 Public Sub BukaReviu()
     RunMerge "buka", FindWordFile(PATTERN_ISIREVIU), SHEET_REVIU
 End Sub
