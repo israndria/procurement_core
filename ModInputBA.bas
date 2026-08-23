@@ -16,7 +16,8 @@ Private Const SHEET_KK       As String = "3. KK Evaluasi Kualifikasi"
 Private Const CELL_KODE      As String = "E5"
 
 ' ── Row layout sheet "0. Input BA" ──────────────────────────
-' Kolom B = label, Kolom C = nilai peserta 1, D = peserta 2
+' Matrix kanonik peserta berada di C37:L53 (maksimal 10 peserta).
+' C/D/E/I di baris lama hanya compatibility view; G = peserta terpilih.
 Private Const ROW_HEADER          As Integer = 1
 ' Blok Tanggal BA (kolom C = tanggal, D = hari otomatis)
 Private Const ROW_TGL_PEMBUKAAN   As Integer = 3
@@ -44,6 +45,10 @@ Private Const ROW_JML_TDK_BUKA    As Integer = 29
 ' Blok Hasil (dari KK Evaluasi)
 Private Const ROW_SKP             As Integer = 32
 Private Const ROW_HASIL_PEMBUKTIAN As Integer = 33
+Private Const MAX_PARTICIPANTS     As Integer = 10
+Private Const MATRIX_HEADER_ROW    As Integer = 37
+Private Const MATRIX_FIRST_ROW     As Integer = 38
+Private Const MATRIX_LAST_ROW      As Integer = 53
 
 
 ' ============================================================
@@ -72,6 +77,7 @@ Public Sub MuatInputBA(Optional tampilPesan As Boolean = True)
     End If
 
     wsBA.Unprotect
+    EnsureInputBASlots wsBA
 
     ' ── 1. Identitas peserta dari Supabase ──────────────────
     Call IsiIdentitasPeserta(wsBA, kodeTender)
@@ -86,29 +92,32 @@ Public Sub MuatInputBA(Optional tampilPesan As Boolean = True)
     On Error Resume Next
     Set wsKK = ThisWorkbook.Sheets(SHEET_KK)
     If Not wsKK Is Nothing Then
-        ' Salin hasil KK untuk seluruh peserta (C:E), bukan hanya peserta 1.
-        ' Kolom G tetap memakai formula peserta terpilih melalui F5.
+        ' Salin SKP + hasil dari KK matrix C:L ke Input BA matrix C:L.
         Dim kkCol As Integer, baCol As Integer
-        For kkCol = 3 To 5
-            baCol = kkCol
-            wsBA.Cells(ROW_SKP, baCol).Value = wsKK.Cells(33, kkCol).Value
+        Dim pesertaIdx As Integer
+        For pesertaIdx = 1 To MAX_PARTICIPANTS
+            kkCol = pesertaIdx + 2
+            baCol = pesertaIdx + 2
+            wsBA.Cells(52, baCol).Value = wsKK.Cells(33, kkCol).Value
 
             Dim hasilMs As String
             hasilMs = Trim(CStr(wsKK.Cells(54, kkCol).Value))
             Select Case UCase(hasilMs)
-                Case "MS":  wsBA.Cells(ROW_HASIL_PEMBUKTIAN, baCol).Value = "Memenuhi"
-                Case "TMS": wsBA.Cells(ROW_HASIL_PEMBUKTIAN, baCol).Value = "Tidak Memenuhi"
-                Case Else:  wsBA.Cells(ROW_HASIL_PEMBUKTIAN, baCol).Value = hasilMs
+                Case "MS":  wsBA.Cells(53, baCol).Value = "Memenuhi"
+                Case "TMS": wsBA.Cells(53, baCol).Value = "Tidak Memenuhi"
+                Case Else:  wsBA.Cells(53, baCol).Value = hasilMs
             End Select
-        Next kkCol
+        Next pesertaIdx
 
         ' Sheet klarifikasi tetap winner-oriented, tetapi mengambil SKP dari
         ' peserta terpilih, bukan selalu dari kolom C.
         Dim selectedCol As Integer
-        selectedCol = Val(wsBA.Range("F5").Value) + 2
-        If selectedCol < 3 Or selectedCol > 5 Then selectedCol = 3
+        Dim selectedIdx As Integer
+        selectedIdx = Val(wsBA.Range("F5").Value)
+        If selectedIdx < 1 Or selectedIdx > MAX_PARTICIPANTS Then selectedIdx = 1
+        selectedCol = selectedIdx + 2
         Dim skpVal As String
-        skpVal = Trim(CStr(wsBA.Cells(ROW_SKP, selectedCol).Value))
+        skpVal = Trim(CStr(wsBA.Cells(52, selectedCol).Value))
         If skpVal <> "" And skpVal <> "0" Then
             Dim wsKlarif As Worksheet
             Set wsKlarif = Nothing
@@ -390,6 +399,51 @@ End Sub
 
 
 ' ============================================================
+' Provision matrix peserta 1..10 + compatibility view.
+' ============================================================
+Private Sub EnsureInputBASlots(wsBA As Worksheet)
+    Dim i As Integer, r As Integer, c As Integer
+    Dim viewRows As Variant, matrixRows As Variant, labels As Variant
+
+    wsBA.Cells(36, 2).Value = "DATABASE PESERTA (MAKSIMAL 10)"
+    wsBA.Cells(37, 2).Value = "Data"
+    If Trim(CStr(wsBA.Range("C5").Value)) = "" Then wsBA.Range("C5").Value = "Peserta 1"
+    labels = Array("Nama Perusahaan", "NPWP", "Alamat", "Direktur / Pemilik", _
+                   "Harga Penawaran", "Harga Penawaran Terkoreksi", _
+                   "Personel Manajerial 1", "Personel Manajerial 2", _
+                   "Alat 1", "Alat 2", "Alat 3", "Alat 4", "Alat 5", "Alat 6", _
+                   "SKP", "Hasil Pembuktian Kualifikasi")
+    For i = LBound(labels) To UBound(labels)
+        wsBA.Cells(MATRIX_FIRST_ROW + i, 2).Value = labels(i)
+    Next i
+    For i = 1 To MAX_PARTICIPANTS
+        c = i + 2
+        wsBA.Cells(MATRIX_HEADER_ROW, c).Value = "Peserta " & i
+        wsBA.Cells(MATRIX_HEADER_ROW, c).Font.Bold = True
+    Next i
+
+    wsBA.Cells(5, 6).Formula = "=IFERROR(MATCH($C$5,$C$37:$L$37,0),1)"
+    On Error Resume Next
+    wsBA.Range("C5").Validation.Delete
+    wsBA.Range("C5").Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+        Operator:=xlBetween, Formula1:="=$C$37:$L$37"
+    On Error GoTo 0
+
+    viewRows = Array(7, 8, 9, 10, 11, 12, 13, 14, 17, 18, 19, 20, 21, 22, 32, 33)
+    matrixRows = Array(38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53)
+    For i = LBound(viewRows) To UBound(viewRows)
+        r = CInt(viewRows(i))
+        wsBA.Cells(r, 7).Formula = _
+            "=IF(INDEX($C$" & matrixRows(i) & ":$L$" & matrixRows(i) & ",1,$F$5)=\"\",\"\",INDEX($C$" & matrixRows(i) & ":$L$" & matrixRows(i) & ",1,$F$5))"
+        wsBA.Cells(r, 3).Formula = "=C$" & matrixRows(i)
+        wsBA.Cells(r, 4).Formula = "=D$" & matrixRows(i)
+        wsBA.Cells(r, 5).Formula = "=E$" & matrixRows(i)
+        wsBA.Cells(r, 9).Formula = "=F$" & matrixRows(i)
+    Next i
+End Sub
+
+
+' ============================================================
 ' Isi identitas peserta dari tabel peserta_identitas
 ' ============================================================
 Private Sub IsiIdentitasPeserta(wsBA As Worksheet, kodeTender As String)
@@ -397,20 +451,27 @@ Private Sub IsiIdentitasPeserta(wsBA As Worksheet, kodeTender As String)
     url = SB_URL & "/rest/v1/peserta_identitas" & _
           "?kode_tender=eq." & kodeTender & _
           "&order=peserta_id.asc" & _
-          "&limit=3"
+          "&limit=10"
 
     Dim json As String
     json = HttpGet(url)
     If json = "" Or json = "[]" Then Exit Sub
 
-    ' Parse peserta: ambil sampai 3 peserta, isi kolom C/D/E
+    ' Parse maksimal 10 peserta ke matrix C:L.
     Dim i As Integer
     Dim startPos As Long
     startPos = 1
     Dim col As Integer
-    col = 3  ' kolom C = peserta pertama
+    Dim pesertaIdx As Integer
+    pesertaIdx = 1
 
-    Do While col <= 5  ' maks 3 peserta (C, D, E)
+    ' Identitas, alat/personel, dan hasil lama dibersihkan; harga 42:43
+    ' dipertahankan karena sumbernya Sheet 6/evaluasi harga.
+    wsBA.Range("C38:L41").ClearContents
+    wsBA.Range("C44:L53").ClearContents
+
+    Do While pesertaIdx <= MAX_PARTICIPANTS
+        col = pesertaIdx + 2
         Dim objStart As Long, objEnd As Long
         objStart = InStr(startPos, json, "{")
         If objStart = 0 Then Exit Do
@@ -420,22 +481,30 @@ Private Sub IsiIdentitasPeserta(wsBA As Worksheet, kodeTender As String)
         Dim obj As String
         obj = Mid(json, objStart, objEnd - objStart + 1)
 
-        wsBA.Cells(ROW_NAMA_PERUSAHAAN, col).Value = ExtractVal(obj, "nama_perusahaan")
-        wsBA.Cells(ROW_NPWP, col).Value            = FormatNPWP(ExtractVal(obj, "npwp_raw"))
-        wsBA.Cells(ROW_ALAMAT, col).Value           = ExtractVal(obj, "alamat")
-        wsBA.Cells(ROW_DIREKTUR, col).Value         = ExtractVal(obj, "nama_direktur")
-        wsBA.Cells(ROW_PERSONEL_1, col).Value       = ExtractVal(obj, "personel_1")
-        wsBA.Cells(ROW_PERSONEL_2, col).Value       = ExtractVal(obj, "personel_2")
-        wsBA.Cells(ROW_ALAT_1, col).Value           = ExtractVal(obj, "alat_1")
-        wsBA.Cells(ROW_ALAT_2, col).Value           = ExtractVal(obj, "alat_2")
-        wsBA.Cells(ROW_ALAT_3, col).Value           = ExtractVal(obj, "alat_3")
-        wsBA.Cells(ROW_ALAT_4, col).Value           = ExtractVal(obj, "alat_4")
-        wsBA.Cells(ROW_ALAT_5, col).Value           = ExtractVal(obj, "alat_5")
-        wsBA.Cells(ROW_ALAT_6, col).Value           = ExtractVal(obj, "alat_6")
+        wsBA.Cells(38, col).Value = ExtractVal(obj, "nama_perusahaan")
+        wsBA.Cells(39, col).NumberFormat = "@"
+        wsBA.Cells(39, col).Value = FormatNPWP(ExtractVal(obj, "npwp_raw"))
+        wsBA.Cells(40, col).Value = ExtractVal(obj, "alamat")
+        wsBA.Cells(41, col).Value = ExtractVal(obj, "nama_direktur")
+        wsBA.Cells(44, col).Value = ExtractVal(obj, "personel_1")
+        wsBA.Cells(45, col).Value = ExtractVal(obj, "personel_2")
+        wsBA.Cells(46, col).Value = ExtractVal(obj, "alat_1")
+        wsBA.Cells(47, col).Value = ExtractVal(obj, "alat_2")
+        wsBA.Cells(48, col).Value = ExtractVal(obj, "alat_3")
+        wsBA.Cells(49, col).Value = ExtractVal(obj, "alat_4")
+        wsBA.Cells(50, col).Value = ExtractVal(obj, "alat_5")
+        wsBA.Cells(51, col).Value = ExtractVal(obj, "alat_6")
 
         startPos = objEnd + 1
-        col = col + 1
+        pesertaIdx = pesertaIdx + 1
     Loop
+
+    ' Harga slot di luar peserta aktif tidak boleh tertinggal dari refresh lama.
+    Dim hargaClearStart As Integer
+    hargaClearStart = pesertaIdx + 2
+    If hargaClearStart <= 12 Then
+        wsBA.Range(wsBA.Cells(42, hargaClearStart), wsBA.Cells(43, 12)).ClearContents
+    End If
 End Sub
 
 
@@ -477,7 +546,7 @@ End Sub
 
 ' ============================================================
 ' Conflict check personil/alat via Python conflict_check.py
-' Isi kolom F/G/H (peserta 1/2/3) untuk baris personil & alat
+' Isi helper M:V (peserta 1..10) untuk baris personil & alat
 ' ============================================================
 Private Sub IsiConflictCheck(wsBA As Worksheet, kodeTender As String)
     Dim sd As String
@@ -515,31 +584,24 @@ Private Sub IsiConflictCheck(wsBA As Worksheet, kodeTender As String)
         Exit Sub  ' silent — conflict check opsional
     End If
 
-    ' Bersihkan kolom F/G/H baris personil & alat dulu
+    ' Conflict helper dipindah ke M:V agar tidak menimpa G (view peserta
+    ' terpilih) atau matrix kanonik C:L.
     Dim r As Integer
     For r = ROW_PERSONEL_1 To ROW_ALAT_6
-        wsBA.Cells(r, 6).Value = ""
-        wsBA.Cells(r, 7).Value = ""
-        wsBA.Cells(r, 8).Value = ""
-        wsBA.Cells(r, 6).Interior.ColorIndex = -4142
-        wsBA.Cells(r, 7).Interior.ColorIndex = -4142
-        wsBA.Cells(r, 8).Interior.ColorIndex = -4142
+        wsBA.Range(wsBA.Cells(r, 13), wsBA.Cells(r, 12 + MAX_PARTICIPANTS)).ClearContents
+        wsBA.Range(wsBA.Cells(r, 13), wsBA.Cells(r, 12 + MAX_PARTICIPANTS)).Interior.ColorIndex = -4142
     Next r
 
-    ' Mapping peserta_id → kolom (C=3, D=4, E=5 → F=6, G=7, H=8)
-    ' Kolom C = peserta 1, D = peserta 2, E = peserta 3
-    ' Status isi ke F (peserta 1), G (peserta 2), H (peserta 3)
-
-    ' Personil: baris ROW_PERSONEL_1 = personil_1, ROW_PERSONEL_2 = personil_2
-    Dim pesertaCols(1 To 3) As Integer
-    pesertaCols(1) = 6  ' F
-    pesertaCols(2) = 7  ' G
-    pesertaCols(3) = 8  ' H
+    ' Personil/alat peserta 1..10 → helper M:V.
+    Dim pesertaCols(1 To MAX_PARTICIPANTS) As Integer
+    Dim pIdx As Integer
+    For pIdx = 1 To MAX_PARTICIPANTS
+        pesertaCols(pIdx) = 12 + pIdx
+    Next pIdx
 
     ' Ekstrak status per peserta per field — format JSON flat per peserta_id
-    ' Karena peserta_id dari Supabase urut asc, kita map index 1/2/3 ke kolom
-    Dim pIdx As Integer
-    For pIdx = 1 To 3
+    ' Karena peserta_id dari Supabase urut asc, kita map index ke kolom helper.
+    For pIdx = 1 To MAX_PARTICIPANTS
         ' Cari blok peserta ke-pIdx di "personil"
         Dim p1Key As String: p1Key = "personil_1"
         Dim p2Key As String: p2Key = "personil_2"

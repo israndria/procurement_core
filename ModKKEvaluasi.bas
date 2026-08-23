@@ -7,11 +7,12 @@ Attribute VB_Name = "ModKKEvaluasi"
 '   1. Tombol "Muat KK Evaluasi" di sheet KK Evaluasi di-klik
 '   2. MuatKKEvaluasi() baca kode_tender dari sheet "1. Input Data" cell E5
 '   3. GET Supabase → filter kode_tender, order urutan asc
-'   4. Isi kolom C (urutan 1), D (urutan 2), E (urutan 3) di sheet KK Evaluasi
+'   4. Isi slot peserta mulai kolom C; slot tambahan disisipkan sebelum helper
 
 Private Const SB_URL As String = "%%SUPABASE_URL%%"
 Private Const SB_KEY As String = "%%SUPABASE_KEY%%"
 Private Const SB_TABLE As String = "kk_evaluasi_peserta"
+Private Const MAX_PARTICIPANTS As Integer = 10
 
 Private Const SHEET_INPUT As String = "1. Input Data"
 Private Const SHEET_KK As String = "3. KK Evaluasi Kualifikasi"
@@ -100,6 +101,10 @@ Public Sub MuatKKEvaluasi(Optional tampilPesan As Boolean = True)
     Dim itemCount As Integer
     ParseKKJSON json, items, itemCount
 
+    Dim pesertaDibatasi As Boolean
+    pesertaDibatasi = (itemCount > MAX_PARTICIPANTS)
+    If pesertaDibatasi Then itemCount = MAX_PARTICIPANTS
+
     If itemCount = 0 Then
         If tampilPesan Then MsgBox "Tidak ada data KK Evaluasi untuk kode tender " & kodeTender & "." & vbCrLf & _
                "Jalankan 'Parse & Simpan KK Evaluasi' di Asisten Pokja terlebih dahulu.", vbInformation
@@ -109,14 +114,24 @@ Public Sub MuatKKEvaluasi(Optional tampilPesan As Boolean = True)
     Set wsKK = ThisWorkbook.Sheets(SHEET_KK)
     wsKK.Unprotect
 
-    ' Kolom: urutan 1=C(3), 2=D(4), 3=E(5)
-    Dim colMap(1 To 3) As Integer
-    colMap(1) = 3: colMap(2) = 4: colMap(3) = 5
+    ' Tiga slot lama C/D/E. Slot tambahan dibuat sebelum kolom helper.
+    Call EnsureKKParticipantSlots(wsKK, itemCount)
+    ' Hapus seluruh slot yang pernah diprovision, bukan hanya slot aktif.
+    ' Ini mencegah peserta lama tersisa saat jumlah peserta turun.
+    Dim lastProvisionedCol As Integer
+    lastProvisionedCol = FindKKHelperColumn(wsKK) - 1
+    If lastProvisionedCol > 12 Then lastProvisionedCol = 12
+    Dim colMap() As Integer
+    ReDim colMap(1 To itemCount)
+    Dim slotIdx As Integer
+    For slotIdx = 1 To itemCount
+        colMap(slotIdx) = slotIdx + 2
+    Next slotIdx
 
-    ' Bersihkan kolom C/D/E baris 6-54: hapus isi + Data Validation + highlight
+    ' Bersihkan seluruh kolom peserta baris 6-54.
     Dim r As Integer, c As Integer
     For r = 6 To 54
-        For c = 3 To 5
+        For c = 3 To lastProvisionedCol
             With wsKK.Cells(r, c)
                 .ClearContents
                 .Validation.Delete
@@ -130,7 +145,6 @@ Public Sub MuatKKEvaluasi(Optional tampilPesan As Boolean = True)
 
     Dim i As Integer
     For i = 1 To itemCount
-        If i > 3 Then Exit For
         Dim it As Variant
         it = items(i - 1)
         Dim col As Integer
@@ -311,6 +325,9 @@ Public Sub MuatKKEvaluasi(Optional tampilPesan As Boolean = True)
     ' Tampilkan ringkasan: sukses + peringatan field perlu cek manual
     Dim finalMsg As String
     finalMsg = "Data " & itemCount & " peserta berhasil dimuat dari Supabase."
+    If pesertaDibatasi Then
+        finalMsg = finalMsg & vbCrLf & "⚠️ Data peserta dibatasi maksimal " & MAX_PARTICIPANTS & "."
+    End If
     If warnMsg <> "" Then
         finalMsg = finalMsg & vbCrLf & vbCrLf & _
                    "⚠️ Field berikut perlu dicek manual (highlight kuning):" & vbCrLf & warnMsg
@@ -326,13 +343,55 @@ End Sub
 
 
 ' ============================================================
+' Provision slot peserta tambahan sebelum helper tersembunyi.
+' Idempotent: posisi helper dideteksi dari formula row 3.
+' ============================================================
+Private Sub EnsureKKParticipantSlots(wsKK As Worksheet, participantCount As Integer)
+    If participantCount > MAX_PARTICIPANTS Then participantCount = MAX_PARTICIPANTS
+    If participantCount <= 3 Then Exit Sub
+
+    Dim helperCol As Integer
+    Dim f As String
+    Do
+        helperCol = 6
+        Do While helperCol <= 16384
+            f = CStr(wsKK.Cells(3, helperCol).Formula)
+            If Left(f, 1) = "=" Then Exit Do
+            helperCol = helperCol + 1
+        Loop
+        If helperCol > 2 + participantCount Then Exit Do
+
+        wsKK.Columns(helperCol).Insert
+        On Error Resume Next
+        wsKK.Columns(5).Copy
+        wsKK.Columns(helperCol).PasteSpecial Paste:=-4122  ' xlPasteFormats
+        Application.CutCopyMode = False
+        wsKK.Columns(helperCol).ColumnWidth = wsKK.Columns(5).ColumnWidth
+        On Error GoTo 0
+    Loop
+End Sub
+
+
+Private Function FindKKHelperColumn(wsKK As Worksheet) As Integer
+    Dim col As Integer
+    For col = 6 To 16384
+        If Left(CStr(wsKK.Cells(3, col).Formula), 1) = "=" Then
+            FindKKHelperColumn = col
+            Exit Function
+        End If
+    Next col
+    FindKKHelperColumn = 6
+End Function
+
+
+' ============================================================
 ' HTTP: Fetch data dari Supabase (filter kode_tender)
 ' ============================================================
 Private Function FetchKKEvaluasi(kodeTender As String) As String
     Dim url As String
     url = SB_URL & "/rest/v1/" & SB_TABLE & _
           "?kode_tender=eq." & kodeTender & _
-          "&order=urutan.asc"
+          "&order=urutan.asc&limit=10"
 
     Dim http As Object
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
@@ -544,7 +603,7 @@ Public Sub MuatHargaPenawaran(Optional tampilPesan As Boolean = True)
     urlPeserta = SB_URL & "/rest/v1/harga_penawaran" & _
                  "?kode_tender=eq." & kodeTender & _
                  "&select=peserta_id,nama_peserta,total_penawaran" & _
-                 "&order=peserta_id.asc&limit=3"
+                 "&order=peserta_id.asc&limit=10"
 
     Dim http As Object
     Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
@@ -562,11 +621,12 @@ Public Sub MuatHargaPenawaran(Optional tampilPesan As Boolean = True)
 
     ' Parse distinct peserta_id + nama_peserta
     Dim jsonP As String: jsonP = http.ResponseText
-    Dim pesertaIds(10) As String
-    Dim pesertaNama(10) As String
-    Dim pesertaTotal(10) As Double
+    ' REST page dan array disamakan: semua peserta sampai batas page Supabase.
+    Dim pesertaIds(0 To MAX_PARTICIPANTS - 1) As String
+    Dim pesertaNama(0 To MAX_PARTICIPANTS - 1) As String
+    Dim pesertaTotal(0 To MAX_PARTICIPANTS - 1) As Double
     Dim pesertaCount As Integer: pesertaCount = 0
-    Dim seenIds(10) As String
+    Dim seenIds(0 To MAX_PARTICIPANTS - 1) As String
 
     Dim posP As Long: posP = 1
     Do
@@ -588,7 +648,7 @@ Public Sub MuatHargaPenawaran(Optional tampilPesan As Boolean = True)
         For si = 0 To pesertaCount - 1
             If seenIds(si) = pid Then isDup = True: Exit For
         Next si
-        If Not isDup And pid <> "" And pesertaCount < 3 Then
+        If Not isDup And pid <> "" And pesertaCount < MAX_PARTICIPANTS Then
             seenIds(pesertaCount) = pid
             pesertaIds(pesertaCount) = pid
             pesertaNama(pesertaCount) = ExtractJSONVal(objP, "nama_peserta")
@@ -604,12 +664,14 @@ Public Sub MuatHargaPenawaran(Optional tampilPesan As Boolean = True)
         Exit Sub
     End If
 
-    ' ── 2. Bersihkan tiga blok, lalu isi seluruh peserta sekaligus ──
+    ' ── 2. Bersihkan blok lama, lalu isi seluruh peserta sekaligus ──
     wsHP.Unprotect
-    wsHP.Range("A3:Z1000").ClearContents
-    wsHP.Range("A1").Value = ""
-    wsHP.Range("J1").Value = ""
-    wsHP.Range("S1").Value = ""
+    Dim clearLastCol As Long
+    clearLastCol = wsHP.UsedRange.Column + wsHP.UsedRange.Columns.Count - 1
+    If clearLastCol < 26 Then clearLastCol = 26
+    If clearLastCol > 8999 Then clearLastCol = 8999
+    wsHP.Range(wsHP.Cells(3, 1), wsHP.Cells(1000, clearLastCol)).ClearContents
+    wsHP.Range(wsHP.Cells(1, 1), wsHP.Cells(1, clearLastCol)).ClearContents
 
     ' Ambil total HPS dari sheet "5. HPS".
     Dim totalHPS As Double: totalHPS = 0
@@ -630,10 +692,20 @@ Public Sub MuatHargaPenawaran(Optional tampilPesan As Boolean = True)
         Next rH
     End If
 
-    Dim baseCols(1 To 3) As Integer
-    baseCols(1) = 1: baseCols(2) = 10: baseCols(3) = 19
+    Dim baseCols(1 To MAX_PARTICIPANTS) As Long
+    Dim baseIdx As Long
+    For baseIdx = 1 To MAX_PARTICIPANTS
+        baseCols(baseIdx) = 1 + ((baseIdx - 1) * 9)
+    Next baseIdx
     Dim pIdx As Integer, loaded As String, warnings As String
     For pIdx = 0 To pesertaCount - 1
+        If pIdx >= 3 Then
+            On Error Resume Next
+            wsHP.Range("S1:Z1000").Copy
+            wsHP.Cells(1, baseCols(pIdx + 1)).PasteSpecial Paste:=-4122  ' xlPasteFormats
+            Application.CutCopyMode = False
+            On Error GoTo ErrHandler
+        End If
         Dim urlItem As String
         urlItem = SB_URL & "/rest/v1/harga_penawaran" & _
                   "?kode_tender=eq." & kodeTender & _
@@ -659,10 +731,6 @@ Public Sub MuatHargaPenawaran(Optional tampilPesan As Boolean = True)
         End If
     Next pIdx
 
-    If pesertaCount < 3 Then
-        wsHP.Range("S1").Value = ""
-        If pesertaCount < 2 Then wsHP.Range("J1").Value = ""
-    End If
     If warnings <> "" Then warnings = vbCrLf & "Perhatian:" & vbCrLf & warnings
     If tampilPesan Then MsgBox "Data harga penawaran " & pesertaCount & " peserta berhasil dimuat." & vbCrLf & _
            loaded & warnings, IIf(warnings = "", vbInformation, vbExclamation), "Muat Harga Penawaran"

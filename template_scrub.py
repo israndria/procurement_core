@@ -135,11 +135,15 @@ def scrub_excel_copy(excel_path: str | Path) -> list[str]:
     logs: list[str] = []
     targets = {
         "@ Master Data": ["C3:C70", "H2:I23"],
-        "0. Input BA": ["C3:G5", "C7:E14", "G7:G14", "C17:E22", "G17:N22", "C25:C29", "C32:G33"],
+        "0. Input BA": [
+            "C3:G5", "C7:E14", "G7:G14", "I7:I14", "C17:E22",
+            "G17:N22", "C25:C29", "C32:G33", "I32:I33", "C38:L53",
+        ],
         "3. KK Evaluasi Kualifikasi": ["C3:GR92"],
-        "6. Harga Penawaran": ["A1:Z171"],
-        "6. Harga Penawaran (2)": ["A1:Z171"],
-        "6. Harga Penawaran (3)": ["A1:Z171"],
+        # 10 blok x 9 kolom, blok terakhir berakhir di CK.
+        "6. Harga Penawaran": ["A1:CK171"],
+        "6. Harga Penawaran (2)": ["A1:CK171"],
+        "6. Harga Penawaran (3)": ["A1:CK171"],
         "5. HPS": ["A1:Z300"],
     }
     try:

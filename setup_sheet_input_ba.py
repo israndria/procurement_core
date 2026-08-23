@@ -13,6 +13,14 @@ import pythoncom
 import os
 import time
 
+MAX_PARTICIPANTS = 10
+_LEGACY_VIEW_COLS = (3, 4, 5, 9)  # C/D/E + I (peserta 1..4)
+_LEGACY_MATRIX_COLS = ("C", "D", "E", "F")
+_VIEW_TO_MATRIX_ROW = {
+    7: 38, 8: 39, 9: 40, 10: 41, 11: 42, 12: 43,
+    13: 44, 14: 45, 17: 46, 18: 47, 19: 48, 20: 49,
+    21: 50, 22: 51, 32: 52, 33: 53,
+}
 
 def setup_sheet_input_ba(filepath):
     filepath = os.path.abspath(filepath)
@@ -46,7 +54,7 @@ def setup_sheet_input_ba(filepath):
         ws.Tab.Color = 10498160  # ungu
 
         # ── 2. Isi layout sheet "0. Input BA" ───────────────────────
-        # Format: kolom B = label, C = peserta 1, D = peserta 2, E = peserta 3
+        # Matrix kanonik C37:L53; C/D/E/I dipertahankan sebagai view lama.
 
         def cell(r, c):
             return ws.Cells(r, c)
@@ -79,13 +87,16 @@ def setup_sheet_input_ba(filepath):
 
         # Blok Identitas Peserta (baris 7-10)
         header(6, "IDENTITAS PESERTA")
+        label(5, "Peserta Terpilih (BA)")
+        if not cell(5, 3).Value:
+            cell(5, 3).Value = "Peserta 1"
         label(7, "Nama Perusahaan")
         label(8, "NPWP")
         label(9, "Alamat")
         label(10, "Direktur / Pemilik")
 
-        # Header kolom peserta
-        for col, txt in [(3, "Peserta 1"), (4, "Peserta 2"), (5, "Peserta 3")]:
+        # Header kolom compatibility view peserta 1..4
+        for col, txt in [(3, "Peserta 1"), (4, "Peserta 2"), (5, "Peserta 3"), (9, "Peserta 4")]:
             ws.Cells(6, col).Value = txt
             ws.Cells(6, col).Font.Bold = True
 
@@ -97,27 +108,69 @@ def setup_sheet_input_ba(filepath):
         label(17, "Alat 1")
         label(18, "Alat 2")
         label(19, "Alat 3")
+        label(20, "Alat 4")
+        label(21, "Alat 5")
+        label(22, "Alat 6")
 
-        # Blok Dokumen Penawaran (baris 22-24)
-        header(21, "DOKUMEN PENAWARAN")
-        label(22, "Jml Peserta Daftar")
-        label(23, "Jml Dok Terkirim (dapat dibuka)")
-        label(24, "Jml Dok Tidak Terkirim")
+        # Blok Dokumen Penawaran (baris 25-29)
+        header(24, "DOKUMEN PENAWARAN")
+        label(25, "Jml Peserta Daftar")
+        label(26, "Jml Dok Terkirim (dapat dibuka)")
+        label(27, "Jml Dok Tidak Terkirim")
+        label(28, "Jml Dok Penawaran Tidak Lengkap")
+        label(29, "Jml Dok Penawaran Tidak Dapat Dibuka")
 
-        # Blok Hasil dari KK Evaluasi (baris 27-28)
-        header(26, "HASIL EVALUASI (dari sheet KK Evaluasi)")
-        label(27, "SKP")
-        label(28, "Hasil Pembuktian Kualifikasi")
+        # Blok Hasil dari KK Evaluasi (baris 31-33)
+        header(31, "HASIL EVALUASI (dari sheet KK Evaluasi)")
+        label(32, "SKP")
+        label(33, "Hasil Pembuktian Kualifikasi")
         # SKP dan Hasil Pembuktian diisi oleh VBA MuatInputBA() — bukan formula
         # (formula ke KK Evaluasi akan circular via sheet 6 W29)
-        ws.Cells(27, 3).Value = ""  # diisi VBA
-        ws.Cells(28, 3).Value = ""  # diisi VBA
+        ws.Cells(32, 3).Value = ""  # diisi VBA
+        ws.Cells(33, 3).Value = ""  # diisi VBA
+
+        # Matrix kanonik: semua peserta 1..10 tetap tersedia.
+        header(36, "DATABASE PESERTA (MAKSIMAL 10)")
+        cell(37, 2).Value = "Data"
+        for urutan in range(1, MAX_PARTICIPANTS + 1):
+            col = urutan + 2
+            ws.Cells(37, col).Value = f"Peserta {urutan}"
+            ws.Cells(37, col).Font.Bold = True
+        matrix_labels = {
+            38: "Nama Perusahaan", 39: "NPWP", 40: "Alamat",
+            41: "Direktur / Pemilik", 42: "Harga Penawaran",
+            43: "Harga Penawaran Terkoreksi", 44: "Personel Manajerial 1",
+            45: "Personel Manajerial 2", 46: "Alat 1", 47: "Alat 2",
+            48: "Alat 3", 49: "Alat 4", 50: "Alat 5", 51: "Alat 6",
+            52: "SKP", 53: "Hasil Pembuktian Kualifikasi",
+        }
+        for row, text in matrix_labels.items():
+            cell(row, 2).Value = text
+
+        # C5 -> F5 index matrix; G = peserta terpilih; view C/D/E/I tetap
+        # formula untuk kompatibilitas dokumen BA lama.
+        ws.Cells(5, 6).Formula = '=IFERROR(MATCH($C$5,$C$37:$L$37,0),1)'
+        try:
+            ws.Range("C5").Validation.Delete()
+            ws.Range("C5").Validation.Add(
+                Type=3, AlertStyle=1, Operator=1, Formula1="=$C$37:$L$37"
+            )
+        except Exception:
+            pass
+        for view_row, matrix_row in _VIEW_TO_MATRIX_ROW.items():
+            ws.Cells(view_row, 7).Formula = (
+                f'=IF(INDEX($C${matrix_row}:$L${matrix_row},1,$F$5)="","",'
+                f'INDEX($C${matrix_row}:$L${matrix_row},1,$F$5))'
+            )
+            for urutan, legacy_col in enumerate(_LEGACY_VIEW_COLS, 1):
+                ws.Cells(view_row, legacy_col).Formula = (
+                    f"={_LEGACY_MATRIX_COLS[urutan - 1]}${matrix_row}"
+                )
 
         # Lebar kolom
         ws.Columns(2).ColumnWidth = 38
-        ws.Columns(3).ColumnWidth = 30
-        ws.Columns(4).ColumnWidth = 20
-        ws.Columns(5).ColumnWidth = 20
+        for col in range(3, 13):
+            ws.Columns(col).ColumnWidth = 22 if col > 5 else 30
 
         print("  [OK] Layout sheet '0. Input BA' selesai")
 
@@ -173,28 +226,21 @@ def _update_sheet3(wb):
         ws.Range("S14").Formula = "=MONTH('0. Input BA'!C3)"
         ws.Range("S15").Formula = "=YEAR('0. Input BA'!C3)"
         # Jumlah dokumen
-        ws.Range("P26").Formula = "='0. Input BA'!C23"   # jml kirim = dapat dibuka
-        ws.Range("P28").Formula = "='0. Input BA'!C23"   # lengkap = kirim
-        ws.Range("P29").Formula = "='0. Input BA'!C24"   # tidak lengkap
-        ws.Range("P31").Formula = "='0. Input BA'!C23"   # dapat dibuka
-        ws.Range("P32").Formula = "='0. Input BA'!C24"   # tidak dapat dibuka
+        ws.Range("P26").Formula = "='0. Input BA'!C25"   # jml peserta daftar
+        ws.Range("P28").Formula = "='0. Input BA'!C26"   # dok terkirim/lengkap
+        ws.Range("P29").Formula = "='0. Input BA'!C28"   # dok tidak lengkap
+        ws.Range("P31").Formula = "='0. Input BA'!C26"   # dapat dibuka
+        ws.Range("P32").Formula = "='0. Input BA'!C29"   # tidak dapat dibuka
         print("  [OK] Sheet 3 updated (tanggal + jumlah dok)")
     except Exception as e:
         print(f"  [WARN] Sheet 3: {e}")
 
 
 def _update_equipment_formulas(ws):
-    """Isi G17:G22 hanya jika nama/kapasitas/jumlah alat benar-benar ada."""
+    """Pertahankan G17:G22 sebagai peserta terpilih; isi helper Q17:Q22."""
     for i in range(6):
         row = 17 + i
         src = 9 + i
-        ws.Cells(row, 7).Formula = (
-            f'=IF(AND(OR(database_reviu!E{src}="",database_reviu!E{src}=0),'
-            f'OR(database_reviu!E{src + 6}="",database_reviu!E{src + 6}=0),'
-            f'OR(database_reviu!E{src + 12}="",database_reviu!E{src + 12}=0)),"",'
-            f'database_reviu!E{src}&", "&database_reviu!E{src + 6}&'
-            f'" ("&database_reviu!E{src + 12}&")")'
-        )
         # Q adalah item bernomor yang dirangkai ke H17. Dasarkan keberadaan
         # item pada G saja; kolom J berisi koma separator template sehingga
         # pengecekan G&J lama menghasilkan "3. " untuk slot kosong.
@@ -237,9 +283,9 @@ def _update_sheet5(wb):
         ws.Range("S6").Formula = "=DAY('0. Input BA'!C4)"
         ws.Range("S7").Formula = "=MONTH('0. Input BA'!C4)"
         ws.Range("S8").Formula = "=YEAR('0. Input BA'!C4)"
-        # Hasil pembuktian peserta 1 (H18=Memenuhi/Tidak, K18=Lulus/TMS)
-        ws.Range("H18").Formula = "='0. Input BA'!C28"
-        ws.Range("K18").Formula = '=IF(\'0. Input BA\'!C28="Memenuhi","Lulus","TMS")'
+        # Hasil pembuktian peserta terpilih (G33 = view winner-oriented).
+        ws.Range("H18").Formula = "='0. Input BA'!G33"
+        ws.Range("K18").Formula = '=IF(\'0. Input BA\'!G33="Memenuhi","Lulus","TMS")'
         print("  [OK] Sheet 5 updated (tanggal + hasil pembuktian)")
     except Exception as e:
         print(f"  [WARN] Sheet 5: {e}")
@@ -251,14 +297,14 @@ def _update_sheet6(wb):
         ws = wb.Sheets("6. BA KLARIF SKP ALAT")
         ws.Unprotect()
         # Personel manajerial
-        ws.Range("V37").Formula = "='0. Input BA'!C13"
-        ws.Range("V38").Formula = "='0. Input BA'!C14"
+        ws.Range("V37").Formula = "='0. Input BA'!G13"
+        ws.Range("V38").Formula = "='0. Input BA'!G14"
         # SKP: W29 = angka — JANGAN dirujuk dari "0. Input BA" karena akan circular
         # (KK Eval C33 → BA KLARIF W29 → KK Eval C33). Biarkan W29 diisi VBA MuatInputBA langsung.
         # ws.Range("W29").Formula = ...  ← sengaja tidak diubah
         # Alat: V48 adalah array formula — biarkan, cukup update sumber alat di "0. Input BA"
         # Formula alat utama di sheet 6 F48 pakai V48 — update V48 sebagai teks gabungan
-        ws.Range("V48").Formula = "=\"yaitu \"&'0. Input BA'!C17&IF('0. Input BA'!C18<>\"\",\" dan \"&'0. Input BA'!C18,\"\")"
+        ws.Range("V48").Formula = "=\"yaitu \"&'0. Input BA'!G17&IF('0. Input BA'!G18<>\"\",\" dan \"&'0. Input BA'!G18,\"\")"
         print("  [OK] Sheet 6 updated (personel + SKP + alat)")
     except Exception as e:
         print(f"  [WARN] Sheet 6: {e}")
@@ -270,12 +316,12 @@ def _update_sheet7(wb):
         ws = wb.Sheets("7. BA Klarifikasi HS")
         ws.Unprotect()
         # NPWP raw (tanpa format) — formula di G55 sudah format dari M55
-        ws.Range("M55").Formula = "='0. Input BA'!C8"
-        ws.Range("M56").Formula = "='0. Input BA'!C9"
+        ws.Range("M55").Formula = "='0. Input BA'!G8"
+        ws.Range("M56").Formula = "='0. Input BA'!G9"
         # Direktur: B71 = nama (UPPER), B72 = gelar
         # Pisah nama+gelar: nama = bagian sebelum koma, gelar = koma+gelar
-        ws.Range("B71").Formula = "=IFERROR(LEFT(TRIM('0. Input BA'!C10),FIND(\",\",'0. Input BA'!C10)-1),TRIM('0. Input BA'!C10))"
-        ws.Range("B72").Formula = "=IFERROR(MID(TRIM('0. Input BA'!C10),FIND(\",\",'0. Input BA'!C10),100),\"\")"
+        ws.Range("B71").Formula = "=IFERROR(LEFT(TRIM('0. Input BA'!G10),FIND(\",\",'0. Input BA'!G10)-1),TRIM('0. Input BA'!G10))"
+        ws.Range("B72").Formula = "=IFERROR(MID(TRIM('0. Input BA'!G10),FIND(\",\",'0. Input BA'!G10),100),\"\")"
         print("  [OK] Sheet 7 updated (NPWP + alamat + direktur)")
     except Exception as e:
         print(f"  [WARN] Sheet 7: {e}")
