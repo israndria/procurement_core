@@ -2633,7 +2633,7 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
             # berdasarkan nomor Pokja, bukan nama paket yang panjang.
             nama_paket_pdf = _pdf_output_suffix(pdf_name, _npk)
 
-            if mode == "pdf_full":
+            if mode in ("pdf_full", "pdf_minimalis"):
                 # Export full dokumen (template BA dipecah per-file, no page-range).
                 # Label dokumen dari nama file Word (prefix angka)
                 _bn_full = os.path.basename(word_path)
@@ -2642,6 +2642,8 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     _label = "BA_REVIU_DPP"
                 elif _bn_full.startswith("4. Undangan"):   _label = "Undangan"
                 elif _bn_full.startswith("6. Ringkasan"):  _label = "REvaluasi"
+                elif _bn_full.startswith("8. Berita Acara Minimalis"):
+                    _label = "BA_Minimalis"
                 pdf_path = _fit_path(folder, f"{_label}_{nama_paket_pdf}.pdf")
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=pdf_path,

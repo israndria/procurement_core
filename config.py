@@ -68,6 +68,7 @@ WORD_SHEET_MAP = [
     ("5. Berita Acara Utama PK - Template.docx",          SHEET_BA),
     ("6. Ringkasan Evaluasi PK - Template.docx",          SHEET_BA),
     ("7. BA Dengan Timpang PK - Template.docx",           SHEET_BA),
+    ("8. Berita Acara Minimalis - Template.docx",          SHEET_BA),
 ]
 
 # Keyword mapping: untuk detect sheet dari nama file Word (dipakai relink).
@@ -80,6 +81,7 @@ WORD_KEYWORD_MAP = {
     "Berita Acara Utama": SHEET_BA,
     "Ringkasan Evaluasi": SHEET_BA,
     "Timpang":   SHEET_BA,
+    "Berita Acara Minimalis": SHEET_BA,
     "BAPK":      SHEET_BA,
 }
 
@@ -233,6 +235,7 @@ PDF_MODES = {
     "pdf_pembuktian":         ("WORD_BA",     "SHEET_BA",     "BA Pembuktian & Nego_ {kode}"),
     "pdf_revaluasi":          ("WORD_BA",     "SHEET_BA",     "REvaluasi_{kode}.pdf"),
     "pdf_pembuktian_timpang": ("WORD_BA",     "SHEET_BA",     "BA Pembuktian Timpang_{kode}.pdf"),
+    "pdf_minimalis":           ("WORD_BA",     "SHEET_BA",     "BA_Minimalis_{kode}.pdf"),
 }
 
 

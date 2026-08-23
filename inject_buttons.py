@@ -176,6 +176,7 @@ def inject_buttons(filepath):
             "btnKodeUnik": (87.7, 26.9),
             "btnREvaluasi": (80.1, 26.9),
             "btnPrintPembuktian": (105.7, 26.9),
+            "btnPrintBAMinimalis": (105.0, 26.9),
             "btnUpdateHPS": (89.1, 26.5),
             "btnBukaReviu": (71.0, 26.5),
             "btnPrintIsiReviu": (79.0, 26.5),
@@ -192,6 +193,7 @@ def inject_buttons(filepath):
             # (name, label, macro, row, color)
             ("btnBukaBA",           "Buka BA PK",             "BukaBA",                    0, BLUE_WORD),
             ("btnPrintBAReviu",     "Print BA Reviu",         "PrintBAReviuPDF",           0, BLACK),
+            ("btnPrintBAMinimalis", "Print BA Minimalis",     "PrintBAMinimalisPDF",       0, BLACK),
             ("btnPembuktianTimpang", "Print Timpang",          "PrintPembuktianTimpangPDF", 0, BLACK),
             ("btnKodeUnik",         "Kode Unik Surat",        "GenerateKodeUnik",           0, TEAL),
             ("btnREvaluasi",        "Print REvaluasi",        "PrintREvaluasiPDF",          0, BLACK),

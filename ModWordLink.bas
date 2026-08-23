@@ -15,6 +15,7 @@ Private Const PATTERN_DOKPIL As String = "3. Dokpil"
 Private Const PATTERN_BAUTAMA As String = "5. Berita Acara Utama"
 Private Const PATTERN_REVALUASI As String = "6. Ringkasan Evaluasi"
 Private Const PATTERN_TIMPANG As String = "7. BA Dengan Timpang"
+Private Const PATTERN_BAMINIMALIS As String = "8. Berita Acara Minimalis"
 
 Private Const SHEET_BA As String = "satu_data"
 Private Const SHEET_REVIU As String = "list_reviu"
@@ -56,6 +57,10 @@ End Sub
 
 Public Sub PrintPembuktianPDF()
     RunPDF "pdf_pembuktian", FindWordFile(PATTERN_BAUTAMA), SHEET_BA, "BA Pembuktian & Nego"
+End Sub
+
+Public Sub PrintBAMinimalisPDF()
+    RunPDF "pdf_minimalis", FindWordFile(PATTERN_BAMINIMALIS), SHEET_BA, "BA Minimalis"
 End Sub
 
 Public Sub GabungBAReviu()
