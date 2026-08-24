@@ -28,6 +28,7 @@ def inject_buttons(filepath):
         "ModInputBA",       # Muat sheet "0. Input BA" dari Supabase + GCal
         "ModSyncDraft",     # Sync Data Draft + Diff Highlight ke Supabase
         "modBarisItem",     # Auto hide surplus item rows on 7.2 Dengan Nego
+        "modAutoLayoutNego", # Merge + wrap + ukur tinggi uraian 7.2 Dengan Nego
     ]
 
     # Verify semua .bas file ada
@@ -51,6 +52,9 @@ def inject_buttons(filepath):
         excel = win32com.client.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
+        # Jangan jalankan Workbook_Open saat injector membuka/re-open workbook.
+        # Event auto-layout dapat menampilkan warning manual dan memblokir COM.
+        excel.EnableEvents = False
 
         wb = excel.Workbooks.Open(filepath)
         vb_project = wb.VBProject
@@ -106,6 +110,9 @@ def inject_buttons(filepath):
             "\n"
             "Private Sub Workbook_Open()\n"
             "    On Error Resume Next\n"
+            "    modAutoLayoutNego.ResetCacheLayout\n"
+            "    modAutoLayoutNego.PasangShortcutRapikan\n"
+            "    modAutoLayoutNego.RapikanDaftarNego True, False\n"
             "    modBarisItem.RefreshBarisItem True\n"
             "    Dim sd As String\n"
             "    sd = ModWordLink.ScriptDir_Public()\n"
@@ -121,6 +128,11 @@ def inject_buttons(filepath):
             "    exitCode = wsh.Run(cmd, 0, True)\n"
             "    Set wsh = Nothing\n"
             "    If exitCode = 1 Then ModWordLink.RelinkTemplate\n"
+            "End Sub\n"
+            "\n"
+            "Private Sub Workbook_BeforeClose(Cancel As Boolean)\n"
+            "    On Error Resume Next\n"
+            "    modAutoLayoutNego.LepasShortcutRapikan\n"
             "End Sub\n"
         )
 
@@ -177,6 +189,64 @@ def inject_buttons(filepath):
             print(f"  [OK] Sheet 5. HPS auto-row events injected ({hps_cm.CountOfLines} baris)")
         except Exception as e:
             print(f"  [WARN] Event sheet 5. HPS tidak dipasang: {e}")
+
+        # 2d. Event layout uraian pada sheet 7.2 Dengan Nego.
+        # Workbook lama memiliki Worksheet_Change + FixRowHeight legacy.
+        # Ganti hanya pola legacy yang dikenal; event custom lain tidak ditimpa.
+        nego_event_code = (
+            "' BEGIN POKJA_AUTO_LAYOUT_NEGO\n"
+            "Private Sub Worksheet_Calculate()\n"
+            "    On Error GoTo SafeExit\n"
+            "    modAutoLayoutNego.AutoRapikanJikaPerlu Me\n"
+            "SafeExit:\n"
+            "End Sub\n"
+            "\n"
+            "Private Sub Worksheet_Activate()\n"
+            "    On Error GoTo SafeExit\n"
+            "    modAutoLayoutNego.PasangShortcutRapikan\n"
+            "    modAutoLayoutNego.AutoRapikanJikaPerlu Me\n"
+            "SafeExit:\n"
+            "End Sub\n"
+            "' END POKJA_AUTO_LAYOUT_NEGO"
+        )
+        try:
+            nego_ws = wb.Sheets("7.2 Dengan Nego")
+            nego_cm = vb_project.VBComponents(nego_ws.CodeName).CodeModule
+            nego_current = nego_cm.Lines(1, nego_cm.CountOfLines) if nego_cm.CountOfLines else ""
+            start_marker = "' BEGIN POKJA_AUTO_LAYOUT_NEGO"
+            end_marker = "' END POKJA_AUTO_LAYOUT_NEGO"
+            start = nego_current.find(start_marker)
+            if start >= 0:
+                end = nego_current.find(end_marker, start)
+                if end < 0:
+                    raise RuntimeError("Marker event layout Nego tidak lengkap")
+                nego_current = nego_current[:start] + nego_current[end + len(end_marker):]
+            elif (
+                "Private Sub Worksheet_Change" in nego_current
+                and "Private Sub FixRowHeight" in nego_current
+                and "mergeArea" in nego_current
+            ):
+                # Legacy event yang sebelumnya terpasang pada template tender.
+                nego_current = ""
+            elif any(
+                marker in nego_current
+                for marker in (
+                    "Private Sub Worksheet_Change",
+                    "Private Sub Worksheet_Calculate",
+                    "Private Sub Worksheet_Activate",
+                )
+            ):
+                raise RuntimeError("Sheet 7.2 Dengan Nego memiliki event custom di luar pola legacy")
+            nego_new = nego_current.rstrip()
+            if nego_new:
+                nego_new += "\n\n"
+            nego_new += nego_event_code
+            if nego_cm.CountOfLines:
+                nego_cm.DeleteLines(1, nego_cm.CountOfLines)
+            nego_cm.AddFromString(nego_new)
+            print(f"  [OK] Sheet 7.2 Dengan Nego auto-layout events injected ({nego_cm.CountOfLines} baris)")
+        except Exception as e:
+            print(f"  [WARN] Event sheet 7.2 Dengan Nego tidak dipasang: {e}")
 
         # 3. Clean old buttons - langsung target 3 sheet yang diketahui ada tombolnya
         print("\n  Cleaning old buttons...")
