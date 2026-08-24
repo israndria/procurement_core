@@ -27,6 +27,7 @@ def inject_buttons(filepath):
         "ModKKEvaluasi",    # Muat data KK Evaluasi Kualifikasi dari Supabase
         "ModInputBA",       # Muat sheet "0. Input BA" dari Supabase + GCal
         "ModSyncDraft",     # Sync Data Draft + Diff Highlight ke Supabase
+        "modBarisItem",     # Auto hide surplus item rows on 7.2 Dengan Nego
     ]
 
     # Verify semua .bas file ada
@@ -105,6 +106,7 @@ def inject_buttons(filepath):
             "\n"
             "Private Sub Workbook_Open()\n"
             "    On Error Resume Next\n"
+            "    modBarisItem.RefreshBarisItem True\n"
             "    Dim sd As String\n"
             "    sd = ModWordLink.ScriptDir_Public()\n"
             "    If sd = \"\" Then Exit Sub\n"
@@ -136,6 +138,45 @@ def inject_buttons(filepath):
                 cm.DeleteLines(1, cm.CountOfLines)
             cm.AddFromString(auto_relink_code)
             print(f"  [OK] Workbook_Open auto-relink injected ({cm.CountOfLines} baris)")
+
+        # 2c. Event khusus sheet HPS untuk mengikuti perubahan input/formula.
+        # Marker membuat re-inject idempotent tanpa menghapus event lain.
+        hps_event_code = (
+            "' BEGIN POKJA_AUTO_BARIS_ITEM\n"
+            "Private Sub Worksheet_Calculate()\n"
+            "    modBarisItem.RefreshBarisItem False\n"
+            "End Sub\n"
+            "\n"
+            "Private Sub Worksheet_Change(ByVal Target As Range)\n"
+            "    If Intersect(Target, Me.Range(\"A2:A501\")) Is Nothing Then Exit Sub\n"
+            "    modBarisItem.RefreshBarisItem False\n"
+            "End Sub\n"
+            "' END POKJA_AUTO_BARIS_ITEM"
+        )
+        try:
+            hps_ws = wb.Sheets("5. HPS")
+            hps_cm = vb_project.VBComponents(hps_ws.CodeName).CodeModule
+            hps_current = hps_cm.Lines(1, hps_cm.CountOfLines) if hps_cm.CountOfLines else ""
+            start_marker = "' BEGIN POKJA_AUTO_BARIS_ITEM"
+            end_marker = "' END POKJA_AUTO_BARIS_ITEM"
+            start = hps_current.find(start_marker)
+            if start >= 0:
+                end = hps_current.find(end_marker, start)
+                if end < 0:
+                    raise RuntimeError("Marker event baris item tidak lengkap di sheet 5. HPS")
+                hps_current = hps_current[:start] + hps_current[end + len(end_marker):]
+            if "Private Sub Worksheet_Calculate" in hps_current or "Private Sub Worksheet_Change" in hps_current:
+                raise RuntimeError("Sheet 5. HPS sudah memiliki event Calculate/Change di luar marker")
+            hps_new = hps_current.rstrip()
+            if hps_new:
+                hps_new += "\n\n"
+            hps_new += hps_event_code
+            if hps_cm.CountOfLines:
+                hps_cm.DeleteLines(1, hps_cm.CountOfLines)
+            hps_cm.AddFromString(hps_new)
+            print(f"  [OK] Sheet 5. HPS auto-row events injected ({hps_cm.CountOfLines} baris)")
+        except Exception as e:
+            print(f"  [WARN] Event sheet 5. HPS tidak dipasang: {e}")
 
         # 3. Clean old buttons - langsung target 3 sheet yang diketahui ada tombolnya
         print("\n  Cleaning old buttons...")
