@@ -900,3 +900,142 @@
 [2026-08-23 12:28:56] 
 📊 Selesai — Updated: 0 | Unchanged: 11 | Empty: 1 | Failed: 0
 [2026-08-23 12:28:56] ============================================================
+[2026-08-23 17:00:39] ============================================================
+[2026-08-23 17:00:39] 🚀 Mulai sync jadwal tender...
+[2026-08-23 17:00:44] 🔄 Refreshing Google token...
+[2026-08-23 17:00:44] 
+🔍 [1/12] Belanja Modal Bangunan Kesehatan (Pembangunan Cytotoxic)
+[2026-08-23 17:00:46]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:46] 
+🔍 [2/12] Belanja Pemeliharaan Bangunan Gedung-Bangunan Gedung Tempat Kerja-Bangunan Kesehatan (Rehab Plafon/Pasad)
+[2026-08-23 17:00:46]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:46] 
+🔍 [3/12] Normalisasi Sungai Jarau Ds. Marampiau RT.05 RW.002 Kec. Candi Laras Selatan
+[2026-08-23 17:00:48]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:48] 
+🔍 [4/12] Lanjutan Sei. Cempaka Kec. Binuang
+[2026-08-23 17:00:48]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:48] 
+🔍 [5/12] Pembangunan Gedung Baru Poltek Syekh Salman Al-Farisi Rantau
+[2026-08-23 17:00:49]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:49] 
+🔍 [6/12] NORMALISASI RAY IPIN DAN RAY LULUK DESA MASTA
+[2026-08-23 17:00:50]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:50] 
+🔍 [7/12] Pengerukkan Sungai Bubur Ds. Pematang Karangan Kec. Tapin Tengah
+[2026-08-23 17:00:51]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:51] 
+🔍 [8/12] LANJUTAN PELEBARAN JALAN RUAS KARANGAN PUTIH - SIDOREJO
+[2026-08-23 17:00:52]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:52] 
+🔍 [9/12] PEMBUATAN BOX COLVERT DAN DRAINASE DESA BANUA HANYAR HULU RT 002/003 RW 001 KEC TAPIN UTARA
+[2026-08-23 17:00:53]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:53] 
+🔍 [10/12] Pembuatan Saluran Tersier Impat Ds. Binderang Kec. Lokpaikat
+[2026-08-23 17:00:54]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:54] 
+🔍 [11/12] Lanjutan Pembangunan Mini Mall Pelayanan Publik Kecamatan Binuang
+[2026-08-23 17:00:55]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 17:00:55] 
+🔍 [12/12] Pembangunan Los Tempat Pedagang Kaki Lima Jalan Bay Pass Kec.Binuang
+[2026-08-23 17:00:55]   ⚠️ Jadwal kosong di SPSE — skip sementara.
+[2026-08-23 17:00:55] 
+📊 Selesai — Updated: 0 | Unchanged: 11 | Empty: 1 | Failed: 0
+[2026-08-23 17:00:55] ============================================================
+[2026-08-23 20:09:04] ============================================================
+[2026-08-23 20:09:04] 🚀 Mulai sync jadwal tender...
+[2026-08-23 20:09:04] 
+🔍 [1/2] Kosong
+[2026-08-23 20:09:04]   ⚠️ Jadwal kosong di SPSE — skip sementara.
+[2026-08-23 20:09:04] 
+🔍 [2/2] Valid
+[2026-08-23 20:09:04]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 20:09:04] 
+📊 Selesai — Updated: 0 | Unchanged: 1 | Empty: 1 | Failed: 0
+[2026-08-23 20:09:04] ============================================================
+[2026-08-23 20:21:17] ============================================================
+[2026-08-23 20:21:17] 🚀 Mulai sync jadwal tender...
+[2026-08-23 20:21:17] 
+🔍 [1/2] Kosong
+[2026-08-23 20:21:17]   ⚠️ Jadwal kosong di SPSE — skip sementara.
+[2026-08-23 20:21:17] 
+🔍 [2/2] Valid
+[2026-08-23 20:21:17]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 20:21:17] 
+📊 Selesai — Updated: 0 | Unchanged: 1 | Empty: 1 | Failed: 0
+[2026-08-23 20:21:17] ============================================================
+[2026-08-23 20:21:50] ============================================================
+[2026-08-23 20:21:50] 🚀 Mulai sync jadwal tender...
+[2026-08-23 20:21:50] 
+🔍 [1/2] Kosong
+[2026-08-23 20:21:50]   ⚠️ Jadwal kosong di SPSE — skip sementara.
+[2026-08-23 20:21:50] 
+🔍 [2/2] Valid
+[2026-08-23 20:21:50]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 20:21:50] 
+📊 Selesai — Updated: 0 | Unchanged: 1 | Empty: 1 | Failed: 0
+[2026-08-23 20:21:50] ============================================================
+[2026-08-23 20:43:04] ============================================================
+[2026-08-23 20:43:04] 🚀 Mulai sync jadwal tender...
+[2026-08-23 20:43:04] 
+🔍 [1/2] Kosong
+[2026-08-23 20:43:04]   ⚠️ Jadwal kosong di SPSE — skip sementara.
+[2026-08-23 20:43:04] 
+🔍 [2/2] Valid
+[2026-08-23 20:43:04]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 20:43:04] 
+📊 Selesai — Updated: 0 | Unchanged: 1 | Empty: 1 | Failed: 0
+[2026-08-23 20:43:04] ============================================================
+[2026-08-23 20:50:17] ============================================================
+[2026-08-23 20:50:17] 🚀 Mulai sync jadwal tender...
+[2026-08-23 20:50:17] 
+🔍 [1/2] Kosong
+[2026-08-23 20:50:17]   ⚠️ Jadwal kosong di SPSE — skip sementara.
+[2026-08-23 20:50:17] 
+🔍 [2/2] Valid
+[2026-08-23 20:50:17]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-23 20:50:17] 
+📊 Selesai — Updated: 0 | Unchanged: 1 | Empty: 1 | Failed: 0
+[2026-08-23 20:50:17] ============================================================
+[2026-08-24 07:30:40] ============================================================
+[2026-08-24 07:30:40] 🚀 Mulai sync jadwal tender...
+[2026-08-24 07:30:59] 🔄 Refreshing Google token...
+[2026-08-24 07:30:59] 
+🔍 [1/12] Belanja Modal Bangunan Kesehatan (Pembangunan Cytotoxic)
+[2026-08-24 07:31:01]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:01] 
+🔍 [2/12] Belanja Pemeliharaan Bangunan Gedung-Bangunan Gedung Tempat Kerja-Bangunan Kesehatan (Rehab Plafon/Pasad)
+[2026-08-24 07:31:02]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:02] 
+🔍 [3/12] Normalisasi Sungai Jarau Ds. Marampiau RT.05 RW.002 Kec. Candi Laras Selatan
+[2026-08-24 07:31:02]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:02] 
+🔍 [4/12] Lanjutan Sei. Cempaka Kec. Binuang
+[2026-08-24 07:31:03]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:03] 
+🔍 [5/12] Pembangunan Gedung Baru Poltek Syekh Salman Al-Farisi Rantau
+[2026-08-24 07:31:04]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:04] 
+🔍 [6/12] NORMALISASI RAY IPIN DAN RAY LULUK DESA MASTA
+[2026-08-24 07:31:05]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:05] 
+🔍 [7/12] Pengerukkan Sungai Bubur Ds. Pematang Karangan Kec. Tapin Tengah
+[2026-08-24 07:31:06]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:06] 
+🔍 [8/12] LANJUTAN PELEBARAN JALAN RUAS KARANGAN PUTIH - SIDOREJO
+[2026-08-24 07:31:07]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:07] 
+🔍 [9/12] PEMBUATAN BOX COLVERT DAN DRAINASE DESA BANUA HANYAR HULU RT 002/003 RW 001 KEC TAPIN UTARA
+[2026-08-24 07:31:07]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:07] 
+🔍 [10/12] Pembuatan Saluran Tersier Impat Ds. Binderang Kec. Lokpaikat
+[2026-08-24 07:31:08]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:08] 
+🔍 [11/12] Lanjutan Pembangunan Mini Mall Pelayanan Publik Kecamatan Binuang
+[2026-08-24 07:31:09]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-08-24 07:31:09] 
+🔍 [12/12] Pembangunan Los Tempat Pedagang Kaki Lima Jalan Bay Pass Kec.Binuang
+[2026-08-24 07:31:09]   ⚠️ Jadwal kosong di SPSE — skip sementara.
+[2026-08-24 07:31:09] 
+📊 Selesai — Updated: 0 | Unchanged: 11 | Empty: 1 | Failed: 0
+[2026-08-24 07:31:09] ============================================================
