@@ -53,3 +53,9 @@ def test_validate_vba_source_rejects_python_style_formula_escape():
 
     with pytest.raises(ValueError, match="escape Python/JSON"):
         _validate_vba_source(source)
+
+
+def test_snapshot_keeps_numeric_text_as_text():
+    source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
+
+    assert "VarType(cellValue) <> vbString" in source

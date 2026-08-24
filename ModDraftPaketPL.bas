@@ -2257,7 +2257,9 @@ Private Function SnapshotArrayCellTypePL(ByVal cellValue As Variant, ByVal formu
         SnapshotArrayCellTypePL = "error"
     ElseIf VarType(cellValue) = vbBoolean Then
         SnapshotArrayCellTypePL = "boolean"
-    ElseIf IsNumeric(cellValue) Then
+    ' Teks numeric (mis. NPWP dengan leading zero) wajib tetap text.
+    ' Jangan biarkan IsNumeric("020...") mengubah snapshot menjadi number.
+    ElseIf VarType(cellValue) <> vbString And IsNumeric(cellValue) Then
         SnapshotArrayCellTypePL = "number"
     Else
         SnapshotArrayCellTypePL = "text"
