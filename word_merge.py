@@ -218,6 +218,81 @@ def _meaningful_dokpil_value(value):
     return value
 
 
+def _normalized_document_text(value):
+    """Normalisasi teks Word untuk semantic read-back pasca mail-merge."""
+    return re.sub(r"\s+", " ", format_value(value)).strip().casefold()
+
+
+def _validate_merge_source_data(data):
+    """Fail-closed sebelum merge jika sumber aktif ternyata kosong.
+
+    Nilai ``0`` pada slot yang tidak dipakai sah, tetapi tidak sah untuk
+    atribut alat/personel aktif atau dua field risiko K3 Isi Reviu.
+    """
+    if not data or data.get("_source_sheet") != "list_reviu":
+        return
+
+    def required(label, value):
+        if not _meaningful_dokpil_value(value):
+            raise ValueError(f"Sumber list_reviu kosong/tidak valid: {label}")
+
+    required("Uraian Pekerjaan Resiko K3", data.get("Uraian_Pekerjaan_Resiko_K3"))
+    required("Resiko Tertinggi/Fatal K3", data.get("Resiko_TertinggiFatal_K3"))
+
+    for idx, item in enumerate(data.get("_dokpil_equipment") or [], 1):
+        required(f"Alat {idx}", item.get("jenis"))
+        required(f"Kapasitas Alat {idx}", item.get("kapasitas"))
+        required(f"Jumlah Alat {idx}", item.get("jumlah"))
+    for idx, item in enumerate(data.get("_dokpil_personnel") or [], 1):
+        required(f"Jabatan Personil {idx}", item.get("jabatan"))
+        required(f"Sertifikat Personil {idx}", item.get("sertifikat"))
+        required(f"Pengalaman Kerja Personil {idx}", item.get("pengalaman"))
+
+
+def _validate_merged_document_text(document_text, data):
+    """Pastikan hasil render membawa kembali nilai aktif dari workbook.
+
+    Ini sengaja dijalankan setelah Word mengganti field, sebelum Save/Export.
+    Dengan begitu merge teknis yang sukses tetapi menghasilkan blank/``0 0``
+    tidak pernah menjadi PDF final.
+    """
+    text = _normalized_document_text(document_text)
+    markers = sorted(set(re.findall(r"\[\[[^\]]+\]\]", text)))
+    if markers:
+        raise ValueError(f"Marker mail-merge tersisa pada output: {markers[:8]}")
+
+    if not data or data.get("_source_sheet") != "list_reviu":
+        return
+
+    expected = [
+        ("Uraian Pekerjaan Resiko K3", data.get("Uraian_Pekerjaan_Resiko_K3")),
+        ("Resiko Tertinggi/Fatal K3", data.get("Resiko_TertinggiFatal_K3")),
+    ]
+    for idx, item in enumerate(data.get("_dokpil_equipment") or [], 1):
+        expected.extend((
+            (f"Alat {idx}", item.get("jenis")),
+            (f"Kapasitas Alat {idx}", item.get("kapasitas")),
+            (f"Jumlah Alat {idx}", item.get("jumlah")),
+        ))
+    for idx, item in enumerate(data.get("_dokpil_personnel") or [], 1):
+        expected.extend((
+            (f"Jabatan Personil {idx}", item.get("jabatan")),
+            (f"Sertifikat Personil {idx}", item.get("sertifikat")),
+            (f"Pengalaman Kerja Personil {idx}", item.get("pengalaman")),
+        ))
+
+    missing = []
+    for label, value in expected:
+        needle = _normalized_document_text(value)
+        if needle and needle not in text:
+            missing.append(label)
+    if missing:
+        raise ValueError(
+            "Semantic read-back gagal; nilai sumber tidak ditemukan pada "
+            f"dokumen hasil: {', '.join(missing)}"
+        )
+
+
 def _dokpil_input_sheet(wb):
     """Cari sheet input alat/personil dengan nama lama maupun nama Tender."""
     aliases = {"tabel alat & personil", "alat & personil"}
@@ -2250,6 +2325,10 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
     import win32com.client
     import glob as _glob_excel
 
+    # Jangan mulai proses jika workbook sumber sudah kehilangan nilai aktif.
+    # Ini menjaga kegagalan tetap terlihat dan mencegah PDF kosong terbit.
+    _validate_merge_source_data(data)
+
     # `merge_word()` juga dipanggil langsung oleh beberapa workflow, bukan
     # hanya melalui CLI yang kebetulan memiliki variabel global excel_path.
     # Resolve workbook dari folder Word agar export sheet BA selalu deterministik.
@@ -2518,6 +2597,10 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         except Exception:
             pass
         _update_toc_fields(wdDoc)
+
+        # Read-back semantic wajib sebelum Save/Export. Merge Word yang return
+        # code-nya sukses belum berarti isi dokumen benar.
+        _validate_merged_document_text(wdDoc.Content.Text, data)
 
         # Cleanup blank pages untuk file BA utama (satu_data) yang multi-section.
         # File "2. Isi Reviu" & "3. Dokpil" dikecualikan (struktur beda, bisa berantakan).
