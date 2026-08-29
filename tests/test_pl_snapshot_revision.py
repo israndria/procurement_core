@@ -14,11 +14,15 @@ from pl_snapshot_revision import (
     PLPK_WHITELIST_ADDRESSES,
     CELL_METADATA,
     SnapshotError,
+    XML_DATA_SUBFOLDER,
     WHITELIST_ADDRESSES,
     compare_snapshots,
+    migrate_legacy_snapshot_files,
     parse_snapshot,
     promote_proposal,
+    resolve_snapshot_path,
     seed_proposal,
+    snapshot_paths,
     validate_snapshot,
 )
 
@@ -185,6 +189,68 @@ def test_snapshot_rejects_empty_or_mismatched_package_code(tmp_path):
         validate_snapshot(mismatched, expected_kode_paket="11000000000")
 
 
+def test_snapshot_resolver_prefers_canonical_directory(tmp_path):
+    legacy = tmp_path / "input_data_snapshot.xml"
+    canonical = tmp_path / XML_DATA_SUBFOLDER / "input_data_snapshot.xml"
+    canonical.parent.mkdir()
+    _write_snapshot(legacy, overrides={"C15": ("text", "legacy")})
+    _write_snapshot(canonical, overrides={"C15": ("text", "canonical")})
+
+    resolved = resolve_snapshot_path(legacy)
+
+    assert resolved == canonical
+    assert snapshot_paths(tmp_path).data_dir == canonical.parent
+    assert parse_snapshot(legacy).cells["C15"].text == "canonical"
+
+
+def test_seed_routes_write_to_provisioned_canonical_directory(tmp_path):
+    legacy_current = tmp_path / "input_data_snapshot.xml"
+    proposal_request = tmp_path / "input_data_proposal.xml"
+    (tmp_path / XML_DATA_SUBFOLDER).mkdir()
+    _write_snapshot(legacy_current)
+
+    result = seed_proposal(legacy_current, proposal_request)
+
+    assert Path(result["proposal"]) == tmp_path / XML_DATA_SUBFOLDER / proposal_request.name
+    assert Path(result["proposal"]).is_file()
+    assert not proposal_request.exists()
+
+
+def test_promote_routes_legacy_current_to_canonical_directory(tmp_path):
+    legacy_current = tmp_path / "input_data_snapshot.xml"
+    proposal_request = tmp_path / "input_data_proposal.xml"
+    canonical_dir = tmp_path / XML_DATA_SUBFOLDER
+    canonical_dir.mkdir()
+    _write_snapshot(legacy_current, overrides={"C15": ("text", "180 Hari")})
+    _write_snapshot(proposal_request, overrides={"C15": ("text", "90 Hari")})
+
+    result = promote_proposal(proposal_request, legacy_current)
+
+    canonical_current = canonical_dir / legacy_current.name
+    assert result["applied"] is True
+    assert canonical_current.is_file()
+    assert parse_snapshot(canonical_current).cells["C15"].text == "90 Hari"
+    assert legacy_current.read_bytes() != canonical_current.read_bytes()
+    assert list(canonical_dir.glob("input_data_snapshot.bak-*.xml"))
+
+
+def test_legacy_migration_is_opt_in_copy_and_never_overwrites_root(tmp_path):
+    legacy = tmp_path / "input_data_snapshot.xml"
+    _write_snapshot(legacy)
+
+    preview = migrate_legacy_snapshot_files(tmp_path)
+    assert preview["dry_run"] is True
+    assert preview["planned"]
+    assert not (tmp_path / XML_DATA_SUBFOLDER).exists()
+
+    result = migrate_legacy_snapshot_files(tmp_path, apply=True)
+
+    canonical = tmp_path / XML_DATA_SUBFOLDER / legacy.name
+    assert result["migrated"]
+    assert canonical.read_bytes() == legacy.read_bytes()
+    assert legacy.is_file()
+
+
 def test_plpk_profile_contains_unique_fields_and_excludes_reserved_rows():
     assert {"C28", "C39", "C45", "C51", "C56", "C63", "C64", "C66", "C75", "C77", "C82", "C89"} <= PLPK_WHITELIST_ADDRESSES
     assert not {f"C{row}" for row in range(57, 63)} & PLPK_WHITELIST_ADDRESSES
@@ -218,6 +284,10 @@ def test_vba_save_keeps_first_baseline_and_load_rejects_empty_code():
     source = source_path.read_text(encoding="utf-8")
 
     assert 'SNAPSHOT_BASELINE_FILE_PL As String = "input_data_baseline.xml"' in source
+    assert 'SNAPSHOT_DATA_FOLDER_PL As String = "11. XML Data"' in source
+    assert 'SnapshotFilePathPL(SNAPSHOT_FILE_PL, True)' in source
+    assert 'SnapshotFilePathPL(SNAPSHOT_FILE_PL, False)' in source
+    assert 'Backward compatibility: snapshot root lama tetap dapat dibaca.' in source
     assert "If Not fso.FileExists(baselinePath) Then" in source
     assert '"Load dibatalkan: kode paket snapshot/workbook kosong."' in source
     assert "NextSnapshotBackupPathPL(snapshotPath)" in source

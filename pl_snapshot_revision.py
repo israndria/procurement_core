@@ -33,6 +33,133 @@ FAMILY_LAYOUTS = {
     FAMILY_PLPK: LAYOUT_VERSION_PLPK,
 }
 MAX_XML_BYTES = 2_000_000
+XML_DATA_SUBFOLDER = "11. XML Data"
+SNAPSHOT_FILE_NAME = "input_data_snapshot.xml"
+PROPOSAL_FILE_NAME = "input_data_proposal.xml"
+BASELINE_FILE_NAME = "input_data_baseline.xml"
+AUDIT_FILE_NAME = "input_data_audit.jsonl"
+
+
+@dataclass(frozen=True)
+class SnapshotPaths:
+    """Canonical local artefact paths for one PL package."""
+
+    package_dir: Path
+    data_dir: Path
+    snapshot: Path
+    proposal: Path
+    baseline: Path
+    audit: Path
+
+    def ensure_dir(self) -> Path:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        return self.data_dir
+
+
+def snapshot_paths(package_dir: str | os.PathLike[str], *, create: bool = False) -> SnapshotPaths:
+    """Return canonical snapshot paths below ``11. XML Data``.
+
+    ``create=False`` is deliberately side-effect free so read-only audit and
+    resolver calls cannot create package state. Writers may request
+    ``create=True`` immediately before their atomic write.
+    """
+    package = Path(package_dir)
+    data_dir = package / XML_DATA_SUBFOLDER
+    paths = SnapshotPaths(
+        package_dir=package,
+        data_dir=data_dir,
+        snapshot=data_dir / SNAPSHOT_FILE_NAME,
+        proposal=data_dir / PROPOSAL_FILE_NAME,
+        baseline=data_dir / BASELINE_FILE_NAME,
+        audit=data_dir / AUDIT_FILE_NAME,
+    )
+    if create:
+        paths.ensure_dir()
+    return paths
+
+
+def _is_snapshot_artifact_name(name: str) -> bool:
+    return name in {
+        SNAPSHOT_FILE_NAME,
+        PROPOSAL_FILE_NAME,
+        BASELINE_FILE_NAME,
+        AUDIT_FILE_NAME,
+    } or bool(re.fullmatch(r"input_data_snapshot\.bak-[^/\\]+\.xml", name))
+
+
+def resolve_snapshot_path(
+    path: str | os.PathLike[str],
+    *,
+    for_write: bool = False,
+) -> Path:
+    """Resolve a snapshot artefact with canonical-first, legacy-safe rules.
+
+    Explicit paths inside ``11. XML Data`` are always honoured. For a legacy
+    root path, an existing canonical file wins for reads; writes use the
+    canonical directory when it already exists. A package with no provisioned
+    directory remains backward-compatible and keeps using its legacy path
+    until an explicit migration/provisioning step is performed.
+    """
+    requested = Path(path)
+    if not _is_snapshot_artifact_name(requested.name):
+        return requested
+    if requested.parent.name.casefold() == XML_DATA_SUBFOLDER.casefold():
+        return requested
+    candidate = requested.parent / XML_DATA_SUBFOLDER / requested.name
+    # New/provisioned packages write canonically. Legacy packages without the
+    # folder retain their old path until an explicit migration/provisioning
+    # step, preserving backward compatibility for existing tests/workflows.
+    if for_write and candidate.parent.is_dir():
+        return candidate
+    if candidate.is_file():
+        return candidate
+    return requested
+
+
+def migrate_legacy_snapshot_files(
+    package_dir: str | os.PathLike[str],
+    *,
+    apply: bool = False,
+) -> dict[str, object]:
+    """Plan or safely copy root snapshot artefacts into ``11. XML Data``.
+
+    This operation never deletes or overwrites legacy root files. Without
+    ``apply`` it is a dry-run; with ``apply=True`` only non-conflicting files
+    are copied with metadata preserved. Conflicts are returned for review.
+    """
+    package = Path(package_dir)
+    if not package.is_dir():
+        raise SnapshotError(f"Folder paket tidak ditemukan: {package}")
+    paths = snapshot_paths(package)
+    planned: list[dict[str, str]] = []
+    conflicts: list[dict[str, str]] = []
+    for source in sorted(package.iterdir(), key=lambda item: item.name.casefold()):
+        if not source.is_file() or not _is_snapshot_artifact_name(source.name):
+            continue
+        target = paths.data_dir / source.name
+        row = {"source": str(source), "target": str(target)}
+        if target.exists():
+            conflicts.append(row)
+        else:
+            planned.append(row)
+
+    migrated: list[dict[str, str]] = []
+    if apply and planned:
+        paths.ensure_dir()
+        for row in planned:
+            source = Path(row["source"])
+            target = Path(row["target"])
+            shutil.copy2(source, target)
+            migrated.append(row)
+    return {
+        "ok": not conflicts,
+        "package_dir": str(package),
+        "data_dir": str(paths.data_dir),
+        "dry_run": not apply,
+        "planned": planned,
+        "migrated": migrated,
+        "conflicts": conflicts,
+    }
 
 
 def _addresses(*ranges: tuple[str, int, int]) -> frozenset[str]:
@@ -290,7 +417,7 @@ def _cell_text(node: ET.Element) -> str:
 
 
 def parse_snapshot(path: str | os.PathLike[str]) -> Snapshot:
-    source = Path(path)
+    source = resolve_snapshot_path(path)
     if not source.is_file():
         raise SnapshotError(f"File snapshot tidak ditemukan: {source}")
     if source.stat().st_size > MAX_XML_BYTES:
@@ -549,12 +676,12 @@ def promote_proposal(
     audit_path: str | os.PathLike[str] | None = None,
     expected_kode_paket: str | None = None,
 ) -> dict[str, object]:
-    proposal = parse_snapshot(proposal_path)
-    current = parse_snapshot(current_path)
+    proposal = parse_snapshot(resolve_snapshot_path(proposal_path))
+    current = parse_snapshot(resolve_snapshot_path(current_path))
     if _same_path(proposal.path, current.path):
         raise SnapshotError("Proposal dan current tidak boleh file yang sama")
     if baseline_path is not None:
-        baseline_target = Path(baseline_path)
+        baseline_target = resolve_snapshot_path(baseline_path)
         if _same_path(baseline_target, current.path) or _same_path(baseline_target, proposal.path):
             raise SnapshotError("Baseline immutable tidak boleh menjadi target promosi")
     if proposal.kode_paket != current.kode_paket:
@@ -564,7 +691,7 @@ def promote_proposal(
     if expected_kode_paket and proposal.kode_paket != expected_kode_paket.strip():
         raise SnapshotError("Kode paket proposal tidak sesuai expected")
     if baseline_path is not None:
-        baseline = parse_snapshot(baseline_path)
+        baseline = parse_snapshot(resolve_snapshot_path(baseline_path))
         if baseline.kode_paket != current.kode_paket:
             raise SnapshotError("Kode paket baseline berbeda dari current")
         if baseline.family != current.family or baseline.layout_version != current.layout_version:
@@ -616,10 +743,16 @@ def promote_proposal(
     if not changes:
         return {"ok": True, "changed": 0, "applied": False, "message": "Tidak ada perubahan."}
 
-    target = current.path
+    # If caller used legacy root notation for a provisioned package, promote
+    # into the canonical directory instead of recreating a root artefact.
+    target = resolve_snapshot_path(current_path, for_write=True)
     backup = _backup_path(target)
     before_sha = current.sha256
-    shutil.copy2(target, backup)
+    target_existed = target.is_file()
+    # Jika current masih legacy di root sementara folder canonical sudah
+    # diprovisioning, target belum ada. Backup harus mengambil sumber current
+    # yang benar, bukan memaksa membaca target canonical yang kosong.
+    shutil.copy2(target if target_existed else current.path, backup)
     after_sha = sha256_file(proposal.path)
     try:
         _atomic_copy(proposal.path, target)
@@ -631,7 +764,7 @@ def promote_proposal(
         ):
             raise SnapshotError("Verifikasi current sesudah promosi gagal")
         if audit_path is not None:
-            audit = Path(audit_path)
+            audit = resolve_snapshot_path(audit_path, for_write=True)
             audit.parent.mkdir(parents=True, exist_ok=True)
             record = {
                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -649,7 +782,10 @@ def promote_proposal(
             with audit.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
-        _atomic_copy(backup, target)
+        if target_existed:
+            _atomic_copy(backup, target)
+        else:
+            target.unlink(missing_ok=True)
         raise
     return {
         "ok": True,
@@ -663,8 +799,8 @@ def promote_proposal(
 
 
 def seed_proposal(current_path: str | os.PathLike[str], proposal_path: str | os.PathLike[str]) -> dict[str, object]:
-    current = parse_snapshot(current_path)
-    proposal = Path(proposal_path)
+    current = parse_snapshot(resolve_snapshot_path(current_path))
+    proposal = resolve_snapshot_path(proposal_path, for_write=True)
     if proposal.resolve() == current.path.resolve():
         raise SnapshotError("Proposal dan current tidak boleh file yang sama")
     validate_snapshot(current.path, require_complete=True)
@@ -699,6 +835,13 @@ def _parser() -> argparse.ArgumentParser:
     seed.add_argument("current")
     seed.add_argument("proposal")
 
+    migrate = sub.add_parser(
+        "migrate-root",
+        help="copy artefak snapshot legacy dari root ke 11. XML Data tanpa menghapus root",
+    )
+    migrate.add_argument("package_dir")
+    migrate.add_argument("--apply", action="store_true")
+
     promote = sub.add_parser("promote")
     promote.add_argument("proposal")
     promote.add_argument("current")
@@ -728,6 +871,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(report, end="")
         elif args.command == "seed-proposal":
             result = seed_proposal(args.current, args.proposal)
+        elif args.command == "migrate-root":
+            result = migrate_legacy_snapshot_files(args.package_dir, apply=args.apply)
         else:
             result = promote_proposal(
                 args.proposal,

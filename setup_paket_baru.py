@@ -26,6 +26,7 @@ from config import (
     detect_pl_workflow, pl_workflow_config,
     excel_to_file_uri,
 )
+from pl_snapshot_revision import XML_DATA_SUBFOLDER
 
 # Output base default = root POKJA folder (untuk mode Tender)
 OUTPUT_BASE = POKJA_ROOT
@@ -196,7 +197,7 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
         _subfolder_9,
     ]
     if workflow:
-        _subfolders.append("10. Revisi Uploadan PPK")
+        _subfolders.extend(["10. Revisi Uploadan PPK", XML_DATA_SUBFOLDER])
     for _sub in _subfolders:
         os.makedirs(os.path.join(target_dir, _sub), exist_ok=True)
 

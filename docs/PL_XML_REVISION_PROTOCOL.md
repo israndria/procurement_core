@@ -8,11 +8,28 @@ user menjalankan `Load Data`.
 
 ## File per folder paket
 
-- `input_data_baseline.xml` — snapshot pertama yang immutable.
-- `input_data_snapshot.xml` — current state yang terakhir diterima Excel.
-- `input_data_proposal.xml` — salinan kerja yang boleh diedit AI.
-- `input_data_audit.jsonl` — audit setiap proposal yang dipromosikan.
-- `input_data_snapshot.bak-*.xml` — backup otomatis sebelum current diganti.
+Seluruh artefak XML/snapshot canonical disimpan flat di subfolder:
+
+```text
+{folder paket}/11. XML Data/
+```
+
+Folder ini dibuat kosong saat provisioning paket baru. `Save Data` Excel
+membuat snapshot/baseline di sana; proposal, audit JSONL, dan backup yang
+dihasilkan engine revisi juga diarahkan ke sana. Resolver membaca canonical
+lebih dahulu. File legacy yang masih berada di root tidak dihapus otomatis.
+`migrate-root --apply` hanya menyalin file root yang tidak konflik dan tetap
+mempertahankan file sumber legacy.
+
+- `11. XML Data/input_data_baseline.xml` — snapshot pertama yang immutable.
+- `11. XML Data/input_data_snapshot.xml` — current state yang terakhir diterima Excel.
+- `11. XML Data/input_data_proposal.xml` — salinan kerja yang boleh diedit AI.
+- `11. XML Data/input_data_audit.jsonl` — audit setiap proposal yang dipromosikan.
+- `11. XML Data/input_data_snapshot.bak-*.xml` — backup otomatis sebelum current diganti.
+
+Untuk paket lama, path root dengan nama artefak yang sama tetap diterima sebagai
+fallback jika file canonical belum ada. Writer baru memakai `11. XML Data` bila
+folder tersebut sudah diprovision.
 
 Proposal yang dibuat melalui `seed-proposal` membawa atribut
 `source_sha256`. Atribut ini mencegah proposal lama menimpa snapshot current
@@ -41,12 +58,12 @@ hanya memperbarui current dan tidak menimpa baseline.
 ## Alur kerja revisi
 
 1. Setelah upload PPK pertama selesai, jalankan `Save Data`.
-2. AI membaca `input_data_baseline.xml` dan dokumen PPK revisi.
+2. AI membaca `11. XML Data/input_data_baseline.xml` dan dokumen PPK revisi.
 3. Buat proposal dari current:
 
    ```powershell
    & $env:POKJA_PYTHON pl_snapshot_revision.py seed-proposal `
-     input_data_snapshot.xml input_data_proposal.xml
+     "11. XML Data/input_data_snapshot.xml" "11. XML Data/input_data_proposal.xml"
    ```
 
 4. AI membaca dokumen revisi, lalu mengubah hanya field yang terbukti berbeda
@@ -56,7 +73,7 @@ hanya memperbarui current dan tidak menimpa baseline.
 
    ```powershell
    & $env:POKJA_PYTHON pl_snapshot_revision.py compare `
-     input_data_baseline.xml input_data_proposal.xml `
+     "11. XML Data/input_data_baseline.xml" "11. XML Data/input_data_proposal.xml" `
      --output revisi_snapshot_report.md
    ```
 
@@ -64,9 +81,9 @@ hanya memperbarui current dan tidak menimpa baseline.
 
    ```powershell
    & $env:POKJA_PYTHON pl_snapshot_revision.py promote `
-     input_data_proposal.xml input_data_snapshot.xml `
-     --baseline input_data_baseline.xml `
-     --audit input_data_audit.jsonl `
+     "11. XML Data/input_data_proposal.xml" "11. XML Data/input_data_snapshot.xml" `
+     --baseline "11. XML Data/input_data_baseline.xml" `
+     --audit "11. XML Data/input_data_audit.jsonl" `
      --expected-kode-paket 11000000000
    ```
 

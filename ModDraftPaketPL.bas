@@ -103,6 +103,7 @@ Private Const SNAPSHOT_LAYOUT_PLJKK As String = "PLJKK-MASTER-DATA-v1"
 Private Const SNAPSHOT_LAYOUT_PLPK As String = "PLPK-MASTER-DATA-v1"
 Private Const SNAPSHOT_FILE_PL As String = "input_data_snapshot.xml"
 Private Const SNAPSHOT_BASELINE_FILE_PL As String = "input_data_baseline.xml"
+Private Const SNAPSHOT_DATA_FOLDER_PL As String = "11. XML Data"
 
 ' Reset status bar secara sinkron.
 ' Callback Application.OnTime tidak dipakai: callback tertunda dapat
@@ -132,6 +133,18 @@ End Sub
 Public Sub SetSilentPL(silent As Boolean)
     m_SilentMode = silent
 End Sub
+
+Private Function SnapshotFilePathPL(ByVal fileName As String, ByVal createFolder As Boolean) As String
+    Dim fso As Object
+    Dim dataFolder As String
+
+    dataFolder = ThisWorkbook.Path & "\" & SNAPSHOT_DATA_FOLDER_PL
+    If createFolder Then
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        If Not fso.FolderExists(dataFolder) Then fso.CreateFolder dataFolder
+    End If
+    SnapshotFilePathPL = dataFolder & "\" & fileName
+End Function
 
 
 ' ============================================================
@@ -1978,6 +1991,7 @@ Public Sub SaveDataPL()
     Dim baselinePath As String
     Dim tempPath As String
     Dim backupPath As String
+    Dim legacyBaselinePath As String
     Dim fso As Object
     Dim hadPreviousSnapshot As Boolean
     Dim snapshotTouched As Boolean
@@ -1989,12 +2003,20 @@ Public Sub SaveDataPL()
         Exit Sub
     End If
 
-    snapshotPath = ThisWorkbook.Path & "\" & SNAPSHOT_FILE_PL
-    baselinePath = ThisWorkbook.Path & "\" & SNAPSHOT_BASELINE_FILE_PL
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    snapshotPath = SnapshotFilePathPL(SNAPSHOT_FILE_PL, True)
+    baselinePath = SnapshotFilePathPL(SNAPSHOT_BASELINE_FILE_PL, False)
+    legacyBaselinePath = ThisWorkbook.Path & "\" & SNAPSHOT_BASELINE_FILE_PL
     tempPath = snapshotPath & ".tmp"
     backupPath = NextSnapshotBackupPathPL(snapshotPath)
-    Set fso = CreateObject("Scripting.FileSystemObject")
     If fso.FileExists(tempPath) Then fso.DeleteFile tempPath, True
+
+    ' Paket lama mungkin masih memiliki baseline di root. Salin sekali ke
+    ' lokasi canonical tanpa menghapus root agar baseline immutable tetap sama.
+    If Not fso.FileExists(baselinePath) And fso.FileExists(legacyBaselinePath) Then
+        CopyFileBinaryPL legacyBaselinePath, baselinePath
+        If Not fso.FileExists(baselinePath) Then Err.Raise vbObjectError + 2112, , "Baseline legacy gagal dimigrasikan."
+    End If
 
     WriteSnapshotXMLPL tempPath, wsMD
     If Not fso.FileExists(tempPath) Then Err.Raise vbObjectError + 2101, , "File snapshot sementara tidak terbentuk."
@@ -2091,10 +2113,14 @@ Public Sub LoadDataPL()
         Exit Sub
     End If
 
-    snapshotPath = ThisWorkbook.Path & "\" & SNAPSHOT_FILE_PL
+    snapshotPath = SnapshotFilePathPL(SNAPSHOT_FILE_PL, False)
     If Dir(snapshotPath) = "" Then
-        If Not m_SilentMode Then MsgBox "Snapshot belum ada:" & vbCrLf & snapshotPath, vbInformation, "Load Data"
-        Exit Sub
+        ' Backward compatibility: snapshot root lama tetap dapat dibaca.
+        snapshotPath = ThisWorkbook.Path & "\" & SNAPSHOT_FILE_PL
+        If Dir(snapshotPath) = "" Then
+            If Not m_SilentMode Then MsgBox "Snapshot belum ada:" & vbCrLf & snapshotPath, vbInformation, "Load Data"
+            Exit Sub
+        End If
     End If
 
     Set dom = CreateObject("MSXML2.DOMDocument.6.0")

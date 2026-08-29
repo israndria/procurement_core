@@ -90,7 +90,11 @@ def test_setup_pl_provisions_revision_upload_folder(
         workflow=workflow,
     )
 
-    assert (output / folder_name / "10. Revisi Uploadan PPK").is_dir()
+    package_dir = output / folder_name
+    assert (package_dir / "10. Revisi Uploadan PPK").is_dir()
+    xml_data = package_dir / "11. XML Data"
+    assert xml_data.is_dir()
+    assert list(xml_data.iterdir()) == []
 
 
 def test_equipment_markers_fill_all_nested_tables(tmp_path):
