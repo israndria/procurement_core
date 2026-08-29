@@ -426,13 +426,13 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         ' Nilai finansial
         Dim paguVal As String: paguVal = CStr(item(11))
         If paguVal <> "" And paguVal <> "null" Then
-            If Left(paguVal, 3) <> "Rp." Then paguVal = "Rp. " & paguVal
-            .Cells(PLR_PAGU, 3).Value = paguVal
+            .Cells(PLR_PAGU, 3).Value = ParseNominalPL(paguVal)
+            .Cells(PLR_PAGU, 3).NumberFormat = """Rp. ""#,##0"
         End If
         Dim hpsVal As String: hpsVal = CStr(item(4))
         If hpsVal <> "" And hpsVal <> "null" Then
-            If Left(hpsVal, 3) <> "Rp." Then hpsVal = "Rp. " & hpsVal
-            .Cells(PLR_HPS, 3).Value = hpsVal
+            .Cells(PLR_HPS, 3).Value = ParseNominalPL(hpsVal)
+            .Cells(PLR_HPS, 3).NumberFormat = """Rp. ""#,##0"
         End If
         If CStr(item(14)) <> "" And CStr(item(14)) <> "null" Then
             .Cells(PLR_LOKASI, 3).Value = CStr(item(14))
@@ -2943,6 +2943,24 @@ End Function
 ' ============================================================
 ' Format "2026-02-06" -> "06 Februari 2026"
 ' ============================================================
+Private Function ParseNominalPL(ByVal raw As String) As Double
+    ' Simpan nominal sebagai angka agar operasi matematika tetap aman.
+    ' Input SPSE dapat berupa Rp. 1.234.567,00 atau angka polos.
+    Dim s As String: s = Trim(raw)
+    Dim commaPos As Long: commaPos = InStr(1, s, ",")
+    If commaPos > 0 Then s = Left(s, commaPos - 1)
+    Dim i As Long, ch As String, digits As String
+    For i = 1 To Len(s)
+        ch = Mid(s, i, 1)
+        If ch >= "0" And ch <= "9" Then digits = digits & ch
+    Next i
+    If digits = "" Then
+        ParseNominalPL = 0
+    Else
+        ParseNominalPL = CDbl(digits)
+    End If
+End Function
+
 Private Function FormatTanggalIndo(tglISO As String) As String
     FormatTanggalIndo = tglISO
     If Len(tglISO) < 10 Then Exit Function
