@@ -11,6 +11,7 @@ Strategy:
 
 Usage:
   python word_merge.py buka    <word_path> <excel_path> <sheet_name>
+  python word_merge.py permanent <word_path> <excel_path> <sheet_name>
   python word_merge.py print   <word_path> <excel_path> <sheet_name>
   python word_merge.py pdf     <word_path> <excel_path> <sheet_name> <pdf_name>
   python word_merge.py printer <word_path> <excel_path> <sheet_name> <printer_name> [from_page] [to_page]
@@ -241,10 +242,11 @@ def read_excel_data(excel_path, sheet_name):
     return data
 
 
-def _meaningful_dokpil_value(value):
-    """Normalisasi nilai slot alat; 0 dari formula Excel berarti kosong."""
+def _meaningful_dokpil_value(value, *, allow_dash=False):
+    """Normalisasi nilai slot; ``-`` boleh untuk kapasitas yang N/A."""
     value = format_value(value).strip()
-    if value.casefold() in ("", "0", "0.0", "none", "null", "-", "—"):
+    empty = ("", "0", "0.0", "none", "null")
+    if value.casefold() in empty or (not allow_dash and value in ("-", "—")):
         return ""
     return value
 
@@ -264,6 +266,8 @@ def _validate_merge_source_data(data):
         return
 
     def required(label, value):
+        if label.startswith("Kapasitas Alat") and format_value(value).strip() in ("-", "—"):
+            return
         if not _meaningful_dokpil_value(value):
             raise ValueError(f"Sumber list_reviu kosong/tidak valid: {label}")
 
@@ -373,7 +377,7 @@ def _read_dokpil_equipment(excel_copy_path):
             equipment.append({
                 "no": str(len(equipment) + 1),
                 "jenis": jenis,
-                "kapasitas": _meaningful_dokpil_value(_kapasitas),
+                "kapasitas": _meaningful_dokpil_value(_kapasitas, allow_dash=True),
                 "jumlah": _meaningful_dokpil_value(_jumlah),
             })
     except Exception as exc:
@@ -2825,6 +2829,11 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
     copy_path = _fit_path(folder, f"{base[:60].rstrip()} (Merged){ext}")
 
     # Copy template ke (Merged) - template asli tidak diubah
+    _permanent_mode = mode in ("permanent", "headless_permanent")
+    if _permanent_mode and os.path.exists(copy_path):
+        raise FileExistsError(
+            f"Output merged sudah ada; pindahkan/hapus secara eksplisit terlebih dahulu: {copy_path}"
+        )
     shutil.copy2(word_path, copy_path)
     # Header resmi dipilih dari profil instansi, hanya pada copy sementara.
     try:
@@ -2846,6 +2855,8 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
     word_pid = None
     new_instance = False
     _deferred_pdf_success = None
+    _permanent_saved = False
+    _permanent_error = None
 
     try:
         wdApp = win32com.client.DispatchEx("Word.Application")
@@ -2931,6 +2942,12 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
             except:
                 wdApp.WindowState = 1
+
+        elif _permanent_mode:
+            # Mode headless permanen: simpan hasil field yang sudah di-unlink
+            # sebelum Word ditutup. Output dipertahankan hanya bila Save sukses.
+            wdDoc.Save()
+            _permanent_saved = True
 
         if mode == "print":
             time.sleep(1)
@@ -3207,9 +3224,12 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 wdApp.ScreenUpdating = True
                 wdApp.Visible = mode in ("buka", "print")
             except: pass
-        show_error(f"Error saat merge:\n{e}")
+        if _permanent_mode:
+            _permanent_error = e
+        else:
+            show_error(f"Error saat merge:\n{e}")
     finally:
-        if mode.startswith("pdf"):
+        if mode.startswith("pdf") or _permanent_mode:
             try:
                 if wdDoc is not None:
                     wdDoc.Close(False)
@@ -3222,13 +3242,15 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 pass
             _terminate_word_process(word_pid)
         pythoncom.CoUninitialize()
-        # Hapus file (Merged) ke Recycle Bin setelah selesai
-        try:
-            if os.path.exists(copy_path):
-                import send2trash
-                send2trash.send2trash(copy_path)
-        except Exception:
-            pass
+        # Mode permanen mempertahankan copy hanya setelah Save sukses.
+        # Mode interaktif/PDF tetap memakai cleanup lama ke Recycle Bin.
+        if not (_permanent_mode and _permanent_saved):
+            try:
+                if os.path.exists(copy_path):
+                    import send2trash
+                    send2trash.send2trash(copy_path)
+            except Exception:
+                pass
         try:
             # Word meninggalkan lock file ``~$`` bila instance dihentikan
             # setelah COM terputus. File ini bukan dokumen user dan aman
@@ -3244,6 +3266,11 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         # Buka PDF setelah Word dan file Merged benar-benar selesai ditutup.
         if _deferred_pdf_success:
             show_success(_deferred_pdf_success)
+
+    if _permanent_error is not None:
+        raise RuntimeError(f"Merge permanen gagal: {_permanent_error}") from _permanent_error
+    if _permanent_saved:
+        return copy_path
 
 
 def show_error(msg):

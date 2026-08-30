@@ -25,6 +25,12 @@ def test_reviu_source_rejects_missing_active_value():
         _validate_merge_source_data(data)
 
 
+def test_reviu_source_allows_dash_for_not_applicable_equipment_capacity():
+    data = _source()
+    data["_dokpil_equipment"][0]["kapasitas"] = "-"
+    _validate_merge_source_data(data)
+
+
 def test_reviu_readback_accepts_source_values_and_rejects_marker():
     data = _source()
     text = " ".join([
