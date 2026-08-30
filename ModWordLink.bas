@@ -153,9 +153,7 @@ Private Sub RunPDF(mode As String, wordFile As String, sheetName As String, stat
         Exit Sub
     End If
 
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
+    SaveAndCalculateForMailMerge
 
     Dim cmd As String
     Dim wsh As Object
@@ -370,9 +368,7 @@ Private Sub RunMerge(mode As String, wordFile As String, sheetName As String)
     End If
     
     ' Simpan Excel dulu supaya Python baca data terbaru
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
+    SaveAndCalculateForMailMerge
     
     Dim excelPath As String
     excelPath = ThisWorkbook.FullName
@@ -395,6 +391,17 @@ End Sub
 Private Function Q(s As String) As String
     Q = Chr(34) & s & Chr(34)
 End Function
+
+Private Sub SaveAndCalculateForMailMerge()
+    ' Formula satu_data wajib dihitung ulang sebelum Python/Word membaca workbook.
+    ' CalculateFull bersifat sinkron; CalculateUntilAsyncQueriesDone dijaga
+    ' kompatibel agar query Excel yang masih berjalan tidak terbaca stale.
+    On Error Resume Next
+    Application.CalculateFull
+    Application.CalculateUntilAsyncQueriesDone
+    ThisWorkbook.Save
+    On Error GoTo 0
+End Sub
 
 ' Cari file .docx di folder Excel yang namanya diawali dengan pattern tertentu
 ' Mendukung berbagai varian nama (BA PK, BA PLJK, BA PLPK, dll)

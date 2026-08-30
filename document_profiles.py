@@ -110,6 +110,19 @@ def strip_static_headers(
             root = ET.fromstring(files[name])
             for child in list(root):
                 root.remove(child)
+            # ``mc:Ignorable`` often names namespace prefixes declared only
+            # by removed header children. Leaving those prefixes undeclared
+            # makes Word report the DOCX as corrupted.
+            root.attrib.pop(
+                "{http://schemas.openxmlformats.org/markup-compatibility/2006}Ignorable",
+                None,
+            )
+            # Word menolak part header yang benar-benar kosong sebagai
+            # dokumen korup; pertahankan paragraf kosong yang valid.
+            ET.SubElement(
+                root,
+                "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p",
+            )
             files[name] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
             changed = True
     if not changed:
@@ -196,7 +209,12 @@ def _ensure_header_reference(document_xml: bytes, relationship_id: str) -> bytes
                     insert_at = i
                     break
             sect_pr.insert(insert_at, reference)
-        reference.set(f"{{{ns_r}}}id", relationship_id)
+        # Pertahankan mapping header yang sudah dimiliki setiap section.
+        # Template BA Reviu PL memakai header1 untuk halaman 1-2 dan header2
+        # kosong untuk halaman tanda tangan; memaksa semua section ke satu
+        # relationship membuat header halaman 3 ikut tercetak.
+        if reference.get(f"{{{ns_r}}}id") is None:
+            reference.set(f"{{{ns_r}}}id", relationship_id)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 

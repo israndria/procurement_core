@@ -22,6 +22,8 @@ import re
 import datetime
 import shutil
 import glob
+import posixpath
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from word_xml_compat import normalize_word_document_xml_in_zip
 
@@ -63,11 +65,40 @@ def _resolve_ba_kind(mode: str, word_path: str = "", excel_path: str = "") -> st
     return "PLJKK"
 
 
-def format_value(value):
+def _is_rupiah_field(field_name):
+    """True untuk field nilai anggaran yang harus tampil sebagai Rupiah."""
+    normalized = normalize_field_name(field_name).casefold() if field_name else ""
+    return normalized in {"pagu", "hps", "nilai_pagu", "nilai_hps"}
+
+
+def _format_rupiah(value):
+    """Format angka Excel ke ``Rp. 1.234.567,89`` tanpa mengubah sumber."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        return None
+    try:
+        amount = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return None
+
+    sign = "-" if amount < 0 else ""
+    amount = abs(amount)
+    whole, fraction = f"{amount:.2f}".split(".")
+    groups = []
+    while whole:
+        groups.insert(0, whole[-3:])
+        whole = whole[:-3]
+    return f"{sign}Rp. {'.'.join(groups)},{fraction}"
+
+
+def format_value(value, field_name=None):
     if value is None:
         return ""
     if isinstance(value, datetime.datetime):
         return value.strftime("%d-%m-%Y")
+    if _is_rupiah_field(field_name):
+        formatted = _format_rupiah(value)
+        if formatted is not None:
+            return formatted
     if isinstance(value, float) and value == int(value):
         return str(int(value))
     s = str(value)
@@ -161,7 +192,7 @@ def read_excel_data(excel_path, sheet_name):
             if header:
                 header = str(header).strip()
                 normalized = normalize_field_name(header)
-                val = format_value(value)
+                val = format_value(value, header)
                 # Formula Excel untuk slot peserta yang tidak terisi sering
                 # menghasilkan angka 0. Untuk Word, slot kosong harus benar-
                 # benar kosong agar baris peserta tidak tampil sebagai "0".
@@ -450,8 +481,101 @@ def _augment_ba_counts(data, excel_copy_path):
         pass
 
 
+_PARTICIPANT_FIELD_FAMILIES = (
+    "Pembukaan",
+    "Administrasi",
+    "Teknis",
+    "Harga",
+    "Ringkasan",
+    "Pembuktian",
+)
+
+
+def _participant_value_empty(value):
+    """Nilai nama peserta yang berarti slot tidak aktif."""
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return not value
+    return format_value(value).strip().casefold() in {
+        "",
+        "0",
+        "0.0",
+        "none",
+        "null",
+        "false",
+    }
+
+
+def _participant_name_state(data, slot):
+    """Kembalikan ``(dikenal, aktif)`` untuk slot peserta 1-10.
+
+    Field baru diprioritaskan, sedangkan ``Peserta N`` dipertahankan sebagai
+    fallback untuk template legacy. Jika sumber tidak mempunyai field nama,
+    helper tidak mengosongkan row secara spekulatif.
+    """
+    if data is None:
+        return False, False
+
+    keys = []
+    for family in _PARTICIPANT_FIELD_FAMILIES:
+        keys.extend((f"{family}_Nama_{slot}", f"{family} Nama {slot}"))
+    keys.extend((f"Peserta_{slot}", f"Peserta {slot}"))
+
+    found = False
+    for key in keys:
+        if key not in data:
+            continue
+        found = True
+        if not _participant_value_empty(data[key]):
+            return True, True
+    return found, False
+
+
+def _xml_field_codes(fragment):
+    """Ambil instruksi MERGEFIELD dari potongan XML Word."""
+    import html
+
+    codes = []
+    for match in re.finditer(
+        r"<w:instrText\b[^>]*>(.*?)</w:instrText\s*>",
+        fragment,
+        re.S,
+    ):
+        codes.append(html.unescape(match.group(1)))
+    for match in re.finditer(
+        r"<w:fldSimple\b[^>]*\bw:instr=\"([^\"]*)\"",
+        fragment,
+        re.S,
+    ):
+        codes.append(html.unescape(match.group(1)))
+    return codes
+
+
+def _participant_slot_from_xml(row, first_cell=""):
+    """Deteksi nomor slot dari field baru/legacy atau nomor row."""
+    for code in _xml_field_codes(row):
+        match = re.search(
+            r"\b(?:Pembukaan|Administrasi|Teknis|Harga|Ringkasan|Pembuktian)"
+            r"(?:[_\s]+)[^\\\"]*?(?:[_\s]+)(10|[1-9])\b",
+            code,
+            re.I,
+        )
+        if match:
+            return int(match.group(1))
+        match = re.search(r"\bPeserta(?:[_\s]+)(10|[1-9])\b", code, re.I)
+        if match:
+            return int(match.group(1))
+
+    import html
+
+    visible = html.unescape(re.sub(r"<[^>]+>", "", first_cell))
+    match = re.fullmatch(r"\s*(10|[1-9])\.?\s*", visible)
+    return int(match.group(1)) if match else None
+
+
 def _trim_blank_participant_rows(wdDoc):
-    """Hapus baris peserta kosong dari tabel ringkasan BA Pembuktian."""
+    """Hapus seluruh baris peserta kosong dari tabel BA Pembuktian."""
     try:
         for i in range(1, wdDoc.Tables.Count + 1):
             table = wdDoc.Tables(i)
@@ -462,18 +586,20 @@ def _trim_blank_participant_rows(wdDoc):
                 row = table.Rows(r)
                 first = row.Cells(1).Range.Text.replace("\r", "").replace("\a", "").strip()
                 second = row.Cells(2).Range.Text.replace("\r", "").replace("\a", "").strip()
-                if re.fullmatch(r"[23]\.?", first) and (not second or second == "0"):
+                if re.fullmatch(r"(?:10|[1-9])\.?", first) and (
+                    not second or second in {"0", "0.0"}
+                ):
                     row.Delete()
     except Exception:
         pass
 
 
 def _blank_empty_participant_rows(wdDoc, data=None):
-    """Kosongkan seluruh isi baris peserta 2/3 bila nama pesertanya kosong.
+    """Kosongkan seluruh isi row peserta 1-10 bila namanya kosong.
 
-    Template ringkasan evaluasi selalu menyediakan tiga slot peserta. Formula
-    Excel mengisi slot yang tidak dipakai dengan 0/MS, sehingga mengosongkan
-    field nama saja masih meninggalkan angka dan status palsu di kolom lain.
+    Formula Excel mengisi slot yang tidak dipakai dengan 0/MS, sehingga
+    mengosongkan field nama saja masih meninggalkan angka dan status palsu di
+    kolom lain.
     Baris dan border dipertahankan; hanya teks tiap sel yang dibersihkan.
     """
     def _cell_text(cell):
@@ -490,18 +616,15 @@ def _blank_empty_participant_rows(wdDoc, data=None):
             for r in range(2, table.Rows.Count + 1):
                 row = table.Rows(r)
                 first = _cell_text(row.Cells(1))
-                if not re.fullmatch(r"[23]\.?", first):
-                    continue
                 if row.Cells.Count < 2:
                     continue
-                slot = first.rstrip(".")
-                expected = data.get(f"Peserta_{slot}") if data else None
+                slot = _participant_slot_from_xml("", first)
+                if slot is None:
+                    continue
                 participant = _cell_text(row.Cells(2))
-                data_empty = expected is not None and str(expected).strip() in (
-                    "", "0", "0.0", "None", "null"
-                )
+                known, active = _participant_name_state(data, slot)
                 cell_empty = participant in ("", "0", "0.0", "None", "null")
-                if not data_empty and not cell_empty:
+                if (known and active) or (not known and not cell_empty):
                     continue
                 for cell in row.Cells:
                     rng = cell.Range.Duplicate
@@ -546,6 +669,7 @@ def _blank_empty_participant_rows_xml(docx_path, data):
                 upper = text_from_xml(table).upper()
                 if "PESERTA" not in upper or "SYARAT KUALIFIKASI" in upper:
                     return table
+                compact_empty_rows = "NAMA PESERTA" in upper and "CATATAN" in upper
                 rows = re.compile(r"<w:tr\b[^>]*>.*?</w:tr\s*>", re.S)
 
                 def process_row(row_match):
@@ -554,13 +678,15 @@ def _blank_empty_participant_rows_xml(docx_path, data):
                     cells = re.findall(r"<w:tc\b[^>]*>.*?</w:tc\s*>", row, re.S)
                     if len(cells) < 2:
                         return row
-                    first = text_from_xml(cells[0]).strip()
-                    if not re.fullmatch(r"[23]\.?", first):
+                    slot = _participant_slot_from_xml(row, cells[0])
+                    if slot is None:
                         return row
-                    slot = first.rstrip(".")
-                    expected = str(data.get(f"Peserta_{slot}") or "").strip()
-                    if expected not in ("", "0", "0.0", "None", "null"):
+                    known, active = _participant_name_state(data, slot)
+                    if not known or active:
                         return row
+                    if compact_empty_rows:
+                        changed = True
+                        return ""
                     new_row = re.sub(
                         r"<w:tc\b[^>]*>.*?</w:tc\s*>",
                         clear_cell, row, flags=re.S,
@@ -1156,6 +1282,148 @@ def _strip_pl_ba_signature_header(wd_doc) -> bool:
     return False
 
 
+def _strip_pl_ba_signature_header_xml(docx_path) -> bool:
+    """Kosongkan header section tanda tangan sebelum Word COM dibuka.
+
+    Template BA Reviu PL yang sudah dinetralisasi mempertahankan ``header2``
+    kosong untuk section halaman tanda tangan. Patch XML ini menjaga mapping
+    header per section dan hanya mengosongkan header yang dirujuk section
+    terakhir. Ini menghindari navigasi halaman/``LinkToPrevious`` via COM yang
+    pernah membuat Word crash.
+    """
+    import tempfile
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    ns_w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    ns_r = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    ns_rel = "http://schemas.openxmlformats.org/package/2006/relationships"
+    header_rel_type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
+    ns_ct = "http://schemas.openxmlformats.org/package/2006/content-types"
+    w = "{" + ns_w + "}"
+    r = "{" + ns_r + "}"
+
+    path = os.fspath(docx_path)
+    with zipfile.ZipFile(path, "r") as source:
+        names = source.namelist()
+        if "word/document.xml" not in names or "word/_rels/document.xml.rels" not in names:
+            return False
+        files = {name: source.read(name) for name in names}
+        infos = {info.filename: info for info in source.infolist()}
+
+    document = ET.fromstring(files["word/document.xml"])
+    sections = document.findall(".//" + w + "sectPr")
+    if len(sections) < 2:
+        return False
+
+    rels = ET.fromstring(files["word/_rels/document.xml.rels"])
+    relationships = {
+        node.get("Id"): node
+        for node in rels
+        if node.get("Type") == header_rel_type
+    }
+    last_refs = [
+        node for node in sections[-1].findall(w + "headerReference")
+        if node.get(w + "type") == "default"
+    ]
+    last_ref = last_refs[0] if last_refs else None
+    last_rid = last_ref.get(r + "id") if last_ref is not None else None
+    target_name = None
+    if last_rid in relationships:
+        target = relationships[last_rid].get("Target", "")
+        target_name = posixpath.normpath(posixpath.join("word", target.lstrip("/")))
+
+    previous_rids = {
+        node.get(r + "id")
+        for section in sections[:-1]
+        for node in section.findall(w + "headerReference")
+        if node.get(w + "type") == "default"
+    }
+    changed = False
+
+    # Bila section terakhir berbagi relationship dengan section sebelumnya,
+    # buat header kosong khusus agar halaman sebelumnya tetap memakai header.
+    if last_ref is None or not target_name or target_name not in files or last_rid in previous_rids:
+        if last_ref is None:
+            last_ref = ET.Element(w + "headerReference")
+            last_ref.set(w + "type", "default")
+            sections[-1].insert(0, last_ref)
+        used_relationship_ids = {node.get("Id", "") for node in rels}
+        relationship_index = 1
+        while f"rId{relationship_index}" in used_relationship_ids:
+            relationship_index += 1
+        new_rid = f"rId{relationship_index}"
+        blank_name = "word/header_signature_blank.xml"
+        suffix = 2
+        while blank_name in files:
+            blank_name = f"word/header_signature_blank{suffix}.xml"
+            suffix += 1
+        ET.SubElement(
+            rels,
+            "{" + ns_rel + "}Relationship",
+            Id=new_rid,
+            Type=header_rel_type,
+            Target=posixpath.relpath(blank_name, "word"),
+        )
+        last_ref.set(r + "id", new_rid)
+        files[blank_name] = (
+            f'<?xml version="1.0" encoding="utf-8"?>'
+            f'<w:hdr xmlns:w="{ns_w}"><w:p/></w:hdr>'
+        ).encode("utf-8")
+        if "[Content_Types].xml" in files:
+            content_types = ET.fromstring(files["[Content_Types].xml"])
+            if not any(
+                node.get("PartName", "").lstrip("/") == blank_name
+                for node in content_types
+            ):
+                ET.SubElement(
+                    content_types,
+                    "{" + ns_ct + "}Override",
+                    PartName="/" + blank_name,
+                    ContentType=(
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
+                    ),
+                )
+                files["[Content_Types].xml"] = ET.tostring(
+                    content_types, encoding="utf-8", xml_declaration=True
+                )
+        changed = True
+    else:
+        header = ET.fromstring(files[target_name])
+        for child in list(header):
+            header.remove(child)
+        header.attrib.pop(
+            "{http://schemas.openxmlformats.org/markup-compatibility/2006}Ignorable",
+            None,
+        )
+        ET.SubElement(header, w + "p")
+        files[target_name] = ET.tostring(header, encoding="utf-8", xml_declaration=True)
+        changed = True
+
+    if not changed:
+        return False
+    files["word/document.xml"] = ET.tostring(document, encoding="utf-8", xml_declaration=True)
+    files["word/_rels/document.xml.rels"] = ET.tostring(
+        rels, encoding="utf-8", xml_declaration=True
+    )
+    fd, temporary = tempfile.mkstemp(
+        prefix="ba_reviu_header_", suffix=".tmp", dir=os.path.dirname(path) or None
+    )
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as output:
+            for name in names:
+                output.writestr(infos[name], files[name])
+            for name, blob in files.items():
+                if name not in infos:
+                    output.writestr(name, blob)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+    return True
+
+
 def _word_process_id(word_app, word_doc=None):
     """Ambil PID instance Word yang dibuat DispatchEx; None jika gagal."""
     import ctypes
@@ -1206,6 +1474,7 @@ def _strip_mailmerge_datasource(docx_path):
     jadi attachment tidak diperlukan di file copy."""
     import re
     import zipfile
+    from xml.etree import ElementTree as ET
     try:
         with zipfile.ZipFile(docx_path, "r") as zin:
             names = zin.namelist()
@@ -1215,13 +1484,38 @@ def _strip_mailmerge_datasource(docx_path):
             new_settings = re.sub(
                 r"<w:mailMerge>.*?</w:mailMerge>|<w:mailMerge\s*/>",
                 "", settings, flags=re.DOTALL)
-            if new_settings == settings:
-                return
-            items = [(n, zin.read(n)) for n in names]
+            files = {n: zin.read(n) for n in names}
+
+        changed = new_settings != settings
+        if changed:
+            files["word/settings.xml"] = new_settings.encode("utf-8")
+
+        # Settings yang pernah terhubung Mail Merge menyimpan relationship
+        # eksternal terpisah. Menghapus w:mailMerge saja meninggalkan relasi
+        # dangling dan Word dapat menolak salinan sebagai corrupted.
+        rels_name = "word/_rels/settings.xml.rels"
+        if rels_name in files:
+            rels = ET.fromstring(files[rels_name])
+            removed = False
+            for relationship in list(rels):
+                if relationship.get("Type", "").endswith("/mailMergeSource"):
+                    rels.remove(relationship)
+                    removed = True
+            if removed:
+                changed = True
+                if list(rels):
+                    files[rels_name] = ET.tostring(
+                        rels, encoding="utf-8", xml_declaration=True
+                    )
+                else:
+                    files.pop(rels_name, None)
+
+        if not changed:
+            return
         tmp = docx_path + ".tmp"
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
-            for n, blob in items:
-                zout.writestr(n, new_settings.encode("utf-8") if n == "word/settings.xml" else blob)
+            for n, blob in files.items():
+                zout.writestr(n, blob)
         os.replace(tmp, docx_path)
     except Exception:
         pass  # gagal strip -> lanjut; worst case error lama muncul lagi
@@ -2539,6 +2833,10 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
         apply_header_to_copy(copy_path, _pokja_root_header, data)
     except Exception as _header_err:
         raise RuntimeError(f"Gagal menerapkan header profil: {_header_err}")
+    if mode in ("pdf_bareviu_pl", "printer") and os.path.basename(word_path).casefold().startswith(
+        "1. ba reviu"
+    ):
+        _strip_pl_ba_signature_header_xml(copy_path)
     _blank_empty_participant_rows_xml(copy_path, data)
     _strip_mailmerge_datasource(copy_path)
 
