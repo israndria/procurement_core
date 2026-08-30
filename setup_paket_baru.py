@@ -17,6 +17,7 @@ import sys
 import zipfile
 import re
 import json
+import time
 from datetime import datetime
 
 from config import (
@@ -32,13 +33,107 @@ from pl_snapshot_revision import XML_DATA_SUBFOLDER
 OUTPUT_BASE = POKJA_ROOT
 
 
+def _win_extended_path(path):
+    """Gunakan namespace Windows extended bila path melewati MAX_PATH."""
+    path = os.path.abspath(os.fspath(path))
+    if os.name != "nt" or len(path) < 240 or path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path.lstrip("\\")
+    return "\\\\?\\" + path
+
+
+def _copy2_retry(source, destination, attempts=3, delay=0.75):
+    """Copy satu template secara atomik agar race/partial copy dapat diulang."""
+    source = os.path.abspath(os.fspath(source))
+    destination = os.path.abspath(os.fspath(destination))
+    source_io = _win_extended_path(source)
+    destination_io = _win_extended_path(destination)
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        # Jangan menambahkan suffix ke destination: nama paket PL dapat sudah
+        # dekat batas MAX_PATH. Temp pendek di parent tetap satu volume,
+        # sehingga os.replace() masih atomik tanpa memperpanjang path.
+        part = os.path.join(
+            os.path.dirname(destination),
+            f".p{os.getpid()}-{attempt}",
+        )
+        part_io = _win_extended_path(part)
+        try:
+            if not os.path.isfile(source_io):
+                raise FileNotFoundError(
+                    f"Sumber template hilang saat copy: {source}"
+                )
+            if os.path.exists(part_io):
+                os.remove(part_io)
+            shutil.copy2(source_io, part_io)
+            os.replace(part_io, destination_io)
+            return
+        except (OSError, shutil.Error) as exc:
+            last_error = exc
+            try:
+                if os.path.exists(part_io):
+                    os.remove(part_io)
+            except OSError:
+                pass
+            if attempt < attempts:
+                time.sleep(delay * attempt)
+    raise OSError(
+        f"Gagal copy template setelah {attempts} percobaan: "
+        f"{source} -> {destination}; {last_error}"
+    ) from last_error
+
+
+def _quarantine_new_setup(target_dir, output_base):
+    """Pindahkan folder setup baru yang gagal ke lokasi recoverable."""
+    if not os.path.isdir(_win_extended_path(target_dir)):
+        return ""
+    quarantine_root = os.path.join(output_base, "_setup-failed")
+    os.makedirs(_win_extended_path(quarantine_root), exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    candidate = os.path.join(quarantine_root, f"{stamp}-{os.getpid()}")
+    suffix = 1
+    while os.path.exists(_win_extended_path(candidate)):
+        candidate = os.path.join(quarantine_root, f"{stamp}-{os.getpid()}-{suffix}")
+        suffix += 1
+    os.replace(_win_extended_path(target_dir), _win_extended_path(candidate))
+    return candidate
+
+
+def _write_setup_status(target_dir, status, **extra):
+    """Tulis status setup ringan untuk membedakan folder complete/partial."""
+    meta_path = os.path.join(target_dir, ".template-meta.json")
+    meta_io = _win_extended_path(meta_path)
+    if not os.path.isfile(meta_io):
+        return
+    try:
+        with open(meta_io, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        data["setup_status"] = status
+        if status == "complete":
+            data.pop("failed_at", None)
+        elif status == "failed":
+            data.pop("completed_at", None)
+        data.update(extra)
+        temp_path = f"{meta_path}.part-{os.getpid()}"
+        temp_io = _win_extended_path(temp_path)
+        with open(temp_io, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+        os.replace(temp_io, meta_io)
+    except Exception as exc:
+        print(f"  [WARN] Status setup gagal ditulis: {exc}")
+
+
 def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
     """Link Word mail merge ke Excel dengan mengedit XML di dalam .docx."""
-    
+    word_io_path = _win_extended_path(word_path)
+    parent_dir = os.path.dirname(os.path.abspath(os.fspath(word_path)))
+    backup = _win_extended_path(os.path.join(parent_dir, f".b{os.getpid()}"))
+    temp_path = _win_extended_path(os.path.join(parent_dir, f".t{os.getpid()}"))
 
     try:
         # Baca settings.xml dan settings.xml.rels dari dalam docx
-        with zipfile.ZipFile(word_path, 'r') as zf:
+        with zipfile.ZipFile(word_io_path, 'r') as zf:
             if 'word/settings.xml' not in zf.namelist():
                 return False
             settings_xml = zf.read('word/settings.xml')
@@ -82,10 +177,8 @@ def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
         ).encode('utf-8')
 
         # Repack docx - replace settings.xml + settings.xml.rels
-        backup = word_path + ".bak"
-        shutil.copy2(word_path, backup)
+        shutil.copy2(word_io_path, backup)
 
-        temp_path = word_path + ".tmp"
         with zipfile.ZipFile(backup, 'r') as zf_in:
             has_settings_rels = 'word/_rels/settings.xml.rels' in zf_in.namelist()
             with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as zf_out:
@@ -101,17 +194,15 @@ def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
                     zf_out.writestr('word/_rels/settings.xml.rels', new_settings_rels)
 
         # Replace original dengan file baru
-        os.replace(temp_path, word_path)
+        os.replace(temp_path, word_io_path)
         os.remove(backup)
         return True
 
     except Exception as e:
         print(f"      Error: {e}")
-        backup = word_path + ".bak"
         if os.path.exists(backup):
-            shutil.copy2(backup, word_path)
+            shutil.copy2(backup, word_io_path)
             os.remove(backup)
-        temp_path = word_path + ".tmp"
         if os.path.exists(temp_path):
             os.remove(temp_path)
         return False
@@ -159,10 +250,11 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     base = output_base or OUTPUT_BASE
     folder_name = re.sub(r'[<>:"/\\|?*]', '-', folder_name).strip()
     target_dir = os.path.join(base, folder_name)
+    created_target = False
 
-    if os.path.exists(target_dir):
+    if os.path.exists(_win_extended_path(target_dir)):
         print(f"\n[WARN] Folder '{folder_name}' sudah ada!")
-        files_exist = os.listdir(target_dir)
+        files_exist = os.listdir(_win_extended_path(target_dir))
         if files_exist:
             print(f"  Isi: {len(files_exist)} file")
             for f in files_exist[:5]:
@@ -178,7 +270,8 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
         else:
             print("[AUTO] Non-interaktif — lanjut, file existing tidak di-overwrite.")
     else:
-        os.makedirs(target_dir)
+        os.makedirs(_win_extended_path(target_dir))
+        created_target = True
 
     # Auto-create subfolder (untuk semua tipe paket, baru maupun existing)
     # Mode Tender: subfolder identik dengan PL JKK, kecuali no.9
@@ -199,19 +292,20 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     if workflow:
         _subfolders.extend(["10. Revisi Uploadan PPK", XML_DATA_SUBFOLDER])
     for _sub in _subfolders:
-        os.makedirs(os.path.join(target_dir, _sub), exist_ok=True)
+        os.makedirs(_win_extended_path(os.path.join(target_dir, _sub)), exist_ok=True)
 
     # Metadata ringan untuk audit/refresh otomatis; user tidak perlu mengisi.
     try:
         meta_path = os.path.join(target_dir, ".template-meta.json")
-        if not os.path.exists(meta_path):
-            with open(meta_path, "w", encoding="utf-8") as _mf:
+        if not os.path.exists(_win_extended_path(meta_path)):
+            with open(_win_extended_path(meta_path), "w", encoding="utf-8") as _mf:
                 json.dump({
                     "schema": 1,
                     "workflow": workflow or "legacy",
                     "template_dir": os.path.abspath(template_dir),
                     "dynamic_header": True,
                     "created_at": datetime.now().isoformat(timespec="seconds"),
+                    "setup_status": "in_progress",
                 }, _mf, ensure_ascii=False, indent=2)
     except Exception as _meta_e:
         print(f"  [WARN] Metadata template gagal: {_meta_e}")
@@ -238,9 +332,26 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     dst_excel = os.path.join(target_dir, excel_name_dst)
     excel_created = False
 
+    def _copy_template(source, destination):
+        try:
+            _copy2_retry(source, destination)
+        except Exception:
+            _write_setup_status(
+                target_dir,
+                "failed",
+                failed_at=datetime.now().isoformat(timespec="seconds"),
+            )
+            if created_target:
+                try:
+                    quarantined = _quarantine_new_setup(target_dir, base)
+                    print(f"  [RECOVERABLE] Folder partial dipindah ke: {quarantined}")
+                except Exception as quarantine_error:
+                    print(f"  [WARN] Quarantine folder partial gagal: {quarantine_error}")
+            raise
+
     print("\n[2/3] Copy & Rename template files...")
-    if not os.path.exists(dst_excel):
-        shutil.copy2(os.path.join(template_dir, excel_template), dst_excel)
+    if not os.path.exists(_win_extended_path(dst_excel)):
+        _copy_template(os.path.join(template_dir, excel_template), dst_excel)
         excel_created = True
         print(f"  [OK] {excel_template} -> {excel_name_dst}")
     else:
@@ -254,8 +365,8 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
         else:
             wf_dst = wf_tpl
         dst_path = os.path.join(target_dir, wf_dst)
-        if not os.path.exists(dst_path):
-            shutil.copy2(os.path.join(template_dir, wf_tpl), dst_path)
+        if not os.path.exists(_win_extended_path(dst_path)):
+            _copy_template(os.path.join(template_dir, wf_tpl), dst_path)
             # V2 donor masih membawa header PUPR sebagai placeholder historis.
             # Salinan paket harus netral; profile instansi dipasang saat export.
             from document_profiles import is_official_header_document, strip_static_headers
@@ -278,6 +389,22 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
             success_count += 1
         else:
             print(f"  [FAIL] {wf_dst}")
+    if success_count != len(dst_word_map):
+        _write_setup_status(
+            target_dir,
+            "failed",
+            failed_at=datetime.now().isoformat(timespec="seconds"),
+        )
+        if created_target:
+            try:
+                quarantined = _quarantine_new_setup(target_dir, base)
+                print(f"  [RECOVERABLE] Folder partial dipindah ke: {quarantined}")
+            except Exception as quarantine_error:
+                print(f"  [WARN] Quarantine folder partial gagal: {quarantine_error}")
+        raise RuntimeError(
+            f"Auto-link mail merge tidak lengkap: "
+            f"{success_count}/{len(dst_word_map)}"
+        )
 
     # Scrub data donor setelah template disalin dan mail merge terhubung.
     # PL memakai range berbeda untuk JKK vs konstruksi; jangan bawa data contoh.
@@ -315,6 +442,11 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
     print(f"\n  Folder : {target_dir}")
     print(f"  Excel  : {excel_name_dst}")
     print(f"  Word   : {success_count}/{len(word_sheet_map)} terhubung")
+    _write_setup_status(
+        target_dir,
+        "complete",
+        completed_at=datetime.now().isoformat(timespec="seconds"),
+    )
 
 
 def setup_paket_baru(folder_name=None, output_base=None):

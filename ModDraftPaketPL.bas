@@ -427,12 +427,12 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Dim paguVal As String: paguVal = CStr(item(11))
         If paguVal <> "" And paguVal <> "null" Then
             .Cells(PLR_PAGU, 3).Value = ParseNominalPL(paguVal)
-            .Cells(PLR_PAGU, 3).NumberFormat = """Rp. ""#,##0"
+            .Cells(PLR_PAGU, 3).NumberFormatLocal = """Rp""."" ""#.##0,00;-Rp#.##0,00"
         End If
         Dim hpsVal As String: hpsVal = CStr(item(4))
         If hpsVal <> "" And hpsVal <> "null" Then
             .Cells(PLR_HPS, 3).Value = ParseNominalPL(hpsVal)
-            .Cells(PLR_HPS, 3).NumberFormat = """Rp. ""#,##0"
+            .Cells(PLR_HPS, 3).NumberFormatLocal = """Rp""."" ""#.##0,00;-Rp#.##0,00"
         End If
         If CStr(item(14)) <> "" And CStr(item(14)) <> "null" Then
             .Cells(PLR_LOKASI, 3).Value = CStr(item(14))
@@ -2945,20 +2945,39 @@ End Function
 ' ============================================================
 Private Function ParseNominalPL(ByVal raw As String) As Double
     ' Simpan nominal sebagai angka agar operasi matematika tetap aman.
-    ' Input SPSE dapat berupa Rp. 1.234.567,00 atau angka polos.
+    ' Input SPSE dapat berupa Rp. 1.234.567,16 atau angka polos.
+    ' Jangan membuang pecahan sen setelah koma.
     Dim s As String: s = Trim(raw)
-    Dim commaPos As Long: commaPos = InStr(1, s, ",")
-    If commaPos > 0 Then s = Left(s, commaPos - 1)
-    Dim i As Long, ch As String, digits As String
-    For i = 1 To Len(s)
-        ch = Mid(s, i, 1)
-        If ch >= "0" And ch <= "9" Then digits = digits & ch
-    Next i
-    If digits = "" Then
-        ParseNominalPL = 0
-    Else
-        ParseNominalPL = CDbl(digits)
+    Dim isNegative As Boolean: isNegative = (InStr(1, s, "-") > 0)
+    s = Replace(s, "Rp.", "")
+    s = Replace(s, "Rp", "")
+    s = Replace(s, " ", "")
+
+    Dim commaPos As Long: commaPos = InStrRev(s, ",")
+    Dim integerPart As String: integerPart = s
+    Dim fractionPart As String: fractionPart = ""
+    If commaPos > 0 Then
+        integerPart = Left(s, commaPos - 1)
+        fractionPart = Mid(s, commaPos + 1)
     End If
+
+    Dim i As Long, ch As String, integerDigits As String, fractionDigits As String
+    For i = 1 To Len(integerPart)
+        ch = Mid(integerPart, i, 1)
+        If ch >= "0" And ch <= "9" Then integerDigits = integerDigits & ch
+    Next i
+    For i = 1 To Len(fractionPart)
+        ch = Mid(fractionPart, i, 1)
+        If ch >= "0" And ch <= "9" Then fractionDigits = fractionDigits & ch
+    Next i
+
+    If integerDigits = "" Then integerDigits = "0"
+    Dim result As Double: result = CDbl(integerDigits)
+    If fractionDigits <> "" Then
+        result = result + (CDbl(fractionDigits) / (10 ^ Len(fractionDigits)))
+    End If
+    If isNegative Then result = -result
+    ParseNominalPL = result
 End Function
 
 Private Function FormatTanggalIndo(tglISO As String) As String

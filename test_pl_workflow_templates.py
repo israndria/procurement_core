@@ -6,7 +6,7 @@ from lxml import etree
 
 from config import PL_WORKFLOW_REGISTRY, pl_workflow_template_dir
 from document_profiles import strip_static_headers
-from setup_paket_baru import _setup_folder
+from setup_paket_baru import _setup_folder, _win_extended_path, _write_setup_status
 from word_merge import _prepare_dokpil_equipment_docx
 
 
@@ -65,6 +65,55 @@ def test_setup_preflight_does_not_create_partial_folder(tmp_path):
     assert not (output / "1. PLPK - Paket Uji").exists()
 
 
+def test_copy_failure_quarantines_new_partial_folder(tmp_path, monkeypatch):
+    source = _populate_template_dir(tmp_path / "template", "PL_KONSTRUKSI")
+    output = tmp_path / "output"
+
+    def fail_copy(*_args, **_kwargs):
+        raise FileNotFoundError("simulated source race")
+
+    monkeypatch.setattr("setup_paket_baru._copy2_retry", fail_copy)
+    with pytest.raises(FileNotFoundError, match="simulated source race"):
+        _setup_folder(
+            "1. PLPK - Paket Race",
+            source,
+            PL_WORKFLOW_REGISTRY["PL_KONSTRUKSI"]["excel_template"],
+            PL_WORKFLOW_REGISTRY["PL_KONSTRUKSI"]["word_map"],
+            output_base=output,
+            workflow="PL_KONSTRUKSI",
+        )
+
+    assert not (output / "1. PLPK - Paket Race").exists()
+    assert len(list((output / "_setup-failed").iterdir())) == 1
+
+
+def test_complete_setup_clears_stale_failure_timestamp(tmp_path):
+    package_dir = tmp_path / "paket"
+    package_dir.mkdir()
+    meta = package_dir / ".template-meta.json"
+    meta.write_text(
+        '{"setup_status":"failed","failed_at":"2026-08-30T07:26:08"}',
+        encoding="utf-8",
+    )
+
+    _write_setup_status(
+        str(package_dir), "complete", completed_at="2026-08-30T07:27:44"
+    )
+
+    data = __import__("json").loads(meta.read_text(encoding="utf-8"))
+    assert data["setup_status"] == "complete"
+    assert "failed_at" not in data
+    assert data["completed_at"] == "2026-08-30T07:27:44"
+
+
+def test_long_windows_path_uses_extended_namespace():
+    path = "C:\\" + ("x" * 260)
+    if __import__("os").name == "nt":
+        assert _win_extended_path(path).startswith("\\\\?\\")
+    else:
+        assert _win_extended_path(path) == path
+
+
 @pytest.mark.parametrize(
     ("workflow", "folder_name"),
     [
@@ -77,6 +126,7 @@ def test_setup_pl_provisions_revision_upload_folder(
 ):
     monkeypatch.setattr("document_profiles.is_official_header_document", lambda _path: False)
     monkeypatch.setattr("template_scrub.scrub_excel_pl_copy", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("setup_paket_baru.link_word_to_excel", lambda *_args, **_kwargs: True)
     source = _populate_template_dir(tmp_path / "template", workflow)
     output = tmp_path / "output"
     cfg = PL_WORKFLOW_REGISTRY[workflow]
@@ -95,6 +145,9 @@ def test_setup_pl_provisions_revision_upload_folder(
     xml_data = package_dir / "11. XML Data"
     assert xml_data.is_dir()
     assert list(xml_data.iterdir()) == []
+    assert __import__("json").loads(
+        (package_dir / ".template-meta.json").read_text(encoding="utf-8")
+    )["setup_status"] == "complete"
 
 
 def test_equipment_markers_fill_all_nested_tables(tmp_path):

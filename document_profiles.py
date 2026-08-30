@@ -77,6 +77,16 @@ def is_official_header_document(path: str | os.PathLike[str]) -> bool:
     )
 
 
+def _zip_io_path(path: str | os.PathLike[str]) -> str:
+    """Resolve local Windows long path for ZIP read/write operations."""
+    value = os.path.abspath(os.fspath(path))
+    if os.name != "nt" or len(value) < 240 or value.startswith("\\\\?\\"):
+        return value
+    if value.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + value.lstrip("\\")
+    return "\\\\?\\" + value
+
+
 def strip_static_headers(
     template_copy: str | os.PathLike[str],
     output_path: str | os.PathLike[str] | None = None,
@@ -91,7 +101,7 @@ def strip_static_headers(
     target = Path(template_copy)
     result = Path(output_path) if output_path else target
     changed = False
-    with zipfile.ZipFile(target, "r") as source_zip:
+    with zipfile.ZipFile(_zip_io_path(target), "r") as source_zip:
         items = source_zip.infolist()
         files = {item.filename: source_zip.read(item.filename) for item in items}
         for name in tuple(files):
@@ -106,21 +116,22 @@ def strip_static_headers(
         return result
     if result != target:
         result.parent.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(result, "w", zipfile.ZIP_DEFLATED) as output_zip:
+        with zipfile.ZipFile(_zip_io_path(result), "w", zipfile.ZIP_DEFLATED) as output_zip:
             for item in items:
                 output_zip.writestr(item, files[item.filename])
         return result
-    temp_fd, temp_name = tempfile.mkstemp(prefix="h_", suffix=".tmp", dir=target.parent)
+    temp_fd, temp_name = tempfile.mkstemp(
+        prefix="h_", suffix=".tmp", dir=_zip_io_path(target.parent)
+    )
     os.close(temp_fd)
-    temp = Path(temp_name)
     try:
-        with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as output_zip:
+        with zipfile.ZipFile(temp_name, "w", zipfile.ZIP_DEFLATED) as output_zip:
             for item in items:
                 output_zip.writestr(item, files[item.filename])
-        os.replace(temp, target)
+        os.replace(temp_name, _zip_io_path(target))
     finally:
-        if temp.exists():
-            temp.unlink()
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
     return target
 
 
