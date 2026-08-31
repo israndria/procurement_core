@@ -2,9 +2,13 @@ from pathlib import Path
 import re
 from zipfile import ZipFile, ZIP_DEFLATED
 
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 
-from gabung_ba_pljkk import deteksi_file, gabung
+from gabung_ba_pljkk import (
+    deteksi_file,
+    ensure_plpk_provider_signature_copy,
+    gabung,
+)
 from document_profiles import inject_header_profile
 from word_merge import _patch_plpk_layout_xml, _resolve_ba_kind
 
@@ -14,6 +18,22 @@ def _blank_pdf(path: Path):
     writer.add_blank_page(width=100, height=100)
     with path.open("wb") as output:
         writer.write(output)
+
+
+def _text_pdf(path: Path, pages: list[str]):
+    import fitz
+
+    document = fitz.open()
+    for value in pages:
+        page = document.new_page(width=500, height=700)
+        page.insert_text((40, 60), value, fontsize=12)
+    document.save(path)
+    document.close()
+
+
+def _page_texts(path: Path) -> list[str]:
+    reader = PdfReader(path)
+    return [" ".join((page.extract_text() or "").split()) for page in reader.pages]
 
 
 def test_deteksi_file_is_scoped_to_ba_type(tmp_path):
@@ -38,6 +58,31 @@ def test_gabung_plpk_writes_plpk_output_name(tmp_path):
     assert Path(result["output"]).name == "BA_PLPK_GPR_P.Bng.pdf"
     assert Path(result["output"]).parent.name == "7. Berita Acara + Summary Non Tender"
     assert Path(result["output"]).read_bytes() == (tmp_path / "BA_PLPK_GPR_P.Bng.pdf").read_bytes()
+
+
+def test_plpk_signature_copy_is_dynamic_and_idempotent(tmp_path):
+    pdf = tmp_path / "BA_PLPK_DYNAMIC.pdf"
+    _text_pdf(
+        pdf,
+        [
+            "BERITA ACARA PEMBUKAAN PENAWARAN",
+            "Pejabat Pengadaan pada Dinas Perdagangan\nDIREKTUR/PIMPINAN\nCV CONTOH\n"
+            "Demikian Berita Acara Klarifikasi dan Negosiasi ini dibuat",
+            "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI",
+        ],
+    )
+
+    assert ensure_plpk_provider_signature_copy(str(pdf)) is True
+    assert _page_texts(pdf) == [
+        "BERITA ACARA PEMBUKAAN PENAWARAN",
+        "Pejabat Pengadaan pada Dinas Perdagangan DIREKTUR/PIMPINAN CV CONTOH "
+        "Demikian Berita Acara Klarifikasi dan Negosiasi ini dibuat",
+        "Pejabat Pengadaan pada Dinas Perdagangan DIREKTUR/PIMPINAN CV CONTOH "
+        "Demikian Berita Acara Klarifikasi dan Negosiasi ini dibuat",
+        "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI",
+    ]
+    assert ensure_plpk_provider_signature_copy(str(pdf)) is False
+    assert len(PdfReader(pdf).pages) == 4
 
 
 def test_old_pljkk_command_is_upgraded_for_a_plpk_package():

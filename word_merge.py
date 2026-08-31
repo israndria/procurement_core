@@ -2603,6 +2603,10 @@ def _build_ba_pl_final_pdf(wd_doc, folder, kode, jenis="PLJKK"):
             try: os.remove(tmp_path)
             except Exception: pass
 
+    if jenis == "PLPK":
+        from gabung_ba_pljkk import ensure_plpk_provider_signature_copy
+        ensure_plpk_provider_signature_copy(pdf_path)
+
     try:
         from gabung_ba_pljkk import gabung as gabung_ba_pl
         result = gabung_ba_pl(folder, jenis)
@@ -2784,6 +2788,12 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     # Tidak ada sheet 7.2, rename tmp -> final
                     import shutil as _sh
                     _sh.move(_tmp_word, _pdf_path)
+                if jenis_ba == "PLPK":
+                    # Duplikasi dinamis halaman tanda tangan penyedia untuk
+                    # arsip dan dokumen serah-terima. Helper idempotent dan
+                    # fail-closed bila marker signature tidak ditemukan.
+                    from gabung_ba_pljkk import ensure_plpk_provider_signature_copy
+                    ensure_plpk_provider_signature_copy(_pdf_path)
                 # Bentuk BA final sama seperti tombol "Gabung BA PLPK/PLJKK".
                 # File Summary SPSE tersimpan di subfolder 7, bukan di root,
                 # sehingga helper lama tidak pernah menemukannya saat Cetak BA.

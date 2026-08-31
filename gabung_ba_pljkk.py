@@ -24,6 +24,7 @@ import sys
 import glob
 import ctypes
 import shutil
+import re
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
 
@@ -128,6 +129,94 @@ def cari_halaman_sisipan(pdf_path: str) -> tuple:
     return p1, p2, q1, q2
 
 
+def cari_halaman_ttd_penyedia(pdf_path: str) -> list[int]:
+    """Cari halaman tanda tangan utama PLPK berdasarkan marker isi aktual."""
+    indices = []
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for index, page in enumerate(pdf.pages):
+                text = re.sub(r"\s+", " ", page.extract_text() or "").upper()
+                has_provider_label = bool(
+                    re.search(r"DIREKTUR\s*/\s*PIMPINAN", text)
+                )
+                has_official_label = "PEJABAT PENGADAAN" in text
+                has_main_ba_closing = (
+                    "DEMIKIAN BERITA ACARA KLARIFIKASI DAN NEGOSIASI INI" in text
+                )
+                is_attachment = "LAMPIRAN I BERITA ACARA" in text
+                if (
+                    has_provider_label
+                    and has_official_label
+                    and has_main_ba_closing
+                    and not is_attachment
+                ):
+                    indices.append(index)
+    except Exception as exc:
+        raise RuntimeError(f"Gagal mendeteksi halaman tanda tangan PLPK: {exc}") from exc
+    return indices
+
+
+def _page_text(page) -> str:
+    try:
+        return re.sub(r"\s+", " ", page.extract_text() or "").strip()
+    except Exception:
+        return ""
+
+
+def _pages_equivalent(left, right) -> bool:
+    """Bandingkan halaman untuk mencegah duplikasi signature berulang."""
+    left_text = _page_text(left)
+    right_text = _page_text(right)
+    if not left_text or left_text != right_text:
+        return False
+    try:
+        return (
+            float(left.mediabox.width) == float(right.mediabox.width)
+            and float(left.mediabox.height) == float(right.mediabox.height)
+        )
+    except Exception:
+        return True
+
+
+def ensure_plpk_provider_signature_copy(pdf_path: str) -> bool:
+    """Pastikan halaman signature penyedia PLPK muncul dua kali berurutan.
+
+    Posisi ditentukan dari marker teks aktual, bukan nomor halaman. Operasi
+    idempotent; marker tidak ditemukan berarti gagal tertutup dan PDF tidak
+    diubah.
+    """
+    reader = PdfReader(pdf_path)
+    signature_pages = cari_halaman_ttd_penyedia(pdf_path)
+    if not signature_pages:
+        raise RuntimeError(
+            "Halaman tanda tangan penyedia PLPK tidak terdeteksi; PDF tidak diubah."
+        )
+    target = signature_pages[0]
+    if target + 1 < len(reader.pages) and _pages_equivalent(
+        reader.pages[target], reader.pages[target + 1]
+    ):
+        return False
+
+    writer = PdfWriter()
+    for index, page in enumerate(reader.pages):
+        writer.add_page(page)
+        if index == target:
+            writer.add_page(page)
+
+    temporary = f"{pdf_path}.signature-copy.tmp"
+    try:
+        with open(temporary, "wb") as output:
+            writer.write(output)
+        os.replace(temporary, pdf_path)
+    finally:
+        try:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+        except OSError:
+            pass
+    return True
+
+
 def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
     jenis = _normalize_jenis(jenis)
     files = deteksi_file(folder_paket, jenis)
@@ -195,14 +284,20 @@ def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
             warning_msgs.append("Penanda 'DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI' tidak lengkap, skip sisipan hasil.")
             ba_hasil = None
 
-        # Halaman terakhir BA Klarifikasi sebelum sheet 7.2 perlu dua copy untuk
-        # arsip kedua pihak. Deteksi dari transisi portrait ke landscape, bukan nomor.
+        # PLPK perlu dua copy halaman tanda tangan penyedia. Deteksi marker
+        # aktual agar tidak bergantung pada nomor halaman atau layout paket.
+        # PLJKK mempertahankan aturan lama: halaman sebelum sisipan landscape.
         duplicate_after = None
-        for idx, page in enumerate(rdr_utama.pages):
-            box = page.mediabox
-            if float(box.width) > float(box.height) and idx > 0:
-                duplicate_after = idx - 1
-                break
+        if jenis == "PLPK":
+            signature_pages = cari_halaman_ttd_penyedia(ba_utama)
+            if signature_pages:
+                duplicate_after = signature_pages[0]
+        else:
+            for idx, page in enumerate(rdr_utama.pages):
+                box = page.mediabox
+                if float(box.width) > float(box.height) and idx > 0:
+                    duplicate_after = idx - 1
+                    break
 
         insert_before = {}
         insert_after = {}
@@ -226,7 +321,10 @@ def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
             )
             writer.add_page(source_page)
 
-            if idx == duplicate_after:
+            if idx == duplicate_after and not (
+                idx + 1 < n_utama
+                and _pages_equivalent(page, rdr_utama.pages[idx + 1])
+            ):
                 writer.add_page(page)
 
             if idx in insert_after:
