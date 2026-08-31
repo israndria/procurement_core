@@ -23,6 +23,27 @@ MOD_NAME = "ModDraftPaketPL"
 WORDLINK_BAS_FILE = SCRIPT_DIR / "ModWordLink.bas"
 WORDLINK_MOD_NAME = "ModWordLink"
 
+# Geometry resmi PLPK dari template Konstruksi. Jangan memakai geometry
+# PLJKK/legacy: injector ini dipakai bersama untuk dua keluarga PL, sehingga
+# layout dipilih setelah workbook dikenali sebagai PLPK.
+PLPK_BUTTON_GEOMETRY = {
+    "btnBukaDokpil_PL": (657.9, 175.0, 130.2, 40.0),
+    "btnRelinkPL": (793.2, 175.0, 129.9, 40.0),
+    "btnRefreshDataPL": (927.6, 175.0, 129.9, 40.0),
+    "btnBukaBA_PL": (657.9, 218.5, 130.2, 27.0),
+    "btnBukaReviu_PL": (793.2, 218.5, 129.9, 27.0),
+    "btnCetakBAReviu_PL": (657.9, 248.5, 130.2, 27.7),
+    "btnCetakDokpil_PL": (793.2, 248.5, 129.9, 27.7),
+    "btnCetakReviu_PL": (657.9, 280.6, 130.2, 28.5),
+    "btnGabungReviu_PL": (793.2, 280.6, 129.9, 28.5),
+    "btnMuatHPS_PL": (929.0, 249.8, 129.9, 28.2),
+    "btnIsiEvaluasiPL": (927.7, 218.6, 129.9, 27.0),
+    "btnCetakBAPLJKK": (657.9, 312.5, 130.2, 28.0),
+    "btnGabungBAPLJKK": (793.2, 312.5, 129.9, 28.0),
+    "btnSaveInputData": (926.7, 280.4, 130.2, 40.0),
+    "btnLoadInputData": (925.7, 323.3, 130.4, 39.4),
+}
+
 # Event workbook untuk BAPLJKK — relink tetap manual, input tanggal dipermudah.
 WORKBOOK_OPEN_CODE = (
     "Private Sub Workbook_Open()\n"
@@ -358,26 +379,8 @@ def inject_pl(filepath: str):
             # Deteksi berdasarkan struktur @ Master Data, bukan nama file/folder.
             is_pk = str(ws.Cells(76, 1).Value or '').strip() == '5. DATA PESERTA'
             if is_pk:
-                # Baseline manual PLPK (diaudit 2026-07-25 dari template user).
-                # Setiap tuple: (Left, Top, Width, Height).
-                button_geometry = {
-                    'btnBukaDokpil_PL':   (655.2, 260.0, 130.2, 40.0),
-                    'btnRelinkPL':         (790.5, 260.0, 129.9, 40.0),
-                    'btnRefreshDataPL':   (924.9, 260.0, 130.1, 40.0),
-                    'btnBukaBA_PL':       (655.2, 303.5, 130.2, 27.4),
-                    'btnBukaReviu_PL':    (790.5, 303.5, 129.9, 27.4),
-                    'btnIsiEvaluasiPL':   (925.0, 303.6, 129.9, 27.4),
-                    'btnCetakBAReviu_PL': (655.2, 333.9, 130.2, 27.5),
-                    'btnCetakDokpil_PL':  (790.5, 333.9, 129.9, 27.5),
-                    'btnMuatHPS_PL':      (926.3, 335.2, 130.1, 28.0),
-                    'btnCetakReviu_PL':   (655.2, 366.1, 130.2, 28.3),
-                    'btnGabungReviu_PL':  (790.5, 366.1, 129.9, 28.3),
-                    'btnCetakBAPLJKK':    (655.2, 397.5, 130.2, 27.8),
-                    'btnGabungBAPLJKK':  (790.5, 397.5, 129.9, 27.8),
-                    'btnSaveInputData':  (1060.0, 260.0, 130.0, 40.0),
-                    'btnLoadInputData':  (1195.0, 260.0, 130.0, 40.0),
-                }
-                print('  Layout tombol: PLPK (baseline manual)')
+                button_geometry = PLPK_BUTTON_GEOMETRY.copy()
+                print('  Layout tombol: PLPK (template Konstruksi)')
             else:
                 # Layout baku PLJKK.
                 # Baseline manual PLJKK — disamakan dengan layout template

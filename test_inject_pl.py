@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from inject_pl import MOD_NAME, _validate_vba_source, find_bapljkk_files
+from inject_pl import (
+    MOD_NAME,
+    PLPK_BUTTON_GEOMETRY,
+    _validate_vba_source,
+    find_bapljkk_files,
+)
 
 
 def test_snapshot_buttons_use_requested_labels_and_current_macros():
@@ -30,6 +35,14 @@ def test_default_discovery_includes_jkk_and_pk_and_skips_backups(tmp_path):
             str(tmp_path / "pk" / "0. BAPLPK - Paket.xlsm"),
         ]
     )
+
+
+def test_plpk_geometry_matches_konstruksi_template_layout():
+    assert PLPK_BUTTON_GEOMETRY["btnBukaDokpil_PL"] == (657.9, 175.0, 130.2, 40.0)
+    assert PLPK_BUTTON_GEOMETRY["btnBukaBA_PL"] == (657.9, 218.5, 130.2, 27.0)
+    assert PLPK_BUTTON_GEOMETRY["btnMuatHPS_PL"] == (929.0, 249.8, 129.9, 28.2)
+    assert PLPK_BUTTON_GEOMETRY["btnSaveInputData"] == (926.7, 280.4, 130.2, 40.0)
+    assert PLPK_BUTTON_GEOMETRY["btnLoadInputData"] == (925.7, 323.3, 130.4, 39.4)
 
 
 def test_validate_vba_source_accepts_vba_double_quotes():
