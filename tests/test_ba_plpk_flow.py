@@ -49,15 +49,25 @@ def test_deteksi_file_is_scoped_to_ba_type(tmp_path):
     assert jkk["kode"] == "OLD"
 
 
-def test_gabung_plpk_writes_plpk_output_name(tmp_path):
+def test_gabung_plpk_writes_full_output_to_package_root(tmp_path):
     _blank_pdf(tmp_path / "BA_PLPK_GPR_P.Bng.pdf")
 
     result = gabung(str(tmp_path), "PLPK")
 
     assert result["ok"] is True
-    assert Path(result["output"]).name == "BA_PLPK_GPR_P.Bng.pdf"
-    assert Path(result["output"]).parent.name == "7. Berita Acara + Summary Non Tender"
+    assert Path(result["output"]).name == "BA_PLPK_FULL_Gabungan_GPR_P.Bng.pdf"
+    assert Path(result["output"]).parent == tmp_path
     assert Path(result["output"]).read_bytes() == (tmp_path / "BA_PLPK_GPR_P.Bng.pdf").read_bytes()
+
+
+def test_deteksi_file_ignores_previous_full_output(tmp_path):
+    _blank_pdf(tmp_path / "BA_PLJKK_CURRENT.pdf")
+    _blank_pdf(tmp_path / "BA_PLJKK_FULL_Gabungan_CURRENT.pdf")
+
+    result = deteksi_file(str(tmp_path), "PLJKK")
+
+    assert Path(result["ba_utama"]).name == "BA_PLJKK_CURRENT.pdf"
+    assert result["ba_pembuktian"] is None
 
 
 def test_plpk_signature_copy_is_dynamic_and_idempotent(tmp_path):
@@ -217,6 +227,17 @@ def test_plpk_vba_word_resolver_skips_generated_merged_copy():
 
     assert 'InStr(1, f, "(Merged)", vbTextCompare) = 0' in content
     assert 'InStr(1, f, "(Dengan Header", vbTextCompare) = 0' in content
+
+
+def test_gabung_ba_vba_requires_confirmation_before_running_python():
+    source = Path(__file__).resolve().parents[1] / "ModDraftPaketPL.bas"
+    content = source.read_text(encoding="utf-8")
+
+    start = content.index("Private Sub GabungBAByJenis")
+    end = content.index("End Sub", start)
+    procedure = content[start:end]
+    assert "vbYesNo + vbQuestion" in procedure
+    assert "<> vbYes Then" in procedure
 
 
 def test_plpk_layout_patch_only_locks_signature_rows_and_drops_cached_break(tmp_path):

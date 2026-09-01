@@ -14,7 +14,7 @@ Logic:
    - Sisipkan BA Evaluasi sebelum daftar hadir pembuktian occurrence ke-2.
    - Duplikasi halaman akhir BA Klarifikasi sebelum sheet 7.2.
    - Sisipkan BA Hasil setelah daftar hadir klarifikasi occurrence ke-1.
-4. Output ke "7. Berita Acara + Summary Non Tender/BA_{jenis}_{kode}.pdf"
+4. Output ke root paket: "BA_{jenis}_FULL_Gabungan_{kode}.pdf"
 
 Usage:
     python gabung_ba_pljkk.py <folder_paket> [PLJKK|PLPK]
@@ -30,10 +30,18 @@ from pypdf import PdfReader, PdfWriter
 
 
 SUBFOLDER = "7. Berita Acara + Summary Non Tender"
+MERGED_OUTPUT_MARKER = "_FULL_Gabungan_"
 
 
 def _normalize_jenis(jenis: str) -> str:
     return "PLPK" if str(jenis or "").upper() == "PLPK" else "PLJKK"
+
+
+def _is_generated_merged_output(path: str, jenis: str) -> bool:
+    """True bila file root adalah output gabungan buatan engine ini."""
+    filename = os.path.basename(path)
+    prefix = f"BA_{_normalize_jenis(jenis)}"
+    return filename.upper().startswith(prefix.upper() + MERGED_OUTPUT_MARKER.upper())
 
 
 def deteksi_file(folder_paket: str, jenis: str = "PLJKK") -> dict:
@@ -51,7 +59,10 @@ def deteksi_file(folder_paket: str, jenis: str = "PLJKK") -> dict:
     
     # 1. BA Utama sesuai konteks workflow (PLJKK atau PLPK).
     ba_utama_pattern = os.path.join(folder_paket, f"{prefix}*.pdf")
-    ba_utama_files = glob.glob(ba_utama_pattern)
+    ba_utama_files = [
+        path for path in glob.glob(ba_utama_pattern)
+        if not _is_generated_merged_output(path, jenis)
+    ]
     if not ba_utama_files:
         res['err'] = f"File {prefix}*.pdf tidak ditemukan di root folder paket."
         return res
@@ -229,12 +240,10 @@ def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
     ba_hasil = files['ba_hasil']
     kode = files['kode']
     
-    # Buat output folder
-    out_dir = os.path.join(folder_paket, SUBFOLDER)
-    os.makedirs(out_dir, exist_ok=True)
-    
-    output_filename = f"BA_{jenis}_{kode}.pdf"
-    output_path = os.path.join(out_dir, output_filename)
+    # Output final sengaja berada di root paket agar mudah ditemukan dan tidak
+    # tercampur dengan BA evaluasi/hasil yang menjadi bahan sisipan.
+    output_filename = f"BA_{jenis}{MERGED_OUTPUT_MARKER}{kode}.pdf"
+    output_path = os.path.join(folder_paket, output_filename)
 
     # Tanpa BA evaluasi/hasil dan tanpa BA lama, tidak ada halaman yang perlu
     # dicari atau disisipkan. Salin BA utama langsung ke output final.

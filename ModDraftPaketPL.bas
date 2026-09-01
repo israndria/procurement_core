@@ -1710,9 +1710,15 @@ End Sub
 
 Private Sub GabungBAByJenis(ByVal jenisBA As String)
     ' Gabung BA PLJKK: BA Utama + sisip BA Eval + BA Hasil Non Tender
-    ' Output: 7. Berita Acara + Summary Non Tender\BA_PLJKK_{kode}.pdf
+    ' Output: root folder paket\BA_<jenis>_FULL_Gabungan_<kode>.pdf
     Dim folderPaket As String
     folderPaket = ThisWorkbook.Path
+
+    If MsgBox("Gabung BA " & UCase$(jenisBA) & " sekarang?" & vbCrLf & _
+              "Hasil FULL/Gabungan akan disimpan di root folder paket.", _
+              vbYesNo + vbQuestion, "Konfirmasi Gabung BA") <> vbYes Then
+        Exit Sub
+    End If
 
     Dim scriptDir As String
     scriptDir = ScriptDirPL()
