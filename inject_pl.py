@@ -56,27 +56,33 @@ WORKBOOK_OPEN_CODE = (
     "    If Target.CountLarge <> 1 Or Target.Column <> 3 Then Exit Sub\n"
     "    If InStr(1, CStr(Sh.Cells(Target.Row, 2).Value), \"tanggal\", vbTextCompare) = 0 Then Exit Sub\n"
     "\n"
+    "    ' Nilai tanggal Excel asli harus dibiarkan numeric.\n"
+    "    If IsNumeric(Target.Value2) And IsDate(Target.Value) Then\n"
+    "        Target.NumberFormat = \"dd mmmm yyyy\"\n"
+    "        Exit Sub\n"
+    "    End If\n"
+    "\n"
     "    Dim raw As String\n"
     "    raw = Trim$(CStr(Target.Value2))\n"
     "    If raw = \"\" Then Exit Sub\n"
     "\n"
-    "    Dim hasil As String\n"
+    "    Dim hasil As Variant\n"
     "    hasil = ParseTanggalPL(raw)\n"
-    "    If hasil = \"\" Or hasil = raw Then Exit Sub\n"
+    "    If IsEmpty(hasil) Then Exit Sub\n"
     "\n"
     "    Application.EnableEvents = False\n"
-    "    Target.NumberFormat = \"@\"\n"
+    "    Target.NumberFormat = \"dd mmmm yyyy\"\n"
     "    Target.Value = hasil\n"
     "\n"
     "SafeExit:\n"
     "    Application.EnableEvents = True\n"
     "End Sub\n"
     "\n"
-    "Private Function ParseTanggalPL(ByVal raw As String) As String\n"
+    "Private Function ParseTanggalPL(ByVal raw As String) As Variant\n"
     "    Dim bulanArr As Variant\n"
     "    bulanArr = Array(\"Januari\", \"Februari\", \"Maret\", \"April\", \"Mei\", \"Juni\", _\n"
     "                     \"Juli\", \"Agustus\", \"September\", \"Oktober\", \"November\", \"Desember\")\n"
-    "    ParseTanggalPL = raw\n"
+    "    ParseTanggalPL = Empty\n"
     "\n"
     "    Dim s As String: s = Trim$(raw)\n"
     "    Dim tgl As Long, bln As Long, thn As Long\n"
@@ -91,19 +97,40 @@ WORKBOOK_OPEN_CODE = (
     "        parts = Split(s, sep)\n"
     "        If UBound(parts) < 2 Then GoTo InvalidDate\n"
     "        tgl = CLng(Trim$(parts(0)))\n"
-    "        bln = CLng(Trim$(parts(1)))\n"
+    "        If IsNumeric(Trim$(parts(1))) Then\n"
+    "            bln = CLng(Trim$(parts(1)))\n"
+    "        Else\n"
+    "            Dim iBulan As Long\n"
+    "            For iBulan = 0 To 11\n"
+    "                If LCase$(Trim$(parts(1))) = LCase$(CStr(bulanArr(iBulan))) Then\n"
+    "                    bln = iBulan + 1\n"
+    "                    Exit For\n"
+    "                End If\n"
+    "            Next iBulan\n"
+    "        End If\n"
     "        thn = CLng(Trim$(parts(2)))\n"
     "    Else\n"
     "        If Not IsNumeric(s) Then GoTo InvalidDate\n"
-    "        If Len(s) < 5 Then GoTo InvalidDate\n"
-    "        thn = CLng(Right$(s, 4))\n"
-    "        s = Left$(s, Len(s) - 4)\n"
-    "        If Len(s) = 3 Then\n"
+    "        If Len(s) = 8 Then\n"
     "            tgl = CLng(Left$(s, 2))\n"
-    "            bln = CLng(Right$(s, 1))\n"
-    "        ElseIf Len(s) = 4 Then\n"
+    "            bln = CLng(Mid$(s, 3, 2))\n"
+    "            thn = CLng(Right$(s, 4))\n"
+    "        ElseIf Len(s) = 6 Then\n"
     "            tgl = CLng(Left$(s, 2))\n"
-    "            bln = CLng(Right$(s, 2))\n"
+    "            bln = CLng(Mid$(s, 3, 2))\n"
+    "            thn = 2000 + CLng(Right$(s, 2))\n"
+    "        ElseIf Len(s) >= 5 Then\n"
+    "            thn = CLng(Right$(s, 4))\n"
+    "            s = Left$(s, Len(s) - 4)\n"
+    "            If Len(s) = 3 Then\n"
+    "                tgl = CLng(Left$(s, 2))\n"
+    "                bln = CLng(Right$(s, 1))\n"
+    "            ElseIf Len(s) = 4 Then\n"
+    "                tgl = CLng(Left$(s, 2))\n"
+    "                bln = CLng(Right$(s, 2))\n"
+    "            Else\n"
+    "                GoTo InvalidDate\n"
+    "            End If\n"
     "        Else\n"
     "            GoTo InvalidDate\n"
     "        End If\n"
@@ -113,11 +140,11 @@ WORKBOOK_OPEN_CODE = (
     "    Dim dt As Date\n"
     "    dt = DateSerial(thn, bln, tgl)\n"
     "    If Day(dt) <> tgl Or Month(dt) <> bln Or Year(dt) <> thn Then GoTo InvalidDate\n"
-    "    ParseTanggalPL = CStr(tgl) & \" \" & CStr(bulanArr(bln - 1)) & \" \" & CStr(thn)\n"
+    "    ParseTanggalPL = dt\n"
     "    Exit Function\n"
     "\n"
     "InvalidDate:\n"
-    "    ParseTanggalPL = raw\n"
+    "    ParseTanggalPL = Empty\n"
     "End Function\n"
 )
 
@@ -167,6 +194,83 @@ def _create_backup(filepath: str) -> Path:
     backup_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, backup)
     return backup
+
+
+def _harden_evaluasi_date_formulas(ws_eval) -> int:
+    """Hardening formula turunan tanggal agar memakai nilai tanggal Excel."""
+    weekday = '"Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"'
+    date_labels = {
+        "tanggal pembukaan penawaran",
+        "tanggal pembuktian kualifikasi",
+        "tanggal klarifikasi & negosiasi",
+        "tanggal ba hasil pengadaan langsung",
+    }
+    patched = 0
+    for row in range(1, 100):
+        label = str(ws_eval.Cells(row, 2).Value or "").strip().casefold()
+        if label not in date_labels:
+            continue
+        date_ref = f"C{row}"
+        day_ref = f"C{row + 1}"
+        current = ws_eval.Cells(row, 3).Value
+        serial = _coerce_eval_date_serial(current)
+        if serial is not None:
+            ws_eval.Cells(row, 3).Value = serial
+        ws_eval.Cells(row, 3).NumberFormat = "dd mmmm yyyy"
+        ws_eval.Cells(row + 1, 3).Formula = f'=IF({date_ref}="","",DAY({date_ref}))'
+        ws_eval.Cells(row + 2, 3).Formula = (
+            f'=IF({date_ref}="","",CHOOSE(WEEKDAY({date_ref}),{weekday}))'
+        )
+        ws_eval.Cells(row + 2, 4).Formula = f'=IF({date_ref}="","",{date_ref})'
+        ws_eval.Cells(row + 2, 4).NumberFormat = "dd mmmm yyyy"
+        ws_eval.Cells(row + 3, 3).Formula = f'=IF({day_ref}="","",terbilang({day_ref}))'
+        ws_eval.Cells(row + 4, 3).Formula = (
+            f'=IF({date_ref}="","",CHOOSE(MONTH({date_ref}),'
+            '"Januari","Februari","Maret","April","Mei","Juni",'
+            '"Juli","Agustus","September","Oktober","November","Desember"))'
+        )
+        ws_eval.Cells(row + 4, 4).Formula = f'=IF({date_ref}="","",MONTH({date_ref}))'
+        ws_eval.Cells(row + 4, 4).NumberFormat = "General"
+        next_label = str(ws_eval.Cells(row + 5, 2).Value or "").strip().casefold()
+        if next_label == "tahun":
+            ws_eval.Cells(row + 5, 3).Formula = f'=IF({date_ref}="","",YEAR({date_ref}))'
+        elif next_label == "tahun terbilang":
+            ws_eval.Cells(row + 5, 3).Formula = (
+                f'=IF({date_ref}="","",terbilang(YEAR({date_ref})))'
+            )
+        patched += 1
+    return patched
+
+
+def _coerce_eval_date_serial(value):
+    """Konversi tanggal sumber template ke serial Excel tanpa locale COM."""
+    if isinstance(value, datetime):
+        value = value.date()
+    if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+        return (value - datetime(1899, 12, 30).date()).days
+    text = str(value or "").strip()
+    if not text:
+        return None
+    months = {
+        "januari": 1, "februari": 2, "maret": 3, "april": 4,
+        "mei": 5, "juni": 6, "juli": 7, "agustus": 8,
+        "september": 9, "oktober": 10, "november": 11, "desember": 12,
+        "january": 1, "february": 2, "march": 3, "may": 5,
+        "june": 6, "july": 7, "august": 8, "october": 10,
+        "december": 12,
+    }
+    import re
+    match = re.fullmatch(r"(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", text)
+    if not match:
+        return None
+    month = months.get(match.group(2).casefold())
+    if month is None:
+        return None
+    try:
+        parsed = datetime(int(match.group(3)), month, int(match.group(1)))
+    except ValueError:
+        return None
+    return (parsed.date() - datetime(1899, 12, 30).date()).days
 
 
 def inject_pl(filepath: str):
@@ -343,6 +447,12 @@ def inject_pl(filepath: str):
                 cm.DeleteLines(1, cm.CountOfLines)
             cm.AddFromString(WORKBOOK_OPEN_CODE)
             print(f"  [OK] Workbook_Open injected ({cm.CountOfLines} baris)")
+
+        try:
+            eval_count = _harden_evaluasi_date_formulas(wb.Sheets("@ Evaluasi"))
+            print(f"  [OK] Formula tanggal @ Evaluasi di-hardening ({eval_count} blok)")
+        except Exception as eval_error:
+            print(f"  [WARN] Formula tanggal @ Evaluasi: {eval_error}")
 
         # Tombol di @ Master Data (Muat Paket PL + Isi Data PL sudah dihapus —
         # pengisian @ Master Data kini otomatis via COM saat buat folder).

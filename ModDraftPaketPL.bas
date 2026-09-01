@@ -1168,15 +1168,16 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
 
     ' R4 Tanggal Pembukaan Penawaran. Selalu overwrite agar nilai workbook
     ' donor tidak bertahan ketika sumber paket baru memang belum tersedia.
-    Dim tglPembukaan As String: tglPembukaan = FormatTanggalIndo(CStr(item(37)))
-    wsEval.Cells(4, 3).Value = tglPembukaan
+    ' Tanggal disimpan sebagai native Excel date, bukan teks Indonesia.
+    ' Formula turunan @ Evaluasi memakai DAY/MONTH/YEAR langsung.
+    WriteEvaluasiTanggalPL wsEval.Cells(4, 3), CStr(item(37))
     ' R10 Tanggal Pembuktian Kualifikasi = tgl_negosiasi (item 32)
-    Dim tglNego As String: tglNego = FormatTanggalIndo(CStr(item(32)))
-    wsEval.Cells(11, 3).Value = tglNego
+    Dim tglNego As String: tglNego = CStr(item(32))
+    WriteEvaluasiTanggalPL wsEval.Cells(11, 3), tglNego
     ' R18 Tanggal Klarifikasi & Negosiasi = tglNego
-    wsEval.Cells(18, 3).Value = tglNego
+    WriteEvaluasiTanggalPL wsEval.Cells(18, 3), tglNego
     ' R32 Tanggal BA Hasil = tgl_penetapan (item 33)
-    wsEval.Cells(32, 3).Value = FormatTanggalIndo(CStr(item(33)))
+    WriteEvaluasiTanggalPL wsEval.Cells(32, 3), CStr(item(33))
     ' R37:R39: single source of truth dari @ Master Data C61:C63.
     wsEval.Cells(37, 3).Formula = "='@ Master Data'!C61"
     wsEval.Cells(38, 3).Formula = "='@ Master Data'!C62"
@@ -2985,6 +2986,36 @@ Private Function ParseNominalPL(ByVal raw As String) As Double
     If isNegative Then result = -result
     ParseNominalPL = result
 End Function
+
+Private Sub WriteEvaluasiTanggalPL(ByVal target As Range, ByVal raw As String)
+    ' Simpan tanggal @ Evaluasi sebagai nilai tanggal Excel.
+    ' Formula DAY/MONTH/YEAR tidak boleh menerima teks tanggal.
+    Dim s As String: s = Trim$(raw)
+    target.ClearContents
+    If s = "" Or LCase$(s) = "null" Then Exit Sub
+    If Len(s) < 10 Then Exit Sub
+
+    Dim parts() As String
+    parts = Split(Left$(s, 10), "-")
+    If UBound(parts) < 2 Then Exit Sub
+
+    Dim tahun As Long, bulan As Long, hari As Long
+    Dim dt As Date
+    On Error GoTo InvalidDate
+    tahun = CLng(parts(0))
+    bulan = CLng(parts(1))
+    hari = CLng(parts(2))
+    dt = DateSerial(tahun, bulan, hari)
+    If Day(dt) <> hari Or Month(dt) <> bulan Or Year(dt) <> tahun Then GoTo InvalidDate
+
+    target.NumberFormat = "dd mmmm yyyy"
+    target.Value = dt
+    Exit Sub
+
+InvalidDate:
+    target.ClearContents
+End Sub
+
 
 Private Function FormatTanggalIndo(tglISO As String) As String
     FormatTanggalIndo = tglISO
