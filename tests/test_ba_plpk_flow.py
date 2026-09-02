@@ -237,6 +237,7 @@ def test_plpk_vba_passes_current_workbook_to_merge_engine():
     procedure = content[start:content.index("End Sub", start)]
 
     assert 'Chr(34) & ThisWorkbook.FullName & Chr(34)' in procedure
+    assert "If Not PrepareWorkbookForMailMerge() Then Exit Sub" in procedure
 
 
 def test_active_xlsm_resolver_ignores_backup_copies(tmp_path):
@@ -255,12 +256,21 @@ def test_active_xlsm_resolver_does_not_misclassify_package_word_tempat(tmp_path)
     assert Path(_find_active_xlsm(tmp_path)) == active
 
 
-def test_active_xlsm_resolver_ignores_hashed_backup_copy(tmp_path):
-    active = tmp_path / "0. BAPLPK - Paket.xlsm"
+def test_active_xlsm_resolver_accepts_hashed_active_name(tmp_path):
+    active = tmp_path / "0. BAPLPK - Paket Panjang__f6b01f12.xlsm"
     active.write_bytes(b"active")
-    (tmp_path / "0. BAPLPK - Paket__f6b01f12.xlsm").write_bytes(b"old")
 
     assert Path(_find_active_xlsm(tmp_path)) == active
+
+
+def test_active_xlsm_resolver_rejects_workbook_inside_backup_directory(tmp_path):
+    backup_dir = tmp_path / ".vba-backup"
+    backup_dir.mkdir()
+    backup = backup_dir / "0. BAPLPK - Paket.xlsm"
+    backup.write_bytes(b"old")
+
+    with pytest.raises(RuntimeError, match="backup"):
+        _find_active_xlsm(tmp_path, preferred=backup)
 
 
 def test_active_xlsm_resolver_uses_explicit_workbook_before_folder_scan(tmp_path):

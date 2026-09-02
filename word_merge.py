@@ -37,7 +37,10 @@ _BACKUP_XLSM_MARKER_RE = re.compile(
     r"(?<![a-z0-9])(?:backup|bak|worker|corrupt|archive|arsip|temp|tmp|merged|copy)(?![a-z])",
     re.IGNORECASE,
 )
-_BACKUP_XLSM_HASH_SUFFIX_RE = re.compile(r"__[0-9a-f]{8}$", re.IGNORECASE)
+_BACKUP_XLSM_DIRECTORIES = {
+    ".vba-backup", "_backup", "_backup_archive", "backup", "backups",
+    "archive", "archives",
+}
 
 
 def _is_backup_xlsm(path):
@@ -48,10 +51,11 @@ def _is_backup_xlsm(path):
     """
     name = os.path.basename(os.fspath(path))
     stem, _extension = os.path.splitext(name)
+    normalized_parts = os.path.normpath(os.fspath(path)).replace("\\", "/").split("/")
     return (
         name.startswith("~$")
+        or any(part.casefold() in _BACKUP_XLSM_DIRECTORIES for part in normalized_parts[:-1])
         or bool(_BACKUP_XLSM_MARKER_RE.search(stem))
-        or bool(_BACKUP_XLSM_HASH_SUFFIX_RE.search(stem))
     )
 
 

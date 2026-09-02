@@ -13,7 +13,6 @@ import hashlib
 import shutil
 import sys
 import tempfile
-import glob
 from datetime import datetime
 from pathlib import Path
 
@@ -22,6 +21,24 @@ BAS_FILE = SCRIPT_DIR / "ModDraftPaketPL.bas"
 MOD_NAME = "ModDraftPaketPL"
 WORDLINK_BAS_FILE = SCRIPT_DIR / "ModWordLink.bas"
 WORDLINK_MOD_NAME = "ModWordLink"
+XL_CALCULATION_AUTOMATIC = -4105
+
+_BACKUP_DIRECTORY_NAMES = {
+    ".vba-backup",
+    "_backup",
+    "_backup_archive",
+    "backup",
+    "backups",
+    "archive",
+    "archives",
+}
+_BACKUP_FILE_MARKERS = (
+    ".bak",
+    ".backup",
+    "backup_",
+    "-backup",
+    ".before-",
+)
 
 # Geometry resmi PLPK dari template Konstruksi. Jangan memakai geometry
 # PLJKK/legacy: injector ini dipakai bersama untuk dua keluarga PL, sehingga
@@ -196,6 +213,20 @@ def _create_backup(filepath: str) -> Path:
     return backup
 
 
+def _is_backup_workbook_path(filepath: str | os.PathLike) -> bool:
+    """Tolak workbook backup/archive sebagai target injector VBA."""
+    path = Path(filepath)
+    if any(part.casefold() in _BACKUP_DIRECTORY_NAMES for part in path.parts[:-1]):
+        return True
+
+    name = path.name.casefold()
+    stem = path.stem.casefold()
+    return (
+        name.startswith("~$")
+        or any(marker in stem for marker in _BACKUP_FILE_MARKERS)
+    )
+
+
 def _harden_evaluasi_date_formulas(ws_eval) -> int:
     """Hardening formula turunan tanggal agar memakai nilai tanggal Excel."""
     weekday = '"Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"'
@@ -277,6 +308,10 @@ def inject_pl(filepath: str):
     filepath = os.path.abspath(filepath)
     print(f"\nInjecting PL module to: {filepath}")
 
+    if _is_backup_workbook_path(filepath):
+        print("  [ERROR] Target berada di backup/archive; injector dihentikan.")
+        return False
+
     if not os.path.exists(filepath):
         print(f"  [ERROR] File tidak ditemukan: {filepath}")
         return False
@@ -343,6 +378,8 @@ def inject_pl(filepath: str):
             print(f"  [WARN] Open normal gagal, coba Excel repair: {open_error}")
             wb = excel.Workbooks.Open(filepath, 0, False, None, None, None, None, None, 1)
             print("  [OK] Excel repair open berhasil")
+        excel.Calculation = XL_CALCULATION_AUTOMATIC
+        excel.CalculateBeforeSave = True
         vb = wb.VBProject
 
         # PL tidak memakai generator kode unik otomatis. Bersihkan modul/button
@@ -572,6 +609,13 @@ def inject_pl(filepath: str):
         except Exception as e:
             print(f"  [WARN] Tombol @ Master Data: {e}")
 
+        # Workbook PL harus menyimpan cache formula terbaru. Mail merge membuka
+        # workbook read-only dan bergantung pada cached value tersebut.
+        try:
+            wb.ForceFullCalculation = True
+        except Exception as calc_policy_error:
+            print(f"  [WARN] Kebijakan full-calculation: {calc_policy_error}")
+        excel.CalculateFullRebuild()
         wb.Save()
         print(f"  [SAVED] {os.path.basename(filepath)}")
         return True
@@ -599,15 +643,24 @@ def find_bapljkk_files(root: str) -> list:
 
     Nama fungsi dipertahankan agar pemanggil lama tetap kompatibel.
     """
-    patterns = (
-        os.path.join(root, "**", "*BAPLJKK*.xlsm"),
-        os.path.join(root, "**", "*BAPLPK*.xlsm"),
-    )
-    files = {
-        f for pattern in patterns for f in glob.glob(pattern, recursive=True)
-        if ".bak" not in f.lower() and "~$" not in os.path.basename(f)
-    }
-    return sorted(files)
+    files = []
+    for current_root, directories, names in os.walk(root):
+        directories[:] = [
+            directory
+            for directory in directories
+            if directory.casefold() not in _BACKUP_DIRECTORY_NAMES
+            and not directory.startswith(".")
+        ]
+        for name in names:
+            upper_name = name.upper()
+            if not upper_name.endswith(".XLSM"):
+                continue
+            if "BAPLJKK" not in upper_name and "BAPLPK" not in upper_name:
+                continue
+            candidate = os.path.join(current_root, name)
+            if not _is_backup_workbook_path(candidate):
+                files.append(candidate)
+    return sorted(set(files))
 
 
 if __name__ == "__main__":

@@ -1648,6 +1648,43 @@ Private Function KodeBAOutputPL() As String
 End Function
 
 
+Private Function PrepareWorkbookForMailMerge() As Boolean
+    ' Mail merge membaca cached value workbook secara read-only. Pastikan cache
+    ' formula benar-benar dihitung dan tersimpan; jika gagal, jangan cetak PDF.
+    On Error GoTo Gagal
+
+    If ThisWorkbook.ReadOnly Then
+        Err.Raise vbObjectError + 2201, "PrepareWorkbookForMailMerge", _
+                  "Workbook terbuka read-only."
+    End If
+
+    ThisWorkbook.ForceFullCalculation = True
+    Application.CalculateBeforeSave = True
+    Application.CalculateFullRebuild
+    Application.CalculateUntilAsyncQueriesDone
+
+    ' Sheet ini sumber tabel negosiasi PLPK. PLJKK lama mungkin tidak memilikinya.
+    On Error Resume Next
+    ThisWorkbook.Worksheets("7.2 Dengan Nego").Calculate
+    Err.Clear
+    On Error GoTo Gagal
+
+    ThisWorkbook.Save
+    If Not ThisWorkbook.Saved Then
+        Err.Raise vbObjectError + 2202, "PrepareWorkbookForMailMerge", _
+                  "Workbook gagal menyimpan hasil kalkulasi."
+    End If
+
+    PrepareWorkbookForMailMerge = True
+    Exit Function
+
+Gagal:
+    PrepareWorkbookForMailMerge = False
+    MsgBox "Cetak BA dibatalkan karena data formula belum berhasil dihitung/disimpan." & _
+           vbCrLf & vbCrLf & Err.Description, vbCritical, "Data Belum Siap"
+End Function
+
+
 Private Sub CetakBAByJenis(ByVal jenisBA As String)
     ' Cetak BA PLJKK (BA Pembukaan Penawaran s/d Tanda Terima) ke PDF atau Printer
     ' Skip Section 1+2 (Reviu DPP) — langsung dari Section 3
@@ -1658,9 +1695,7 @@ Private Sub CetakBAByJenis(ByVal jenisBA As String)
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
 
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
+    If Not PrepareWorkbookForMailMerge() Then Exit Sub
 
     Dim scriptDir As String
     scriptDir = ScriptDirPL()

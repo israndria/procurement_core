@@ -5,6 +5,7 @@ import pytest
 from inject_pl import (
     MOD_NAME,
     PLPK_BUTTON_GEOMETRY,
+    _is_backup_workbook_path,
     _validate_vba_source,
     find_bapljkk_files,
 )
@@ -26,6 +27,12 @@ def test_default_discovery_includes_jkk_and_pk_and_skips_backups(tmp_path):
     (tmp_path / "pk" / "0. BAPLPK - Paket.xlsm").touch()
     (tmp_path / "pk" / "0. BAPLPK - Paket.bak.xlsm").touch()
     (tmp_path / "pk" / "~$0. BAPLPK - Paket.xlsm").touch()
+    backup_dir = tmp_path / "pk" / ".vba-backup"
+    backup_dir.mkdir()
+    (backup_dir / "0. BAPLPK - Paket.before-ModDraftPaketPL.xlsm").touch()
+    archive_dir = tmp_path / "_backup_archive"
+    archive_dir.mkdir()
+    (archive_dir / "0. BAPLJKK - Paket Arsip.xlsm").touch()
 
     found = find_bapljkk_files(str(tmp_path))
 
@@ -34,6 +41,21 @@ def test_default_discovery_includes_jkk_and_pk_and_skips_backups(tmp_path):
             str(tmp_path / "jkk" / "0. BAPLJKK - Paket.xlsm"),
             str(tmp_path / "pk" / "0. BAPLPK - Paket.xlsm"),
         ]
+    )
+
+
+def test_explicit_backup_workbook_is_detected():
+    assert _is_backup_workbook_path(
+        r"D:\Paket\.vba-backup\0. BAPLPK - Paket.xlsm"
+    )
+    assert _is_backup_workbook_path(
+        r"D:\Paket\0. BAPLPK - Paket.before-ModDraftPaketPL-20260902.xlsm"
+    )
+    assert not _is_backup_workbook_path(
+        r"D:\Paket\0. BAPLPK - Paket Aktif.xlsm"
+    )
+    assert not _is_backup_workbook_path(
+        r"D:\Paket\0. BAPLPK - Paket Panjang__f6b01f12.xlsm"
     )
 
 
@@ -72,3 +94,20 @@ def test_snapshot_keeps_numeric_text_as_text():
     source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
 
     assert "VarType(cellValue) <> vbString" in source
+
+
+def test_ba_print_aborts_if_recalculation_or_save_fails():
+    source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
+
+    assert "Private Function PrepareWorkbookForMailMerge() As Boolean" in source
+    assert "Application.CalculateFullRebuild" in source
+    assert "If Not PrepareWorkbookForMailMerge() Then Exit Sub" in source
+    assert "ThisWorkbook.ReadOnly" in source
+
+
+def test_injector_enforces_fresh_formula_cache_before_save():
+    source = Path(__file__).with_name("inject_pl.py").read_text(encoding="utf-8")
+
+    assert "excel.Calculation = XL_CALCULATION_AUTOMATIC" in source
+    assert "excel.CalculateBeforeSave = True" in source
+    assert "excel.CalculateFullRebuild()" in source
