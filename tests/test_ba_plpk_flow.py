@@ -2,6 +2,7 @@ from pathlib import Path
 import re
 from zipfile import ZipFile, ZIP_DEFLATED
 
+import pytest
 from pypdf import PdfReader, PdfWriter
 
 from gabung_ba_pljkk import (
@@ -10,7 +11,7 @@ from gabung_ba_pljkk import (
     gabung,
 )
 from document_profiles import inject_header_profile
-from word_merge import _patch_plpk_layout_xml, _resolve_ba_kind
+from word_merge import _find_active_xlsm, _patch_plpk_layout_xml, _resolve_ba_kind
 
 
 def _blank_pdf(path: Path):
@@ -227,6 +228,92 @@ def test_plpk_vba_word_resolver_skips_generated_merged_copy():
 
     assert 'InStr(1, f, "(Merged)", vbTextCompare) = 0' in content
     assert 'InStr(1, f, "(Dengan Header", vbTextCompare) = 0' in content
+
+
+def test_plpk_vba_passes_current_workbook_to_merge_engine():
+    source = Path(__file__).resolve().parents[1] / "ModDraftPaketPL.bas"
+    content = source.read_text(encoding="utf-8")
+    start = content.index("Private Sub CetakBAByJenis")
+    procedure = content[start:content.index("End Sub", start)]
+
+    assert 'Chr(34) & ThisWorkbook.FullName & Chr(34)' in procedure
+
+
+def test_active_xlsm_resolver_ignores_backup_copies(tmp_path):
+    active = tmp_path / "0. BAPLPK - Paket.xlsm"
+    active.write_bytes(b"active")
+    (tmp_path / "0. BAPLPK - Paket.backup_20260901.xlsm").write_bytes(b"old")
+    (tmp_path / "0. BAPLPK - Paket.xmlbatch4-backup.xlsm").write_bytes(b"old")
+
+    assert Path(_find_active_xlsm(tmp_path)) == active
+
+
+def test_active_xlsm_resolver_does_not_misclassify_package_word_tempat(tmp_path):
+    active = tmp_path / "0. BAPLPK - Bangunan Gedung Tempat Kerja.xlsm"
+    active.write_bytes(b"active")
+
+    assert Path(_find_active_xlsm(tmp_path)) == active
+
+
+def test_active_xlsm_resolver_ignores_hashed_backup_copy(tmp_path):
+    active = tmp_path / "0. BAPLPK - Paket.xlsm"
+    active.write_bytes(b"active")
+    (tmp_path / "0. BAPLPK - Paket__f6b01f12.xlsm").write_bytes(b"old")
+
+    assert Path(_find_active_xlsm(tmp_path)) == active
+
+
+def test_active_xlsm_resolver_uses_explicit_workbook_before_folder_scan(tmp_path):
+    active = tmp_path / "0. BAPLPK - Paket.xlsm"
+    explicit = tmp_path / "0. BAPLPK - Paket pilihan.xlsm"
+    active.write_bytes(b"active")
+    explicit.write_bytes(b"explicit")
+
+    assert Path(_find_active_xlsm(tmp_path, preferred=explicit)) == explicit
+
+
+def test_active_xlsm_resolver_rejects_explicit_backup(tmp_path):
+    backup = tmp_path / "0. BAPLPK - Paket.backup_20260901.xlsm"
+    backup.write_bytes(b"old")
+
+    with pytest.raises(RuntimeError, match="backup"):
+        _find_active_xlsm(tmp_path, preferred=backup)
+
+
+def test_active_xlsm_resolver_fails_closed_for_multiple_active_workbooks(tmp_path):
+    (tmp_path / "0. BAPLPK - Paket A.xlsm").write_bytes(b"a")
+    (tmp_path / "0. BAPLPK - Paket B.xlsm").write_bytes(b"b")
+
+    with pytest.raises(RuntimeError, match="Lebih dari satu workbook aktif"):
+        _find_active_xlsm(tmp_path)
+
+
+def test_plpk_layout_patch_removes_only_first_transition_break(tmp_path):
+    document = (
+        b'<?xml version="1.0"?>'
+        b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        b'<w:body>'
+        b'<w:p><w:r><w:t>BA Pembukaan selesai</w:t></w:r></w:p>'
+        b'<w:p><w:r><w:t>6.a. BA KLARIFIKASI SKP, ALAT, PERSONEL</w:t></w:r></w:p>'
+        b'<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
+        b'<w:p><w:r><w:t>BERITA ACARA PEMBUKTIAN KUALIFIKASI</w:t></w:r></w:p>'
+        b'<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
+        b'<w:p><w:r><w:t>BERITA ACARA PEMBUKTIAN KUALIFIKASI</w:t></w:r></w:p>'
+        b'<w:sectPr/></w:body></w:document>'
+    )
+    template = tmp_path / "transition.docx"
+    with ZipFile(template, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", document)
+
+    _patch_plpk_layout_xml(template, {})
+
+    with ZipFile(template) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+    blocks = re.findall(r"<w:p\b[^>]*>.*?</w:p\s*>", xml, re.S)
+    headings = [i for i, block in enumerate(blocks) if "BERITA ACARA PEMBUKTIAN" in block]
+    assert len(headings) == 2
+    assert "w:type=\"page\"" not in blocks[headings[0] - 1]
+    assert "w:type=\"page\"" in blocks[headings[1] - 1]
 
 
 def test_gabung_ba_vba_requires_confirmation_before_running_python():

@@ -22,7 +22,6 @@ import time
 import re
 import datetime
 import shutil
-import glob
 import posixpath
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
@@ -32,6 +31,76 @@ from word_xml_compat import normalize_word_document_xml_in_zip
 def _safe_filename(s: str, max_len: int = 80) -> str:
     s = re.sub(r'[<>:"/\\|?*]', '', str(s)).strip().replace('\n',' ').replace('\r','')
     return s[:max_len] if s else 'Dokumen'
+
+
+_BACKUP_XLSM_MARKER_RE = re.compile(
+    r"(?<![a-z0-9])(?:backup|bak|worker|corrupt|archive|arsip|temp|tmp|merged|copy)(?![a-z])",
+    re.IGNORECASE,
+)
+_BACKUP_XLSM_HASH_SUFFIX_RE = re.compile(r"__[0-9a-f]{8}$", re.IGNORECASE)
+
+
+def _is_backup_xlsm(path):
+    """Return True for generated/recovery workbook names, not package words.
+
+    Marker matching is token-aware: ``temp`` is rejected, while ``Tempat``
+    (a legitimate Indonesian package word) is not.
+    """
+    name = os.path.basename(os.fspath(path))
+    stem, _extension = os.path.splitext(name)
+    return (
+        name.startswith("~$")
+        or bool(_BACKUP_XLSM_MARKER_RE.search(stem))
+        or bool(_BACKUP_XLSM_HASH_SUFFIX_RE.search(stem))
+    )
+
+
+def _find_active_xlsm(folder, preferred=None):
+    """Resolve the active package workbook without ever guessing a backup.
+
+    VBA passes ``ThisWorkbook.FullName`` as ``preferred``. That exact path is
+    authoritative after validation, so a stale backup beside it cannot win.
+    Without an explicit path, exactly one non-generated ``.xlsm`` must exist;
+    zero returns an empty path and multiple candidates fail closed.
+    """
+    if preferred is not None and str(preferred).strip():
+        candidate = os.path.normpath(os.fspath(preferred))
+        if not candidate.casefold().endswith(".xlsm"):
+            raise RuntimeError(
+                f"Workbook sumber harus .xlsm, tetapi path yang diterima: {candidate}"
+            )
+        if _is_backup_xlsm(candidate):
+            raise RuntimeError(
+                f"Workbook sumber tampak sebagai backup/recovery; proses dihentikan: "
+                f"{os.path.basename(candidate)}"
+            )
+        if not os.path.isfile(candidate):
+            raise FileNotFoundError(f"Workbook sumber tidak ditemukan: {candidate}")
+        return candidate
+
+    candidates = []
+    folder_path = os.fspath(folder)
+    try:
+        entries = os.scandir(folder_path)
+    except FileNotFoundError:
+        return ""
+    with entries:
+        for entry in entries:
+            if not entry.is_file() or not entry.name.casefold().endswith(".xlsm"):
+                continue
+            if _is_backup_xlsm(entry.name):
+                continue
+            candidates.append(os.path.normpath(entry.path))
+
+    if not candidates:
+        return ""
+    if len(candidates) > 1:
+        names = ", ".join(os.path.basename(path) for path in sorted(candidates))
+        raise RuntimeError(
+            "Lebih dari satu workbook aktif ditemukan; sumber merge tidak dipilih "
+            f"secara otomatis: {names}"
+        )
+    return candidates[0]
 
 
 def _pdf_output_suffix(pdf_name: str = "", package_name: str = "") -> str:
@@ -2402,6 +2471,30 @@ def _patch_plpk_layout_xml(docx_path, data=None):
                 changed = blank_or_remove_paragraph(previous) or changed
                 previous -= 1
 
+        # The legacy PLPK template contains a manual break after navigation
+        # labels (``6.a ...``) and immediately before the first real BA
+        # Pembuktian heading. Once those labels are removed, that break creates
+        # a page containing only the dynamic header. Remove only this first
+        # transition break; all later copy/attendance breaks remain intact.
+        first_ba_pembuktian = False
+        for index, block in enumerate(output_blocks):
+            if (
+                not block
+                or paragraph_text(block).casefold()
+                != "berita acara pembuktian kualifikasi"
+            ):
+                continue
+            if first_ba_pembuktian:
+                break
+            first_ba_pembuktian = True
+            previous = index - 1
+            while previous >= 0 and not paragraph_text(output_blocks[previous]):
+                if has_page_break(output_blocks[previous]):
+                    if blank_or_remove_paragraph(previous):
+                        changed = True
+                    break
+                previous -= 1
+
         if not changed:
             return
         index = iter(output_blocks)
@@ -2532,7 +2625,7 @@ def _normalize_plpk_static_content(wd_doc, data):
         _replace_all(old_text, new_text)
 
 
-def _build_ba_pl_final_pdf(wd_doc, folder, kode, jenis="PLJKK"):
+def _build_ba_pl_final_pdf(wd_doc, folder, kode, jenis="PLJKK", excel_path=None):
     """Export BA Word + sheet 7.2 copies, then insert matching PL summary."""
     from pypdf import PdfReader, PdfWriter
     import pdfplumber
@@ -2542,8 +2635,7 @@ def _build_ba_pl_final_pdf(wd_doc, folder, kode, jenis="PLJKK"):
     pdf_path = _fit_path(folder, f"BA_{jenis}_{kode}.pdf")
     tmp_word = pdf_path + "_tmpword.pdf"
     tmp_72 = pdf_path + "_tmp72.pdf"
-    xlsm_paths = glob.glob(os.path.join(folder, "*.xlsm"))
-    xlsm_path = os.path.normpath(xlsm_paths[0]) if xlsm_paths else None
+    xlsm_path = _find_active_xlsm(folder, preferred=excel_path) or None
     has_72 = False
 
     try:
@@ -2617,15 +2709,14 @@ def _build_ba_pl_final_pdf(wd_doc, folder, kode, jenis="PLJKK"):
     return pdf_path
 
 
-def _build_bapljkk_final_pdf(wd_doc, folder, kode):
+def _build_bapljkk_final_pdf(wd_doc, folder, kode, excel_path=None):
     """Backward-compatible PLJKK wrapper."""
-    return _build_ba_pl_final_pdf(wd_doc, folder, kode, "PLJKK")
+    return _build_ba_pl_final_pdf(wd_doc, folder, kode, "PLJKK", excel_path)
 
 
-def merge_word(word_path, data, mode="buka", pdf_name=""):
+def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
     import pythoncom
     import win32com.client
-    import glob as _glob_excel
 
     # Jangan mulai proses jika workbook sumber sudah kehilangan nilai aktif.
     # Ini menjaga kegagalan tetap terlihat dan mencegah PDF kosong terbit.
@@ -2634,10 +2725,11 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
     # `merge_word()` juga dipanggil langsung oleh beberapa workflow, bukan
     # hanya melalui CLI yang kebetulan memiliki variabel global excel_path.
     # Resolve workbook dari folder Word agar export sheet BA selalu deterministik.
-    _excel_candidates = sorted(_glob_excel.glob(
-        os.path.join(os.path.dirname(os.path.abspath(word_path)), "*.xlsm")
-    ))
-    excel_path = _excel_candidates[0] if _excel_candidates else ""
+    requested_excel_path = excel_path
+    excel_path = _find_active_xlsm(
+        os.path.dirname(os.path.abspath(word_path)),
+        preferred=requested_excel_path,
+    )
 
     # Mode bapljkk: copy template -> (Merged), replace MERGEFIELD dari Excel, baru export.
     # (sebelumnya buka ReadOnly tanpa merge -> PDF tampil cached hasil merge lama/template)
@@ -2687,23 +2779,37 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                     _normalize_plpk_static_content(wdDoc, data)
                 wdDoc.Save()
             if mode in ("pdf_bapljkk", "pdf_baplp"):
+                if not excel_path:
+                    raise RuntimeError(
+                        "Workbook aktif .xlsm tidak ditemukan; PDF BA tidak dibuat "
+                        "agar tidak memakai sumber lama."
+                    )
                 _kode_ba = pdf_name if pdf_name else "PL"
-                _xlsm_path = None
+                _xlsm_path = excel_path
+                _xl_pl = None
+                _wb_pl = None
                 try:
-                    import glob as _glob_pl
-                    _xlsm_pl = _glob_pl.glob(os.path.join(_folder, "*.xlsm"))
-                    if _xlsm_pl:
-                        _xlsm_path = os.path.normpath(_xlsm_pl[0])
-                        _xl_pl = win32com.client.DispatchEx("Excel.Application")
-                        _xl_pl.Visible = False
-                        _wb_pl = _xl_pl.Workbooks.Open(_xlsm_path, ReadOnly=True)
-                        _ku_pl = str(_wb_pl.Sheets("@ Master Data").Range("F2").Value).strip()
-                        _wb_pl.Close(False)
-                        _xl_pl.Quit()
-                        if _ku_pl and _ku_pl not in ("", "None", "null"):
-                            _kode_ba = _ku_pl
-                except Exception:
-                    pass
+                    _xl_pl = win32com.client.DispatchEx("Excel.Application")
+                    _xl_pl.Visible = False
+                    _wb_pl = _xl_pl.Workbooks.Open(_xlsm_path, ReadOnly=True)
+                    _ku_pl = str(_wb_pl.Sheets("@ Master Data").Range("F2").Value).strip()
+                    if _ku_pl and _ku_pl not in ("", "None", "null"):
+                        _kode_ba = _ku_pl
+                except Exception as _source_err:
+                    raise RuntimeError(
+                        f"Gagal membaca workbook aktif untuk PDF BA: {_xlsm_path}"
+                    ) from _source_err
+                finally:
+                    if _wb_pl:
+                        try:
+                            _wb_pl.Close(False)
+                        except Exception:
+                            pass
+                    if _xl_pl:
+                        try:
+                            _xl_pl.Quit()
+                        except Exception:
+                            pass
                 _pdf_path = _fit_path(_folder, f"BA_{jenis_ba}_{_kode_ba}.pdf")
                 _tmp_word = _pdf_path + "_tmpword.pdf"
                 _tmp_72   = _pdf_path + "_tmp72.pdf"
@@ -2809,7 +2915,9 @@ def merge_word(word_path, data, mode="buka", pdf_name=""):
                 # Printer harus memakai PDF final, bukan Word mentah.
                 # Word mentah melewati Summary SPSE dan dua copy sheet 7.2.
                 _printer_name = pdf_name
-                _final_pdf = _build_ba_pl_final_pdf(wdDoc, _folder, "PL", jenis_ba)
+                _final_pdf = _build_ba_pl_final_pdf(
+                    wdDoc, _folder, "PL", jenis_ba, excel_path
+                )
                 import win32api
                 _result = win32api.ShellExecute(
                     0, "printto", _final_pdf, f'"{_printer_name}"', _folder, 0
@@ -3373,7 +3481,9 @@ def run_merge_mode_pl(folder_path: str, excel_path: str) -> list:
             continue
 
         try:
-            merge_word(word_path, data, mode="buka", pdf_name="")
+            merge_word(
+                word_path, data, mode="buka", pdf_name="", excel_path=excel_path
+            )
             results.append({"file": os.path.basename(word_path), "sukses": True, "pesan": "OK"})
         except Exception as e:
             results.append({"file": os.path.basename(word_path), "sukses": False, "pesan": str(e)})
@@ -3405,4 +3515,4 @@ if __name__ == "__main__":
     if data is None:
         sys.exit(1)
 
-    merge_word(word_path, data, mode, pdf_name)
+    merge_word(word_path, data, mode, pdf_name, excel_path=excel_path)
