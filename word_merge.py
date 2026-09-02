@@ -2471,11 +2471,12 @@ def _patch_plpk_layout_xml(docx_path, data=None):
                 changed = blank_or_remove_paragraph(previous) or changed
                 previous -= 1
 
-        # The legacy PLPK template contains a manual break after navigation
-        # labels (``6.a ...``) and immediately before the first real BA
-        # Pembuktian heading. Once those labels are removed, that break creates
-        # a page containing only the dynamic header. Remove only this first
-        # transition break; all later copy/attendance breaks remain intact.
+        # Keep the first real BA Pembuktian heading with its content. Some
+        # package templates carry an explicit break after the hidden
+        # navigation label; removing it makes the heading fall at the bottom
+        # of the preceding BA Pembukaan page while its body starts next page.
+        # If a template has no break, add a paragraph-level break only for the
+        # first heading. Later copies/attendance breaks remain untouched.
         first_ba_pembuktian = False
         for index, block in enumerate(output_blocks):
             if (
@@ -2487,13 +2488,11 @@ def _patch_plpk_layout_xml(docx_path, data=None):
             if first_ba_pembuktian:
                 break
             first_ba_pembuktian = True
-            previous = index - 1
-            while previous >= 0 and not paragraph_text(output_blocks[previous]):
-                if has_page_break(output_blocks[previous]):
-                    if blank_or_remove_paragraph(previous):
-                        changed = True
-                    break
-                previous -= 1
+            if not preceding_has_page_break(output_blocks, index):
+                updated = set_page_break_before(block)
+                if updated != block:
+                    output_blocks[index] = updated
+                    changed = True
 
         if not changed:
             return

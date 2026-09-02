@@ -288,7 +288,7 @@ def test_active_xlsm_resolver_fails_closed_for_multiple_active_workbooks(tmp_pat
         _find_active_xlsm(tmp_path)
 
 
-def test_plpk_layout_patch_removes_only_first_transition_break(tmp_path):
+def test_plpk_layout_patch_preserves_first_transition_break_before_ba_pembuktian(tmp_path):
     document = (
         b'<?xml version="1.0"?>'
         b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
@@ -312,7 +312,7 @@ def test_plpk_layout_patch_removes_only_first_transition_break(tmp_path):
     blocks = re.findall(r"<w:p\b[^>]*>.*?</w:p\s*>", xml, re.S)
     headings = [i for i, block in enumerate(blocks) if "BERITA ACARA PEMBUKTIAN" in block]
     assert len(headings) == 2
-    assert "w:type=\"page\"" not in blocks[headings[0] - 1]
+    assert "w:type=\"page\"" in blocks[headings[0] - 1]
     assert "w:type=\"page\"" in blocks[headings[1] - 1]
 
 
