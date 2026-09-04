@@ -100,7 +100,9 @@ def test_ba_print_aborts_if_recalculation_or_save_fails():
     source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
 
     assert "Private Function PrepareWorkbookForMailMerge() As Boolean" in source
-    assert "Application.CalculateFullRebuild" in source
+    assert "Application.CalculateFullRebuild" not in source
+    assert "Application.CalculateBeforeSave = False" in source
+    assert 'Array("@ Master Data", "@ Evaluasi", "5. HPS"' in source
     assert "If Not PrepareWorkbookForMailMerge() Then Exit Sub" in source
     assert "ThisWorkbook.ReadOnly" in source
 

@@ -6,10 +6,44 @@ import win32com.client
 import pythoncom
 import os
 import time
+import shutil
+from datetime import datetime
+from pathlib import Path
+
+
+_BACKUP_DIRECTORY_NAMES = {".vba-backup", "_backup", "_backup_archive", "backup", "backups", "archive", "archives"}
+_BACKUP_FILE_MARKERS = (".bak", ".backup", "backup_", "-backup", ".before-")
+
+
+def _is_backup_workbook(filepath):
+    path = Path(filepath)
+    if any(part.casefold() in _BACKUP_DIRECTORY_NAMES for part in path.parts[:-1]):
+        return True
+    stem = path.stem.casefold()
+    return path.name.casefold().startswith("~$") or any(
+        marker in stem for marker in _BACKUP_FILE_MARKERS
+    )
+
+
+def _create_backup(filepath):
+    source = Path(filepath)
+    backup_dir = source.parent / ".vba-backup"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    backup = backup_dir / f"{source.stem}.before-inject-buttons-{stamp}{source.suffix}"
+    shutil.copy2(source, backup)
+    return backup
 
 def inject_buttons(filepath):
     filepath = os.path.abspath(filepath)
     print(f"Injecting to: {filepath}")
+
+    if _is_backup_workbook(filepath):
+        print("  [ERROR] Target berada di backup/archive; injector dihentikan.")
+        return False
+    if not os.path.isfile(filepath):
+        print("  [ERROR] Workbook tidak ditemukan.")
+        return False
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -49,6 +83,8 @@ def inject_buttons(filepath):
     wb = None
 
     try:
+        backup_path = _create_backup(filepath)
+        print(f"  [BACKUP] {backup_path}")
         excel = win32com.client.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False

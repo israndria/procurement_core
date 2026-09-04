@@ -1867,7 +1867,19 @@ def _export_sheet_pdf(excel_path, sheet_name, out_pdf, landscape=True, fit_wide=
         xlApp = win32com.client.DispatchEx("Excel.Application")
         xlApp.Visible = False
         xlApp.DisplayAlerts = False
-        wb_xl = xlApp.Workbooks.Open(excel_path, ReadOnly=True)
+        # Workbook sudah dihitung/disimpan oleh macro pemanggil. Buka tanpa
+        # link eksternal atau macro agar export deterministik dan cepat.
+        try:
+            xlApp.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
+        except Exception:
+            pass
+        wb_xl = xlApp.Workbooks.Open(
+            excel_path,
+            UpdateLinks=0,
+            ReadOnly=True,
+            IgnoreReadOnlyRecommended=True,
+            AddToMru=False,
+        )
         try:
             ws = wb_xl.Sheets(sheet_name)
         except Exception:
@@ -2653,7 +2665,17 @@ def _build_ba_pl_final_pdf(wd_doc, folder, kode, jenis="PLJKK", excel_path=None)
             try:
                 xl_app = win32com.client.DispatchEx("Excel.Application")
                 xl_app.Visible = False
-                wb = xl_app.Workbooks.Open(xlsm_path, ReadOnly=True)
+                try:
+                    xl_app.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
+                except Exception:
+                    pass
+                wb = xl_app.Workbooks.Open(
+                    xlsm_path,
+                    UpdateLinks=0,
+                    ReadOnly=True,
+                    IgnoreReadOnlyRecommended=True,
+                    AddToMru=False,
+                )
                 _sheet72 = wb.Sheets("7.2 Dengan Nego")
                 _configure_inserted_excel_sheet(_sheet72)
                 _sheet72.ExportAsFixedFormat(
@@ -2787,32 +2809,16 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
                         "Workbook aktif .xlsm tidak ditemukan; PDF BA tidak dibuat "
                         "agar tidak memakai sumber lama."
                     )
-                _kode_ba = pdf_name if pdf_name else "PL"
+                _kode_ba = str(pdf_name or "").strip()
+                if not _kode_ba:
+                    for _key in ("Kode_Paket", "Kode_Unik", "kode_paket", "kode_unik"):
+                        _value = data.get(_key) if isinstance(data, dict) else None
+                        if _value and str(_value).strip() not in ("None", "null"):
+                            _kode_ba = str(_value).strip()
+                            break
+                if not _kode_ba:
+                    _kode_ba = "PL"
                 _xlsm_path = excel_path
-                _xl_pl = None
-                _wb_pl = None
-                try:
-                    _xl_pl = win32com.client.DispatchEx("Excel.Application")
-                    _xl_pl.Visible = False
-                    _wb_pl = _xl_pl.Workbooks.Open(_xlsm_path, ReadOnly=True)
-                    _ku_pl = str(_wb_pl.Sheets("@ Master Data").Range("F2").Value).strip()
-                    if _ku_pl and _ku_pl not in ("", "None", "null"):
-                        _kode_ba = _ku_pl
-                except Exception as _source_err:
-                    raise RuntimeError(
-                        f"Gagal membaca workbook aktif untuk PDF BA: {_xlsm_path}"
-                    ) from _source_err
-                finally:
-                    if _wb_pl:
-                        try:
-                            _wb_pl.Close(False)
-                        except Exception:
-                            pass
-                    if _xl_pl:
-                        try:
-                            _xl_pl.Quit()
-                        except Exception:
-                            pass
                 _pdf_path = _fit_path(_folder, f"BA_{jenis_ba}_{_kode_ba}.pdf")
                 _tmp_word = _pdf_path + "_tmpword.pdf"
                 _tmp_72   = _pdf_path + "_tmp72.pdf"
@@ -2829,7 +2835,17 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
                     try:
                         _xl72 = win32com.client.DispatchEx("Excel.Application")
                         _xl72.Visible = False
-                        _wb72 = _xl72.Workbooks.Open(_xlsm_path, ReadOnly=True)
+                        try:
+                            _xl72.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
+                        except Exception:
+                            pass
+                        _wb72 = _xl72.Workbooks.Open(
+                            _xlsm_path,
+                            UpdateLinks=0,
+                            ReadOnly=True,
+                            IgnoreReadOnlyRecommended=True,
+                            AddToMru=False,
+                        )
                         _ws72 = None
                         try:
                             _ws72 = _wb72.Sheets("7.2 Dengan Nego")

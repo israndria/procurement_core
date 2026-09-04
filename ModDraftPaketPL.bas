@@ -1649,8 +1649,15 @@ End Function
 
 
 Private Function PrepareWorkbookForMailMerge() As Boolean
-    ' Mail merge membaca cached value workbook secara read-only. Pastikan cache
-    ' formula benar-benar dihitung dan tersimpan; jika gagal, jangan cetak PDF.
+    ' Mail merge membaca cached value workbook secara read-only. Hitung hanya
+    ' sheet yang menjadi sumber BA; CalculateFullRebuild sangat lambat dan
+    ' dapat menyimpan #NAME? pada UDF terbilang ketika cache belum siap.
+    Dim oldCalculateBeforeSave As Boolean
+    Dim oldForceFullCalculation As Boolean
+    Dim oldEnableEvents As Boolean
+    Dim stateCaptured As Boolean
+    Dim sheetName As Variant
+    Dim ws As Worksheet
     On Error GoTo Gagal
 
     If ThisWorkbook.ReadOnly Then
@@ -1658,14 +1665,33 @@ Private Function PrepareWorkbookForMailMerge() As Boolean
                   "Workbook terbuka read-only."
     End If
 
-    ThisWorkbook.ForceFullCalculation = True
-    Application.CalculateBeforeSave = True
-    Application.CalculateFullRebuild
-    Application.CalculateUntilAsyncQueriesDone
+    oldCalculateBeforeSave = Application.CalculateBeforeSave
+    oldForceFullCalculation = ThisWorkbook.ForceFullCalculation
+    oldEnableEvents = Application.EnableEvents
+    stateCaptured = True
+    ThisWorkbook.ForceFullCalculation = False
+    Application.CalculateBeforeSave = False
+    ' Cegah Worksheet_Calculate memanggil layout berulang selama rangkaian
+    ' kalkulasi. Layout dipanggil sekali secara eksplisit di bawah.
+    Application.EnableEvents = False
 
-    ' Sheet ini sumber tabel negosiasi PLPK. PLJKK lama mungkin tidak memilikinya.
+    ' Urutan mengikuti dependensi: sumber identitas/HPS -> penawaran/nego ->
+    ' sheet mail-merge. Sheet yang tidak ada pada varian lama dilewati.
+    For Each sheetName In Array("@ Master Data", "@ Evaluasi", "5. HPS", _
+                                "6. Harga Penawaran", "7.2 Dengan Nego", _
+                                "satu_data", "list_reviu", "list_dokpil")
+        Set ws = Nothing
+        On Error Resume Next
+        Set ws = ThisWorkbook.Worksheets(CStr(sheetName))
+        On Error GoTo Gagal
+        If Not ws Is Nothing Then ws.Calculate
+    Next sheetName
+
+    ' Sembunyikan surplus item dan ukur uraian sebelum cache disimpan. Macro
+    ' ini optional agar workbook lama tanpa modul layout tetap dapat dicetak.
     On Error Resume Next
-    ThisWorkbook.Worksheets("7.2 Dengan Nego").Calculate
+    modBarisItem.RefreshBarisItem True
+    modAutoLayoutNego.RapikanDaftarNego False, False
     Err.Clear
     On Error GoTo Gagal
 
@@ -1675,10 +1701,20 @@ Private Function PrepareWorkbookForMailMerge() As Boolean
                   "Workbook gagal menyimpan hasil kalkulasi."
     End If
 
+    Application.CalculateBeforeSave = oldCalculateBeforeSave
+    ThisWorkbook.ForceFullCalculation = oldForceFullCalculation
+    Application.EnableEvents = oldEnableEvents
     PrepareWorkbookForMailMerge = True
     Exit Function
 
 Gagal:
+    If stateCaptured Then
+        On Error Resume Next
+        Application.CalculateBeforeSave = oldCalculateBeforeSave
+        ThisWorkbook.ForceFullCalculation = oldForceFullCalculation
+        Application.EnableEvents = oldEnableEvents
+        On Error GoTo 0
+    End If
     PrepareWorkbookForMailMerge = False
     MsgBox "Cetak BA dibatalkan karena data formula belum berhasil dihitung/disimpan." & _
            vbCrLf & vbCrLf & Err.Description, vbCritical, "Data Belum Siap"
@@ -2756,6 +2792,59 @@ Private Sub RunMergePL(ByVal mode As String, ByVal wordPattern As String, ByVal 
     Application.StatusBar = "Membuka " & wordFile & "... Word akan muncul sebentar lagi."
 End Sub
 
+Private Sub SyncCanonicalBAWordTemplatePL(ByVal folder As String, ByVal fileName As String)
+    ' Template pusat adalah sumber layout BA PLPK. Saat template pusat lebih
+    ' baru, sinkronkan salinan paket sebelum merge agar edit layout terbaru
+    ' (mis. Surat Penyampaian Hasil Pengadaan Langsung) tidak stale.
+    ' Salinan lama selalu masuk subfolder .word-backup, tidak pernah ke root.
+    On Error GoTo SyncFailed
+    If Not IsPLPKWorkbook() Then Exit Sub
+    If InStr(1, fileName, "5. BA ", vbTextCompare) <> 1 Then Exit Sub
+
+    Dim root As String
+    root = EnvValuePL("POKJA_DRIVE_ROOT")
+    Dim canonical As String
+    If root <> "" Then
+        canonical = root & "\Paket Experiment - Pengadaan Langsung\V2 - Template PL\Konstruksi\5. BA PLPK - Template.docx"
+    End If
+
+    ' Fallback untuk PC yang tidak mewariskan POKJA_DRIVE_ROOT ke Excel.
+    If canonical = "" Or Dir(canonical) = "" Then
+        Dim probe As String
+        Dim i As Integer
+        probe = folder
+        For i = 1 To 12
+            canonical = probe & "\Paket Experiment - Pengadaan Langsung\V2 - Template PL\Konstruksi\5. BA PLPK - Template.docx"
+            If Dir(canonical) <> "" Then Exit For
+            Dim cutAt As Long
+            cutAt = InStrRev(probe, "\")
+            If cutAt <= 3 Then canonical = "": Exit For
+            probe = Left$(probe, cutAt - 1)
+        Next i
+    End If
+    If canonical = "" Or Dir(canonical) = "" Then Exit Sub
+
+    Dim localPath As String
+    localPath = folder & "\" & fileName
+    If Dir(localPath) = "" Then Exit Sub
+    If FileDateTime(canonical) <= FileDateTime(localPath) Then Exit Sub
+
+    Dim backupDir As String
+    backupDir = folder & "\.word-backup"
+    If Dir(backupDir, vbDirectory) = "" Then MkDir backupDir
+    Dim backupPath As String
+    backupPath = backupDir & "\" & fileName & ".before-template-" & _
+                 Format(Now, "yyyymmdd-hhnnss") & ".bak"
+    FileCopy localPath, backupPath
+    FileCopy canonical, localPath
+    Exit Sub
+
+SyncFailed:
+    ' Gagal sinkron tidak boleh menghentikan cetak dari salinan lokal yang
+    ' masih ada. Tulis status ringan untuk troubleshooting.
+    Debug.Print "Sync template BA PLPK dilewati: " & Err.Description
+End Sub
+
 Private Function FindWordFilePL(ByVal pattern As String) As String
     Dim folder As String
     folder = ThisWorkbook.Path
@@ -2767,6 +2856,7 @@ Private Function FindWordFilePL(ByVal pattern As String) As String
             If Left(f, Len(pattern)) = pattern And _
                InStr(1, f, "(Merged)", vbTextCompare) = 0 And _
                InStr(1, f, "(Dengan Header", vbTextCompare) = 0 Then
+                SyncCanonicalBAWordTemplatePL folder, f
                 FindWordFilePL = f
                 Exit Function
             End If

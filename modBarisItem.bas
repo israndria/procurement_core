@@ -5,8 +5,6 @@ Private Const SOURCE_SHEET As String = "5. HPS"
 Private Const OUTPUT_SHEET As String = "7.2 Dengan Nego"
 Private Const FIRST_SOURCE_ROW As Long = 2
 Private Const LAST_SOURCE_ROW As Long = 501
-Private Const FIRST_ITEM_ROW As Long = 9
-Private Const LAST_ITEM_ROW As Long = 508
 Private Const MAX_ITEMS As Long = 500
 
 Private m_IsRunning As Boolean
@@ -22,6 +20,8 @@ Public Sub RefreshBarisItem(Optional ByVal ForceRefresh As Boolean = True)
     Dim validCount As Long
     Dim lastValidRow As Long
     Dim outputLastRow As Long
+    Dim firstItemRow As Long
+    Dim lastItemRow As Long
     Dim signature As String
 
     If m_IsRunning Then Exit Sub
@@ -33,6 +33,7 @@ Public Sub RefreshBarisItem(Optional ByVal ForceRefresh As Boolean = True)
 
     Set wsSource = ThisWorkbook.Worksheets(SOURCE_SHEET)
     Set wsOutput = ThisWorkbook.Worksheets(OUTPUT_SHEET)
+    GetItemBounds wsOutput, firstItemRow, lastItemRow
 
     For Each cell In wsSource.Range("A" & FIRST_SOURCE_ROW & ":A" & LAST_SOURCE_ROW).Cells
         value = cell.Value2
@@ -48,9 +49,9 @@ Public Sub RefreshBarisItem(Optional ByVal ForceRefresh As Boolean = True)
     End If
 
     If lastValidRow = 0 Then
-        outputLastRow = FIRST_ITEM_ROW - 1
+        outputLastRow = firstItemRow - 1
     Else
-        outputLastRow = FIRST_ITEM_ROW + (lastValidRow - FIRST_SOURCE_ROW)
+        outputLastRow = firstItemRow + (lastValidRow - FIRST_SOURCE_ROW)
     End If
 
     signature = CStr(validCount) & ":" & CStr(lastValidRow)
@@ -59,9 +60,9 @@ Public Sub RefreshBarisItem(Optional ByVal ForceRefresh As Boolean = True)
     Application.EnableEvents = False
     Application.ScreenUpdating = False
 
-    wsOutput.Rows(FIRST_ITEM_ROW & ":" & LAST_ITEM_ROW).Hidden = False
-    If outputLastRow < LAST_ITEM_ROW Then
-        wsOutput.Rows((outputLastRow + 1) & ":" & LAST_ITEM_ROW).Hidden = True
+    wsOutput.Rows(firstItemRow & ":" & lastItemRow).Hidden = False
+    If outputLastRow < lastItemRow Then
+        wsOutput.Rows((outputLastRow + 1) & ":" & lastItemRow).Hidden = True
     End If
 
     m_LastSignature = signature
@@ -75,6 +76,30 @@ SafeExit:
 ErrorHandler:
     MsgBox "RefreshBarisItem gagal: " & Err.Description, vbExclamation, "Penyesuaian Baris Item"
     Resume SafeExit
+End Sub
+
+Private Sub GetItemBounds(ByVal ws As Worksheet, ByRef firstRow As Long, ByRef lastRow As Long)
+    Dim rowNumber As Long
+    Dim formulaText As String
+
+    firstRow = 0
+    For rowNumber = 1 To 100
+        formulaText = CStr(ws.Cells(rowNumber, "A").Formula)
+        If InStr(1, formulaText, "5. HPS", vbTextCompare) > 0 _
+           And InStr(1, formulaText, "A2", vbTextCompare) > 0 Then
+            firstRow = rowNumber
+            Exit For
+        End If
+    Next rowNumber
+
+    If firstRow = 0 Then
+        If ws.Cells(8, "A").HasFormula Or Len(Trim$(CStr(ws.Cells(8, "A").Value2))) > 0 Then
+            firstRow = 8
+        Else
+            firstRow = 9
+        End If
+    End If
+    lastRow = firstRow + MAX_ITEMS - 1
 End Sub
 
 Private Function IsValidItemValue(ByVal value As Variant) As Boolean

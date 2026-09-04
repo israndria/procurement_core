@@ -3,8 +3,7 @@ Option Explicit
 
 Private Const TARGET_SHEET As String = "7.2 Dengan Nego"
 Private Const HELPER_SHEET As String = "_LayoutHelper"
-Private Const FIRST_ITEM_ROW As Long = 9
-Private Const LAST_ITEM_ROW As Long = 508
+Private Const MAX_ITEMS As Long = 500
 Private Const MIN_ROW_HEIGHT As Double = 25
 Private Const MAX_ROW_HEIGHT As Double = 409
 Private Const EXTRA_HEIGHT As Double = 5
@@ -23,6 +22,8 @@ Public Sub RapikanDaftarNego( _
     Dim skippedRows As String
     Dim activeCount As Long
     Dim hiddenCount As Long
+    Dim firstItemRow As Long
+    Dim lastItemRow As Long
 
     If mIsRunning Then Exit Sub
     mIsRunning = True
@@ -31,25 +32,30 @@ Public Sub RapikanDaftarNego( _
 
     Set ws = ThisWorkbook.Worksheets(TARGET_SHEET)
     Set helperWs = GetOrCreateHelperSheet()
+    GetItemBounds ws, firstItemRow, lastItemRow
 
     oldScreenUpdating = Application.ScreenUpdating
     oldEnableEvents = Application.EnableEvents
     oldCalculation = Application.Calculation
+
+    ' Worksheet_Calculate dapat memanggil macro ini lagi setelah sumber HPS
+    ' dihitung. Jika signature item belum berubah, jangan ukur/merge 500 baris
+    ' sekali lagi; ini mengurangi waktu buka dan cetak tanpa mengubah hasil.
+    If Not ForceRefresh Then
+        If BuildLayoutSignature(ws) = mLastSignature Then GoTo CleanExit
+    End If
 
     Application.ScreenUpdating = False
     Application.EnableEvents = False
     Application.Calculation = xlCalculationManual
     Application.StatusBar = "Merapikan uraian pekerjaan..."
 
-    ' Pastikan hasil formula sumber/target terbaru sebelum menentukan row aktif.
-    If ForceRefresh Then
-        Application.CalculateFull
-    Else
-        ThisWorkbook.Worksheets("5. HPS").Calculate
-        ws.Calculate
-    End If
+    ' Pastikan hanya sumber dan target yang dihitung. Application.Calculate
+    ' menghitung semua workbook terbuka dan membuat Workbook_Open lambat.
+    ThisWorkbook.Worksheets("5. HPS").Calculate
+    ws.Calculate
 
-    ProcessItemRows ws, helperWs, skippedRows, activeCount, hiddenCount
+    ProcessItemRows ws, helperWs, firstItemRow, lastItemRow, skippedRows, activeCount, hiddenCount
     mLastSignature = BuildLayoutSignature(ws)
 
 CleanExit:
@@ -109,6 +115,8 @@ End Sub
 Private Sub ProcessItemRows( _
     ByVal ws As Worksheet, _
     ByVal helperWs As Worksheet, _
+    ByVal firstItemRow As Long, _
+    ByVal lastItemRow As Long, _
     ByRef skippedRows As String, _
     ByRef activeCount As Long, _
     ByRef hiddenCount As Long)
@@ -120,7 +128,7 @@ Private Sub ProcessItemRows( _
     Dim sideArea As Range
     Dim calculatedHeight As Double
 
-    For rowNumber = FIRST_ITEM_ROW To LAST_ITEM_ROW
+    For rowNumber = firstItemRow To lastItemRow
         numberValue = ws.Cells(rowNumber, "A").Value2
         descriptionText = SafeTrimmedText(ws.Cells(rowNumber, "B").Value2)
         Set descriptionArea = ws.Range("B" & rowNumber & ":H" & rowNumber)
@@ -149,6 +157,30 @@ Private Sub ProcessItemRows( _
             End If
         End If
     Next rowNumber
+End Sub
+
+Private Sub GetItemBounds(ByVal ws As Worksheet, ByRef firstRow As Long, ByRef lastRow As Long)
+    Dim rowNumber As Long
+    Dim formulaText As String
+
+    firstRow = 0
+    For rowNumber = 1 To 100
+        formulaText = CStr(ws.Cells(rowNumber, "A").Formula)
+        If InStr(1, formulaText, "5. HPS", vbTextCompare) > 0 _
+           And InStr(1, formulaText, "A2", vbTextCompare) > 0 Then
+            firstRow = rowNumber
+            Exit For
+        End If
+    Next rowNumber
+
+    If firstRow = 0 Then
+        If ws.Cells(8, "A").HasFormula Or Len(Trim$(CStr(ws.Cells(8, "A").Value2))) > 0 Then
+            firstRow = 8
+        Else
+            firstRow = 9
+        End If
+    End If
+    lastRow = firstRow + MAX_ITEMS - 1
 End Sub
 
 Private Function IsEmptyItem(ByVal numberValue As Variant, ByVal descriptionText As String) As Boolean
@@ -277,13 +309,16 @@ Private Function BuildLayoutSignature(ByVal ws As Worksheet) As String
     Dim valuesB As Variant
     Dim parts() As String
     Dim rowIndex As Long
+    Dim firstItemRow As Long
+    Dim lastItemRow As Long
     Dim itemCount As Long
     Dim valueA As String
     Dim valueB As String
 
-    valuesA = ws.Range("A" & FIRST_ITEM_ROW & ":A" & LAST_ITEM_ROW).Value2
-    valuesB = ws.Range("B" & FIRST_ITEM_ROW & ":B" & LAST_ITEM_ROW).Value2
-    ReDim parts(1 To LAST_ITEM_ROW - FIRST_ITEM_ROW + 1)
+    GetItemBounds ws, firstItemRow, lastItemRow
+    valuesA = ws.Range("A" & firstItemRow & ":A" & lastItemRow).Value2
+    valuesB = ws.Range("B" & firstItemRow & ":B" & lastItemRow).Value2
+    ReDim parts(1 To lastItemRow - firstItemRow + 1)
 
     For rowIndex = 1 To UBound(parts)
         If IsError(valuesA(rowIndex, 1)) Then

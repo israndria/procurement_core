@@ -21,6 +21,7 @@ BAS_FILE = SCRIPT_DIR / "ModDraftPaketPL.bas"
 MOD_NAME = "ModDraftPaketPL"
 WORDLINK_BAS_FILE = SCRIPT_DIR / "ModWordLink.bas"
 WORDLINK_MOD_NAME = "ModWordLink"
+LAYOUT_MODULES = ("modBarisItem", "modAutoLayoutNego")
 XL_CALCULATION_MANUAL = -4135
 XL_AUTOMATION_SECURITY_LOW = 1
 
@@ -63,7 +64,7 @@ PLPK_BUTTON_GEOMETRY = {
 }
 
 # Event workbook untuk BAPLJKK — relink tetap manual, input tanggal dipermudah.
-WORKBOOK_OPEN_CODE = (
+WORKBOOK_OPEN_DATE_CODE = (
     "Private Sub Workbook_Open()\n"
     "    ' Workbook_Open dimatikan — relink manual lewat tombol Relink Word\n"
     "End Sub\n"
@@ -166,6 +167,52 @@ WORKBOOK_OPEN_CODE = (
     "End Function\n"
 )
 
+# Reuse the guarded date-change event, while adding the dynamic layout hooks.
+# The hooks are deliberately incremental; no full-workbook recalculation occurs
+# when a user opens a PL workbook.
+WORKBOOK_OPEN_CODE = WORKBOOK_OPEN_DATE_CODE.replace(
+    "Private Sub Workbook_Open()\n",
+    "Private Sub Workbook_Open()\n"
+    "    On Error Resume Next\n"
+    "    modAutoLayoutNego.ResetCacheLayout\n"
+    "    modAutoLayoutNego.PasangShortcutRapikan\n"
+    "    modAutoLayoutNego.RapikanDaftarNego True, False\n"
+    "    modBarisItem.RefreshBarisItem True\n"
+    "    On Error GoTo SafeExit\n"
+    "SafeExit:\n",
+    1,
+)
+
+HPS_EVENT_CODE = (
+    "' BEGIN POKJA_AUTO_BARIS_ITEM\n"
+    "Private Sub Worksheet_Calculate()\n"
+    "    modBarisItem.RefreshBarisItem False\n"
+    "End Sub\n"
+    "\n"
+    "Private Sub Worksheet_Change(ByVal Target As Range)\n"
+    "    If Intersect(Target, Me.Range(\"A2:A501\")) Is Nothing Then Exit Sub\n"
+    "    modBarisItem.RefreshBarisItem False\n"
+    "End Sub\n"
+    "' END POKJA_AUTO_BARIS_ITEM"
+)
+
+NEGO_EVENT_CODE = (
+    "' BEGIN POKJA_AUTO_LAYOUT_NEGO\n"
+    "Private Sub Worksheet_Calculate()\n"
+    "    On Error GoTo SafeExit\n"
+    "    modAutoLayoutNego.AutoRapikanJikaPerlu Me\n"
+    "SafeExit:\n"
+    "End Sub\n"
+    "\n"
+    "Private Sub Worksheet_Activate()\n"
+    "    On Error GoTo SafeExit\n"
+    "    modAutoLayoutNego.PasangShortcutRapikan\n"
+    "    modAutoLayoutNego.AutoRapikanJikaPerlu Me\n"
+    "SafeExit:\n"
+    "End Sub\n"
+    "' END POKJA_AUTO_LAYOUT_NEGO"
+)
+
 
 def _validate_vba_source(content: str, module_name: str = MOD_NAME) -> None:
     """Tolak source BAS rusak sebelum menyentuh workbook."""
@@ -255,7 +302,13 @@ def _harden_evaluasi_date_formulas(ws_eval) -> int:
         )
         ws_eval.Cells(row + 2, 4).Formula = f'=IF({date_ref}="","",{date_ref})'
         ws_eval.Cells(row + 2, 4).NumberFormat = "dd mmmm yyyy"
-        ws_eval.Cells(row + 3, 3).Formula = f'=IF({day_ref}="","",terbilang({day_ref}))'
+        # Donor workbook tidak seragam: sebagian memiliki UDF terbilang1,
+        # sebagian (termasuk template PL pusat) hanya memiliki terbilang.
+        # IFERROR membuat hasil lintas-template tetap valid tanpa menyimpan
+        # #NAME? ke PDF saat salah satu nama UDF tidak tersedia.
+        ws_eval.Cells(row + 3, 3).Formula = (
+            f'=IF({day_ref}="","",IFERROR(terbilang1({day_ref}),terbilang({day_ref})))'
+        )
         ws_eval.Cells(row + 4, 3).Formula = (
             f'=IF({date_ref}="","",CHOOSE(MONTH({date_ref}),'
             '"Januari","Februari","Maret","April","Mei","Juni",'
@@ -268,7 +321,7 @@ def _harden_evaluasi_date_formulas(ws_eval) -> int:
             ws_eval.Cells(row + 5, 3).Formula = f'=IF({date_ref}="","",YEAR({date_ref}))'
         elif next_label == "tahun terbilang":
             ws_eval.Cells(row + 5, 3).Formula = (
-                f'=IF({date_ref}="","",terbilang(YEAR({date_ref})))'
+                f'=IF({date_ref}="","",IFERROR(terbilang1(YEAR({date_ref})),terbilang(YEAR({date_ref}))))'
             )
         patched += 1
     return patched
@@ -303,6 +356,45 @@ def _coerce_eval_date_serial(value):
     except ValueError:
         return None
     return (parsed.date() - datetime(1899, 12, 30).date()).days
+
+
+def _inject_marked_sheet_event(vb_project, workbook, sheet_name, event_code,
+                               start_marker, end_marker, *, legacy_event=False):
+    """Pasang event sheet secara idempotent dan fail-closed.
+
+    Event custom milik paket tidak boleh ditimpa diam-diam. Hanya blok marker
+    milik injector atau pola legacy layout yang dikenal yang boleh diganti.
+    """
+    ws = workbook.Sheets(sheet_name)
+    cm = vb_project.VBComponents(ws.CodeName).CodeModule
+    current = cm.Lines(1, cm.CountOfLines) if cm.CountOfLines else ""
+    start = current.find(start_marker)
+    if start >= 0:
+        end = current.find(end_marker, start)
+        if end < 0:
+            raise RuntimeError(f"Marker event {sheet_name} tidak lengkap")
+        current = current[:start] + current[end + len(end_marker):]
+    elif legacy_event and (
+        "Private Sub Worksheet_Change" in current
+        and "Private Sub FixRowHeight" in current
+        and "mergeArea" in current
+    ):
+        current = ""
+    elif any(marker in current for marker in (
+        "Private Sub Worksheet_Change",
+        "Private Sub Worksheet_Calculate",
+        "Private Sub Worksheet_Activate",
+    )):
+        raise RuntimeError(f"Sheet {sheet_name} memiliki event custom di luar pola legacy")
+
+    new_code = current.rstrip()
+    if new_code:
+        new_code += "\n\n"
+    new_code += event_code
+    if cm.CountOfLines:
+        cm.DeleteLines(1, cm.CountOfLines)
+    cm.AddFromString(new_code)
+    return cm.CountOfLines
 
 
 def inject_pl(filepath: str):
@@ -479,6 +571,59 @@ def inject_pl(filepath: str):
         print(f"  [OK] {WORDLINK_MOD_NAME} imported ({imported_wordlink.CodeModule.CountOfLines} baris)")
         os.unlink(wordlink_tmp_path)
 
+        # Auto-layout 7.2 Dengan Nego wajib ikut pada workbook PLPK/PLJKK.
+        # Import menggunakan nama sementara agar module lama tetap utuh bila
+        # proses terhenti sebelum module baru tervalidasi.
+        for layout_name in LAYOUT_MODULES:
+            layout_bas = SCRIPT_DIR / f"{layout_name}.bas"
+            if not layout_bas.exists():
+                raise FileNotFoundError(f"{layout_bas} tidak ditemukan")
+            layout_content = layout_bas.read_text(encoding="utf-8")
+            _validate_vba_source(layout_content, layout_name)
+            layout_tmp = tempfile.NamedTemporaryFile(
+                suffix=".bas", delete=False, mode="w", encoding="utf-8"
+            )
+            layout_tmp.write(
+                layout_content.replace(
+                    f'Attribute VB_Name = "{layout_name}"',
+                    f'Attribute VB_Name = "{layout_name}_NEW"',
+                )
+            )
+            layout_tmp.close()
+            try:
+                imported_layout = vb.VBComponents.Import(layout_tmp.name)
+                old_layout = None
+                for comp in vb.VBComponents:
+                    if comp.Name == layout_name:
+                        old_layout = comp
+                        break
+                if old_layout:
+                    vb.VBComponents.Remove(old_layout)
+                    print(f"  {layout_name} lama dihapus")
+                imported_layout.Name = layout_name
+                layout_text = imported_layout.CodeModule.Lines(
+                    1, imported_layout.CodeModule.CountOfLines
+                )
+                expected_layout_lines = len(layout_content.splitlines()) - 1
+                if imported_layout.CodeModule.CountOfLines != expected_layout_lines:
+                    raise ValueError(
+                        f"Jumlah baris {layout_name} berubah setelah import: "
+                        f"{imported_layout.CodeModule.CountOfLines} != {expected_layout_lines}"
+                    )
+                _validate_vba_source(
+                    f'Attribute VB_Name = "{layout_name}"\n{layout_text}',
+                    layout_name,
+                )
+                print(
+                    f"  [OK] {layout_name} imported "
+                    f"({imported_layout.CodeModule.CountOfLines} baris)"
+                )
+            finally:
+                try:
+                    os.unlink(layout_tmp.name)
+                except OSError:
+                    pass
+
         # Inject Workbook_Open ke ThisWorkbook
         this_wb_comp = None
         for comp in vb.VBComponents:
@@ -491,6 +636,35 @@ def inject_pl(filepath: str):
                 cm.DeleteLines(1, cm.CountOfLines)
             cm.AddFromString(WORKBOOK_OPEN_CODE)
             print(f"  [OK] Workbook_Open injected ({cm.CountOfLines} baris)")
+
+        # Perubahan HPS dan kalkulasi 7.2 langsung memicu perapian. Event
+        # custom di luar marker tidak ditimpa agar workbook paket tetap aman.
+        try:
+            count = _inject_marked_sheet_event(
+                vb, wb, "5. HPS", HPS_EVENT_CODE,
+                "' BEGIN POKJA_AUTO_BARIS_ITEM",
+                "' END POKJA_AUTO_BARIS_ITEM",
+            )
+            print(f"  [OK] Sheet 5. HPS auto-row events injected ({count} baris)")
+        except Exception as event_error:
+            print(f"  [WARN] Event sheet 5. HPS tidak dipasang: {event_error}")
+
+        try:
+            count = _inject_marked_sheet_event(
+                vb, wb, "7.2 Dengan Nego", NEGO_EVENT_CODE,
+                "' BEGIN POKJA_AUTO_LAYOUT_NEGO",
+                "' END POKJA_AUTO_LAYOUT_NEGO",
+                legacy_event=True,
+            )
+            print(
+                f"  [OK] Sheet 7.2 Dengan Nego auto-layout events injected "
+                f"({count} baris)"
+            )
+        except Exception as event_error:
+            print(
+                f"  [WARN] Event sheet 7.2 Dengan Nego tidak dipasang: "
+                f"{event_error}"
+            )
 
         try:
             eval_count = _harden_evaluasi_date_formulas(wb.Sheets("@ Evaluasi"))
