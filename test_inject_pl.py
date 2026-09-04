@@ -105,9 +105,12 @@ def test_ba_print_aborts_if_recalculation_or_save_fails():
     assert "ThisWorkbook.ReadOnly" in source
 
 
-def test_injector_enforces_fresh_formula_cache_before_save():
+def test_injector_never_recalculates_formula_cache_during_structural_injection():
     source = Path(__file__).with_name("inject_pl.py").read_text(encoding="utf-8")
 
-    assert "excel.Calculation = XL_CALCULATION_AUTOMATIC" in source
-    assert "excel.CalculateBeforeSave = True" in source
-    assert "excel.CalculateFullRebuild()" in source
+    assert "XL_AUTOMATION_SECURITY_LOW = 1" in source
+    assert "excel.AutomationSecurity = XL_AUTOMATION_SECURITY_LOW" in source
+    assert "excel.EnableEvents = False" in source
+    assert "excel.Calculation = XL_CALCULATION_MANUAL" in source
+    assert "excel.CalculateBeforeSave = True" not in source
+    assert "excel.CalculateFullRebuild()" not in source

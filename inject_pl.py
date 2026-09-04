@@ -21,7 +21,8 @@ BAS_FILE = SCRIPT_DIR / "ModDraftPaketPL.bas"
 MOD_NAME = "ModDraftPaketPL"
 WORDLINK_BAS_FILE = SCRIPT_DIR / "ModWordLink.bas"
 WORDLINK_MOD_NAME = "ModWordLink"
-XL_CALCULATION_AUTOMATIC = -4105
+XL_CALCULATION_MANUAL = -4135
+XL_AUTOMATION_SECURITY_LOW = 1
 
 _BACKUP_DIRECTORY_NAMES = {
     ".vba-backup",
@@ -367,8 +368,12 @@ def inject_pl(filepath: str):
         excel = win32com.client.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
+        # UDF seperti terbilang1 harus terdaftar saat workbook dibuka. Jangan
+        # pernah membuka workbook untuk ditulis dalam mode ForceDisable (3):
+        # save setelah formula tersentuh dapat menyimpan cache UDF sebagai
+        # #NAME?. Event workbook tetap dimatikan agar Workbook_Open tidak jalan.
+        excel.AutomationSecurity = XL_AUTOMATION_SECURITY_LOW
         excel.EnableEvents = False
-
         try:
             wb = excel.Workbooks.Open(filepath, 0, False)
         except Exception as open_error:
@@ -378,8 +383,10 @@ def inject_pl(filepath: str):
             print(f"  [WARN] Open normal gagal, coba Excel repair: {open_error}")
             wb = excel.Workbooks.Open(filepath, 0, False, None, None, None, None, None, 1)
             print("  [OK] Excel repair open berhasil")
-        excel.Calculation = XL_CALCULATION_AUTOMATIC
-        excel.CalculateBeforeSave = True
+        # Excel menolak mengubah Calculation sebelum workbook terbuka pada
+        # sebagian versi. Set setelah Open, sebelum perubahan struktural.
+        # Injector hanya mengubah VBA/shape; cached formula dipertahankan.
+        excel.Calculation = XL_CALCULATION_MANUAL
         vb = wb.VBProject
 
         # PL tidak memakai generator kode unik otomatis. Bersihkan modul/button
@@ -609,13 +616,9 @@ def inject_pl(filepath: str):
         except Exception as e:
             print(f"  [WARN] Tombol @ Master Data: {e}")
 
-        # Workbook PL harus menyimpan cache formula terbaru. Mail merge membuka
-        # workbook read-only dan bergantung pada cached value tersebut.
-        try:
-            wb.ForceFullCalculation = True
-        except Exception as calc_policy_error:
-            print(f"  [WARN] Kebijakan full-calculation: {calc_policy_error}")
-        excel.CalculateFullRebuild()
+        # Jangan Calculate/CalculateFullRebuild di injector. Ini operasi
+        # struktural; memaksa recalc di sini adalah jalur korupsi cache UDF
+        # ketika workbook lama memiliki fungsi VBA yang belum ter-load.
         wb.Save()
         print(f"  [SAVED] {os.path.basename(filepath)}")
         return True
