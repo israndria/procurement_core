@@ -397,6 +397,27 @@ def _inject_marked_sheet_event(vb_project, workbook, sheet_name, event_code,
     return cm.CountOfLines
 
 
+def _remove_marked_sheet_event(vb_project, workbook, sheet_name,
+                               start_marker, end_marker):
+    """Hapus blok event milik injector tanpa menyentuh event custom paket."""
+    ws = workbook.Sheets(sheet_name)
+    cm = vb_project.VBComponents(ws.CodeName).CodeModule
+    current = cm.Lines(1, cm.CountOfLines) if cm.CountOfLines else ""
+    start = current.find(start_marker)
+    if start < 0:
+        return cm.CountOfLines
+    end = current.find(end_marker, start)
+    if end < 0:
+        raise RuntimeError(f"Marker event {sheet_name} tidak lengkap")
+    current = current[:start] + current[end + len(end_marker):]
+    current = current.rstrip()
+    if cm.CountOfLines:
+        cm.DeleteLines(1, cm.CountOfLines)
+    if current:
+        cm.AddFromString(current)
+    return cm.CountOfLines
+
+
 def inject_pl(filepath: str):
     filepath = os.path.abspath(filepath)
     print(f"\nInjecting PL module to: {filepath}")
@@ -480,6 +501,13 @@ def inject_pl(filepath: str):
         # Injector hanya mengubah VBA/shape; cached formula dipertahankan.
         excel.Calculation = XL_CALCULATION_MANUAL
         vb = wb.VBProject
+
+        # PLPK dikenali dari struktur workbook, bukan nama file/folder.
+        # PLJKK Pengawasan/Perencanaan harus tetap mendapat fitur umum PL,
+        # tetapi tidak boleh menerima otomasi 7.2 Dengan Nego.
+        master_ws = wb.Sheets("@ Master Data")
+        is_pk = str(master_ws.Cells(76, 1).Value or "").strip() == "5. DATA PESERTA"
+        active_layout_modules = LAYOUT_MODULES if is_pk else ()
 
         # PL tidak memakai generator kode unik otomatis. Bersihkan modul/button
         # legacy yang bisa ikut terbawa dari injector tender/umum.
@@ -571,10 +599,10 @@ def inject_pl(filepath: str):
         print(f"  [OK] {WORDLINK_MOD_NAME} imported ({imported_wordlink.CodeModule.CountOfLines} baris)")
         os.unlink(wordlink_tmp_path)
 
-        # Auto-layout 7.2 Dengan Nego wajib ikut pada workbook PLPK/PLJKK.
+        # Auto-layout 7.2 Dengan Nego hanya untuk PLPK Konstruksi.
         # Import menggunakan nama sementara agar module lama tetap utuh bila
         # proses terhenti sebelum module baru tervalidasi.
-        for layout_name in LAYOUT_MODULES:
+        for layout_name in active_layout_modules:
             layout_bas = SCRIPT_DIR / f"{layout_name}.bas"
             if not layout_bas.exists():
                 raise FileNotFoundError(f"{layout_bas} tidak ditemukan")
@@ -624,6 +652,16 @@ def inject_pl(filepath: str):
                 except OSError:
                     pass
 
+        # Bersihkan modul auto-layout lama dari template/paket PLJKK bila
+        # pernah diinjeksi oleh versi injector sebelumnya.
+        if not is_pk:
+            for layout_name in LAYOUT_MODULES:
+                for comp in list(vb.VBComponents):
+                    if comp.Name == layout_name:
+                        vb.VBComponents.Remove(comp)
+                        print(f"  {layout_name} auto-layout dihapus dari PLJKK")
+                        break
+
         # Inject Workbook_Open ke ThisWorkbook
         this_wb_comp = None
         for comp in vb.VBComponents:
@@ -634,37 +672,47 @@ def inject_pl(filepath: str):
             cm = this_wb_comp.CodeModule
             if cm.CountOfLines > 0:
                 cm.DeleteLines(1, cm.CountOfLines)
-            cm.AddFromString(WORKBOOK_OPEN_CODE)
+            cm.AddFromString(WORKBOOK_OPEN_CODE if is_pk else WORKBOOK_OPEN_DATE_CODE)
             print(f"  [OK] Workbook_Open injected ({cm.CountOfLines} baris)")
 
         # Perubahan HPS dan kalkulasi 7.2 langsung memicu perapian. Event
         # custom di luar marker tidak ditimpa agar workbook paket tetap aman.
         try:
-            count = _inject_marked_sheet_event(
-                vb, wb, "5. HPS", HPS_EVENT_CODE,
-                "' BEGIN POKJA_AUTO_BARIS_ITEM",
-                "' END POKJA_AUTO_BARIS_ITEM",
-            )
-            print(f"  [OK] Sheet 5. HPS auto-row events injected ({count} baris)")
+            if is_pk:
+                count = _inject_marked_sheet_event(
+                    vb, wb, "5. HPS", HPS_EVENT_CODE,
+                    "' BEGIN POKJA_AUTO_BARIS_ITEM",
+                    "' END POKJA_AUTO_BARIS_ITEM",
+                )
+                print(f"  [OK] Sheet 5. HPS auto-row events injected ({count} baris)")
+            else:
+                count = _remove_marked_sheet_event(
+                    vb, wb, "5. HPS",
+                    "' BEGIN POKJA_AUTO_BARIS_ITEM",
+                    "' END POKJA_AUTO_BARIS_ITEM",
+                )
+                print(f"  [OK] Sheet 5. HPS auto-row events removed from PLJKK ({count} baris)")
         except Exception as event_error:
             print(f"  [WARN] Event sheet 5. HPS tidak dipasang: {event_error}")
 
         try:
-            count = _inject_marked_sheet_event(
-                vb, wb, "7.2 Dengan Nego", NEGO_EVENT_CODE,
-                "' BEGIN POKJA_AUTO_LAYOUT_NEGO",
-                "' END POKJA_AUTO_LAYOUT_NEGO",
-                legacy_event=True,
-            )
-            print(
-                f"  [OK] Sheet 7.2 Dengan Nego auto-layout events injected "
-                f"({count} baris)"
-            )
+            if is_pk:
+                count = _inject_marked_sheet_event(
+                    vb, wb, "7.2 Dengan Nego", NEGO_EVENT_CODE,
+                    "' BEGIN POKJA_AUTO_LAYOUT_NEGO",
+                    "' END POKJA_AUTO_LAYOUT_NEGO",
+                    legacy_event=True,
+                )
+                print(f"  [OK] Sheet 7.2 Dengan Nego auto-layout events injected ({count} baris)")
+            else:
+                count = _remove_marked_sheet_event(
+                    vb, wb, "7.2 Dengan Nego",
+                    "' BEGIN POKJA_AUTO_LAYOUT_NEGO",
+                    "' END POKJA_AUTO_LAYOUT_NEGO",
+                )
+                print(f"  [OK] Sheet 7.2 Dengan Nego auto-layout removed from PLJKK ({count} baris)")
         except Exception as event_error:
-            print(
-                f"  [WARN] Event sheet 7.2 Dengan Nego tidak dipasang: "
-                f"{event_error}"
-            )
+            print(f"  [WARN] Event sheet 7.2 Dengan Nego tidak dipasang: {event_error}")
 
         try:
             eval_count = _harden_evaluasi_date_formulas(wb.Sheets("@ Evaluasi"))
