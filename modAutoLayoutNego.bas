@@ -33,6 +33,14 @@ Public Sub RapikanDaftarNego( _
     Set ws = ThisWorkbook.Worksheets(TARGET_SHEET)
     Set helperWs = GetOrCreateHelperSheet()
     GetItemBounds ws, firstItemRow, lastItemRow
+    If firstItemRow <= 0 Or lastItemRow < firstItemRow Then
+        mIsRunning = False
+        Exit Sub
+    End If
+
+    ' Modul lama pernah menganggap footer sebagai slot item. Pulihkan blok
+    ' Total/Dibulatkan/Terbilang/TTD sebelum evaluasi signature.
+    EnsureFooterVisible ws, lastItemRow + 1
 
     oldScreenUpdating = Application.ScreenUpdating
     oldEnableEvents = Application.EnableEvents
@@ -162,6 +170,7 @@ End Sub
 Private Sub GetItemBounds(ByVal ws As Worksheet, ByRef firstRow As Long, ByRef lastRow As Long)
     Dim rowNumber As Long
     Dim formulaText As String
+    Dim footerRow As Long
 
     firstRow = 0
     For rowNumber = 1 To 100
@@ -180,7 +189,55 @@ Private Sub GetItemBounds(ByVal ws As Worksheet, ByRef firstRow As Long, ByRef l
             firstRow = 9
         End If
     End If
-    lastRow = firstRow + MAX_ITEMS - 1
+    footerRow = FindFooterRow(ws, firstRow)
+    If footerRow <= firstRow Then
+        ' Fail closed: tanpa marker Total, jangan menyentuh visibilitas baris.
+        firstRow = 0
+        lastRow = 0
+        Exit Sub
+    End If
+    lastRow = footerRow - 1
+End Sub
+
+Private Function FindFooterRow(ByVal ws As Worksheet, ByVal firstItemRow As Long) As Long
+    Dim rowNumber As Long
+    Dim cellValue As Variant
+    Dim finalProbeRow As Long
+
+    finalProbeRow = firstItemRow + MAX_ITEMS
+    If finalProbeRow > ws.Rows.Count Then finalProbeRow = ws.Rows.Count
+
+    For rowNumber = firstItemRow + 1 To finalProbeRow
+        cellValue = ws.Cells(rowNumber, "M").Value2
+        If Not IsError(cellValue) Then
+            If StrComp(Trim$(CStr(cellValue)), "Total", vbTextCompare) = 0 Then
+                FindFooterRow = rowNumber
+                Exit Function
+            End If
+        End If
+    Next rowNumber
+End Function
+
+Private Sub EnsureFooterVisible(ByVal ws As Worksheet, ByVal footerRow As Long)
+    Dim lastCell As Range
+    Dim lastContentRow As Long
+
+    On Error Resume Next
+    Set lastCell = ws.Range("A:R").Find( _
+        What:="*", _
+        After:=ws.Range("A1"), _
+        LookIn:=xlFormulas, _
+        LookAt:=xlPart, _
+        SearchOrder:=xlByRows, _
+        SearchDirection:=xlPrevious, _
+        MatchCase:=False)
+    On Error GoTo 0
+
+    lastContentRow = footerRow
+    If Not lastCell Is Nothing Then
+        If lastCell.Row > lastContentRow Then lastContentRow = lastCell.Row
+    End If
+    ws.Rows(footerRow & ":" & lastContentRow).Hidden = False
 End Sub
 
 Private Function IsEmptyItem(ByVal numberValue As Variant, ByVal descriptionText As String) As Boolean

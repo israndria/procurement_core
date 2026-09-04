@@ -33,3 +33,12 @@ def test_nego_layout_skips_duplicate_measurement_when_signature_is_unchanged():
     source = (ROOT / "modAutoLayoutNego.bas").read_text(encoding="utf-8")
     assert "If Not ForceRefresh Then" in source
     assert "If BuildLayoutSignature(ws) = mLastSignature Then GoTo CleanExit" in source
+
+
+def test_nego_layout_never_treats_total_and_signature_footer_as_item_rows():
+    for name in ("modBarisItem.bas", "modAutoLayoutNego.bas"):
+        source = (ROOT / name).read_text(encoding="utf-8")
+        assert "FindFooterRow" in source
+        assert "lastRow = footerRow - 1" in source
+        assert "EnsureFooterVisible" in source
+        assert "lastRow = firstRow + MAX_ITEMS - 1" not in source

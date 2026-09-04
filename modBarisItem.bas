@@ -34,6 +34,7 @@ Public Sub RefreshBarisItem(Optional ByVal ForceRefresh As Boolean = True)
     Set wsSource = ThisWorkbook.Worksheets(SOURCE_SHEET)
     Set wsOutput = ThisWorkbook.Worksheets(OUTPUT_SHEET)
     GetItemBounds wsOutput, firstItemRow, lastItemRow
+    If firstItemRow <= 0 Or lastItemRow < firstItemRow Then GoTo SafeExit
 
     For Each cell In wsSource.Range("A" & FIRST_SOURCE_ROW & ":A" & LAST_SOURCE_ROW).Cells
         value = cell.Value2
@@ -60,6 +61,9 @@ Public Sub RefreshBarisItem(Optional ByVal ForceRefresh As Boolean = True)
     Application.EnableEvents = False
     Application.ScreenUpdating = False
 
+    ' Footer Total/Dibulatkan/Terbilang/TTD bukan slot item. Pulihkan dulu
+    ' bila workbook pernah diproses modul lama yang menyembunyikannya.
+    EnsureFooterVisible wsOutput, lastItemRow + 1
     wsOutput.Rows(firstItemRow & ":" & lastItemRow).Hidden = False
     If outputLastRow < lastItemRow Then
         wsOutput.Rows((outputLastRow + 1) & ":" & lastItemRow).Hidden = True
@@ -81,6 +85,7 @@ End Sub
 Private Sub GetItemBounds(ByVal ws As Worksheet, ByRef firstRow As Long, ByRef lastRow As Long)
     Dim rowNumber As Long
     Dim formulaText As String
+    Dim footerRow As Long
 
     firstRow = 0
     For rowNumber = 1 To 100
@@ -99,7 +104,55 @@ Private Sub GetItemBounds(ByVal ws As Worksheet, ByRef firstRow As Long, ByRef l
             firstRow = 9
         End If
     End If
-    lastRow = firstRow + MAX_ITEMS - 1
+    footerRow = FindFooterRow(ws, firstRow)
+    If footerRow <= firstRow Then
+        ' Fail closed: tanpa marker Total, jangan sembunyikan baris apa pun.
+        firstRow = 0
+        lastRow = 0
+        Exit Sub
+    End If
+    lastRow = footerRow - 1
+End Sub
+
+Private Function FindFooterRow(ByVal ws As Worksheet, ByVal firstItemRow As Long) As Long
+    Dim rowNumber As Long
+    Dim cellValue As Variant
+    Dim finalProbeRow As Long
+
+    finalProbeRow = firstItemRow + MAX_ITEMS
+    If finalProbeRow > ws.Rows.Count Then finalProbeRow = ws.Rows.Count
+
+    For rowNumber = firstItemRow + 1 To finalProbeRow
+        cellValue = ws.Cells(rowNumber, "M").Value2
+        If Not IsError(cellValue) Then
+            If StrComp(Trim$(CStr(cellValue)), "Total", vbTextCompare) = 0 Then
+                FindFooterRow = rowNumber
+                Exit Function
+            End If
+        End If
+    Next rowNumber
+End Function
+
+Private Sub EnsureFooterVisible(ByVal ws As Worksheet, ByVal footerRow As Long)
+    Dim lastCell As Range
+    Dim lastContentRow As Long
+
+    On Error Resume Next
+    Set lastCell = ws.Range("A:R").Find( _
+        What:="*", _
+        After:=ws.Range("A1"), _
+        LookIn:=xlFormulas, _
+        LookAt:=xlPart, _
+        SearchOrder:=xlByRows, _
+        SearchDirection:=xlPrevious, _
+        MatchCase:=False)
+    On Error GoTo 0
+
+    lastContentRow = footerRow
+    If Not lastCell Is Nothing Then
+        If lastCell.Row > lastContentRow Then lastContentRow = lastCell.Row
+    End If
+    ws.Rows(footerRow & ":" & lastContentRow).Hidden = False
 End Sub
 
 Private Function IsValidItemValue(ByVal value As Variant) As Boolean
