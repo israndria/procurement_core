@@ -15,6 +15,14 @@ def test_pl_injector_includes_dynamic_nego_layout_modules_and_events():
     assert "terbilang(YEAR" in source
 
 
+def test_pl_injector_saves_xml_snapshot_on_ctrl_s_and_fails_closed():
+    source = (ROOT / "inject_pl.py").read_text(encoding="utf-8")
+    assert "Private Sub Workbook_BeforeSave" in source
+    assert "ModDraftPaketPL.SaveDataPL" in source
+    assert "Cancel = True" in source
+    assert "Penyimpanan dibatalkan: snapshot XML gagal dibuat." in source
+
+
 def test_pl_injector_layout_module_sources_are_validated_and_imported():
     source = (ROOT / "inject_pl.py").read_text(encoding="utf-8")
     assert 'layout_bas = SCRIPT_DIR / f"{layout_name}.bas"' in source

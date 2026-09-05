@@ -6,6 +6,7 @@ import pytest
 from pypdf import PdfReader, PdfWriter
 
 from gabung_ba_pljkk import (
+    _collect_attendance_pages,
     deteksi_file,
     ensure_plpk_provider_signature_copy,
     gabung,
@@ -35,6 +36,80 @@ def _text_pdf(path: Path, pages: list[str]):
 def _page_texts(path: Path) -> list[str]:
     reader = PdfReader(path)
     return [" ".join((page.extract_text() or "").split()) for page in reader.pages]
+
+
+def _make_system_ba_inputs(folder: Path):
+    summary = folder / "7. Berita Acara + Summary Non Tender"
+    summary.mkdir()
+    _text_pdf(summary / "5. BA Evaluasi Penawaran PL-demo.pdf", ["SYSTEM BA EVALUASI"])
+    _text_pdf(summary / "7. BA Hasil Non Tender PL-demo.pdf", ["SYSTEM BA HASIL"])
+
+
+def _attendance_page(copy_name: str, heading: str) -> str:
+    return (
+        f"{copy_name}\n{heading}\n"
+        "Hari/Tanggal/Bulan/Tahun\nTempat\nNama Tanda Tangan"
+    )
+
+
+def test_attendance_detector_ignores_cross_reference_text(tmp_path):
+    pdf = tmp_path / "BA_PLPK_MARKERS.pdf"
+    _text_pdf(
+        pdf,
+        [
+            "BA PEMBUKTIAN KUALIFIKASI5.1 DAFTAR HADIR PEMBUKTIAN KUALIFIKASI",
+            _attendance_page("TOP", "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"),
+            _attendance_page("TOP", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI TEKNIS DAN HARGA"),
+            _attendance_page("BOTTOM", "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"),
+            _attendance_page("BOTTOM", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI TEKNIS DAN HARGA"),
+        ],
+    )
+
+    assert _collect_attendance_pages(str(pdf)) == ([1, 3], [2, 4])
+
+
+def test_gabung_keeps_system_bas_only_in_upper_ppk_copy(tmp_path):
+    main = tmp_path / "BA_PLPK_MAIN.pdf"
+    _text_pdf(
+        main,
+        [
+            _attendance_page("TOP PEMBUKTIAN", "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"),
+            _attendance_page("TOP KLARIFIKASI", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"),
+            _attendance_page("BOTTOM PEMBUKTIAN", "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"),
+            _attendance_page("BOTTOM KLARIFIKASI", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"),
+        ],
+    )
+    _make_system_ba_inputs(tmp_path)
+
+    result = gabung(str(tmp_path), "PLPK")
+
+    assert result["ok"] is True
+    pages = _page_texts(Path(result["output"]))
+    assert pages[0] == "SYSTEM BA EVALUASI"
+    assert pages[1].startswith("TOP PEMBUKTIAN DAFTAR HADIR PEMBUKTIAN KUALIFIKASI")
+    assert pages[2].startswith("TOP KLARIFIKASI DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI")
+    assert pages[3] == "SYSTEM BA HASIL"
+    assert pages[4].startswith("BOTTOM PEMBUKTIAN DAFTAR HADIR PEMBUKTIAN KUALIFIKASI")
+    assert pages[5].startswith("BOTTOM KLARIFIKASI DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI")
+
+
+def test_gabung_fails_closed_when_two_copy_markers_are_ambiguous(tmp_path):
+    main = tmp_path / "BA_PLPK_MAIN.pdf"
+    _text_pdf(
+        main,
+        [
+            _attendance_page("TOP PEMBUKTIAN", "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"),
+            _attendance_page("TOP KLARIFIKASI", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"),
+            _attendance_page("BOTTOM PEMBUKTIAN", "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"),
+        ],
+    )
+    _make_system_ba_inputs(tmp_path)
+
+    result = gabung(str(tmp_path), "PLPK")
+
+    assert result["ok"] is False
+    assert "dua copy" in result["pesan"].lower()
+    assert not (tmp_path / "BA_PLPK_FULL_Gabungan_MAIN.pdf").exists()
 
 
 def test_deteksi_file_is_scoped_to_ba_type(tmp_path):

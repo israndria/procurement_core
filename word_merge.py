@@ -1608,40 +1608,211 @@ def _set_field_result(field, val):
     rng.Text = val
 
 
-def _replace_merge_fields(wdDoc, data):
-    """Replace semua MERGEFIELD di wdDoc dgn nilai dari data + apply format switch.
-    Field di-Unlink jadi teks statis. Loop backwards supaya index aman."""
-    field_count = wdDoc.Fields.Count
-    for i in range(field_count, 0, -1):
-        try:
-            field = wdDoc.Fields(i)
-            code_text = field.Code.Text.strip()
-            if code_text.upper().startswith("MERGEFIELD"):
-                parts = code_text.split()
-                if len(parts) >= 2:
-                    fname = parts[1].strip('"').strip()
-                    val = None
-                    if fname in data:
-                        val = data[fname]
-                    else:
-                        norm = normalize_field_name(fname)
-                        if norm in data:
-                            val = data[norm]
+def _iter_word_fields(wdDoc):
+    """Iterasi field pada body, header/footer, footnote, dan story Word lain.
 
-                    if val is not None:
-                        val = str(val)
-                        format_str = " ".join(parts[2:]).upper()
-                        if "UPPER" in format_str:
-                            val = val.upper()
-                        elif "LOWER" in format_str:
-                            val = val.lower()
-                        elif "FIRSTCAP" in format_str:
-                            val = val.capitalize()
-                    else:
-                        val = ""
-                    _set_field_result(field, val)
-        except:
+    ``Document.Fields`` tidak selalu mencakup field pada header/footer. Jalur
+    merge harus memeriksa semua story supaya mergefield yang tertinggal tidak
+    lolos hanya karena berada di bagian dokumen yang tidak terlihat pada body.
+    """
+    seen = set()
+
+    def emit(collection, story_key):
+        try:
+            count = int(collection.Count)
+        except Exception:
+            return
+        for index in range(count, 0, -1):
+            try:
+                field = collection(index)
+                code = str(field.Code.Text or "").strip()
+                try:
+                    start = int(field.Code.Start)
+                    end = int(field.Code.End)
+                except Exception:
+                    start = end = -1
+                key = (story_key, start, end, code)
+                if key in seen:
+                    continue
+                seen.add(key)
+                yield field
+            except Exception:
+                continue
+
+    yielded = False
+    try:
+        stories = wdDoc.StoryRanges
+        for story_index in range(1, int(stories.Count) + 1):
+            story = stories(story_index)
+            chain_index = 0
+            while story is not None:
+                story_key = (story_index, chain_index)
+                for field in emit(story.Fields, story_key):
+                    yielded = True
+                    yield field
+                chain_index += 1
+                try:
+                    story = story.NextStoryRange
+                except Exception:
+                    story = None
+    except Exception:
+        pass
+
+    # Fallback untuk mock/Word lama yang tidak mengekspos StoryRanges.
+    if not yielded:
+        try:
+            for field in emit(wdDoc.Fields, "document"):
+                yield field
+        except Exception:
             pass
+
+
+def _mergefield_name(code_text):
+    """Ambil nama field dari instruksi Word ``MERGEFIELD``."""
+    match = re.match(
+        r"(?is)^\s*MERGEFIELD\s+(?:\"([^\"]+)\"|(\S+))",
+        str(code_text or ""),
+    )
+    if not match:
+        return ""
+    return str(match.group(1) or match.group(2) or "").strip()
+
+
+def _resolve_merge_data(data, field_name):
+    """Resolve field exact/normalized/case-insensitive tanpa fallback kosong."""
+    if field_name in data:
+        return True, data[field_name]
+    normalized = normalize_field_name(field_name)
+    if normalized in data:
+        return True, data[normalized]
+    folded = str(field_name).casefold()
+    normalized_folded = str(normalized).casefold()
+    for key, value in data.items():
+        if str(key).casefold() in {folded, normalized_folded}:
+            return True, value
+    return False, None
+
+
+def _extract_mergefield_names_docx(docx_path):
+    """Baca nama MERGEFIELD dari semua XML Word tanpa membuka Word."""
+    import html
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    word_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    instruction_tags = {word_ns + "instrText", word_ns + "fldCode"}
+
+    def add_matches(text, names):
+        for match in re.finditer(
+            r"(?is)MERGEFIELD\s+(?:\"([^\"]+)\"|(\S+))", text or ""
+        ):
+            name = str(match.group(1) or match.group(2) or "").strip()
+            if name and name not in names:
+                names.append(name)
+
+    names = []
+    with zipfile.ZipFile(docx_path, "r") as archive:
+        for info in archive.infolist():
+            if not info.filename.startswith("word/") or not info.filename.endswith(".xml"):
+                continue
+            raw = archive.read(info)
+            try:
+                root = ET.fromstring(raw)
+            except ET.ParseError:
+                # Fallback hanya untuk template XML yang rusak ringan; Word
+                # tetap akan menolak template rusak pada tahap berikutnya.
+                add_matches(html.unescape(raw.decode("utf-8", errors="replace")), names)
+                continue
+
+            for node in root.iter():
+                if node.tag == word_ns + "fldSimple":
+                    for key, value in node.attrib.items():
+                        if key.rsplit("}", 1)[-1] == "instr":
+                            add_matches("".join(node.itertext()) or value, names)
+                            break
+                elif node.tag in instruction_tags:
+                    add_matches("".join(node.itertext()), names)
+
+            # Word kadang membagi instruksi menjadi beberapa w:instrText,
+            # misalnya ``MER`` + ``GEFIELD Nama``. Gabungkan instruksi dalam
+            # setiap paragraf agar preflight tidak salah mengira field hilang.
+            for paragraph in root.iter(word_ns + "p"):
+                parts = [
+                    "".join(node.itertext())
+                    for node in paragraph.iter()
+                    if node.tag in instruction_tags
+                ]
+                if parts:
+                    add_matches("".join(parts), names)
+    return names
+
+
+def validate_merge_source_fields(docx_path, data):
+    """Fail-closed bila template memiliki field tanpa kolom sumber."""
+    fields = _extract_mergefield_names_docx(docx_path)
+    missing = [name for name in fields if not _resolve_merge_data(data or {}, name)[0]]
+    if missing:
+        raise ValueError(
+            "Merge dibatalkan; field tidak memiliki sumber data: "
+            + ", ".join(missing[:20])
+        )
+    return fields
+
+
+def _replace_merge_fields(wdDoc, data):
+    """Replace semua MERGEFIELD dan gagal tertutup bila sumber/field bermasalah."""
+    unresolved = []
+    errors = []
+    replaced = 0
+    fields = list(_iter_word_fields(wdDoc))
+    for field in fields:
+        try:
+            code_text = field.Code.Text.strip()
+            if not code_text.upper().startswith("MERGEFIELD"):
+                continue
+            fname = _mergefield_name(code_text)
+            if not fname:
+                errors.append("MERGEFIELD tanpa nama")
+                continue
+            found, raw_value = _resolve_merge_data(data or {}, fname)
+            if not found:
+                unresolved.append(fname)
+                continue
+            val = "" if raw_value is None else str(raw_value)
+            format_str = code_text[code_text.upper().find(fname.upper()) + len(fname):].upper()
+            if "UPPER" in format_str:
+                val = val.upper()
+            elif "LOWER" in format_str:
+                val = val.lower()
+            elif "FIRSTCAP" in format_str:
+                val = val.capitalize()
+            _set_field_result(field, val)
+            replaced += 1
+        except Exception as exc:
+            errors.append(str(exc))
+
+    if unresolved or errors:
+        details = []
+        if unresolved:
+            details.append("sumber hilang: " + ", ".join(sorted(set(unresolved))[:20]))
+        if errors:
+            details.append("field error: " + "; ".join(errors[:5]))
+        raise RuntimeError("Mergefield gagal diproses; " + " | ".join(details))
+
+    remaining = []
+    for field in _iter_word_fields(wdDoc):
+        try:
+            code = str(field.Code.Text or "").strip()
+            if code.upper().startswith("MERGEFIELD"):
+                remaining.append(_mergefield_name(code) or code)
+        except Exception:
+            continue
+    if remaining:
+        raise RuntimeError(
+            "Merge dibatalkan; MERGEFIELD tersisa setelah replace: "
+            + ", ".join(sorted(set(remaining))[:20])
+        )
+    return {"replaced": replaced, "fields": len(fields)}
 
 
 def _toc_line_key(text):
@@ -2746,6 +2917,7 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
     # Jangan mulai proses jika workbook sumber sudah kehilangan nilai aktif.
     # Ini menjaga kegagalan tetap terlihat dan mencegah PDF kosong terbit.
     _validate_merge_source_data(data)
+    validate_merge_source_fields(word_path, data)
 
     # `merge_word()` juga dipanggil langsung oleh beberapa workflow, bukan
     # hanya melalui CLI yang kebetulan memiliki variabel global excel_path.
@@ -2947,6 +3119,8 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
                 show_print_success(_printer_name)
             wdDoc.Close(False)
         except Exception as e:
+            if mode.startswith("pdf"):
+                raise RuntimeError(f"Error cetak BA {jenis_ba}: {e}") from e
             show_error(f"Error cetak BA {jenis_ba}:\n{e}")
         finally:
             wdApp.Quit()
@@ -2994,6 +3168,7 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
     _deferred_pdf_success = None
     _permanent_saved = False
     _permanent_error = None
+    _headless_error = None
 
     try:
         wdApp = win32com.client.DispatchEx("Word.Application")
@@ -3361,7 +3536,9 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
                 wdApp.ScreenUpdating = True
                 wdApp.Visible = mode in ("buka", "print")
             except: pass
-        if _permanent_mode:
+        if mode.startswith("pdf"):
+            _headless_error = e
+        elif _permanent_mode:
             _permanent_error = e
         else:
             show_error(f"Error saat merge:\n{e}")
@@ -3402,8 +3579,15 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
             pass
         # Buka PDF setelah Word dan file Merged benar-benar selesai ditutup.
         if _deferred_pdf_success:
+            if not os.path.isfile(_deferred_pdf_success) or os.path.getsize(_deferred_pdf_success) <= 0:
+                raise RuntimeError(
+                    "Export PDF dilaporkan selesai tetapi output tidak terbentuk: "
+                    + str(_deferred_pdf_success)
+                )
             show_success(_deferred_pdf_success)
 
+    if _headless_error is not None:
+        raise RuntimeError(f"Merge headless gagal: {_headless_error}") from _headless_error
     if _permanent_error is not None:
         raise RuntimeError(f"Merge permanen gagal: {_permanent_error}") from _permanent_error
     if _permanent_saved:

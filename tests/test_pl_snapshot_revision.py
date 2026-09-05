@@ -289,7 +289,14 @@ def test_vba_save_keeps_first_baseline_and_load_rejects_empty_code():
     assert 'SnapshotFilePathPL(SNAPSHOT_FILE_PL, False)' in source
     assert 'Backward compatibility: snapshot root lama tetap dapat dibaca.' in source
     assert "If Not fso.FileExists(baselinePath) Then" in source
-    assert '"Load dibatalkan: kode paket snapshot/workbook kosong."' in source
+    assert '"Load dibatalkan: kode paket snapshot kosong."' in source
     assert "NextSnapshotBackupPathPL(snapshotPath)" in source
     assert "pulihkan current lama" in source
     assert '"Field read-only berubah: " & address' in source
+
+
+def test_load_data_pl_keeps_strict_guard_and_explicit_template_migration():
+    source = (Path(__file__).parents[1] / "ModDraftPaketPL.bas").read_text(encoding="utf-8")
+    assert "Public Sub LoadDataPL(Optional ByVal allowTemplateMigration As Boolean = False)" in source
+    assert "snapshotCode <> currentCode And Not allowTemplateMigration" in source
+    assert "kode paket workbook kosong. Gunakan mode migrasi template terverifikasi." in source

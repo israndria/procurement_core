@@ -11,9 +11,10 @@ Logic:
    - Teks "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI" (occurrence ke-1 & ke-2) -> page index q1 dan q2
 3. Gabungkan halaman menggunakan pypdf tanpa menghapus BA utama:
    - Pertahankan blok BA Pembuktian Kualifikasi tervalidasi.
-   - Sisipkan BA Evaluasi sebelum daftar hadir pembuktian occurrence ke-2.
+   - Untuk PLPK, sisipkan BA Evaluasi dan BA Hasil hanya ke copy atas
+     (dokumen yang diserahkan ke PPK); copy bawah tetap menjadi arsip internal.
    - Duplikasi halaman akhir BA Klarifikasi sebelum sheet 7.2.
-   - Sisipkan BA Hasil setelah daftar hadir klarifikasi occurrence ke-1.
+   - Untuk PLJKK, pertahankan aturan legacy yang sudah ada.
 4. Output ke root paket: "BA_{jenis}_FULL_Gabungan_{kode}.pdf"
 
 Usage:
@@ -112,18 +113,8 @@ def cari_halaman_sisipan(pdf_path: str) -> tuple:
     Returns: (p1, p2, q1, q2)
     """
     p1 = p2 = q1 = q2 = None
-    p_indices = []
-    q_indices = []
-    
     try:
-        with pdfplumber.open(pdf_path) as pdf:
-            for idx, page in enumerate(pdf.pages):
-                text = page.extract_text() or ""
-                if "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI" in text:
-                    p_indices.append(idx)
-                if "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI" in text:
-                    q_indices.append(idx)
-                    
+        p_indices, q_indices = _collect_attendance_pages(pdf_path)
         if len(p_indices) >= 2:
             p1, p2 = p_indices[0], p_indices[1]
         elif len(p_indices) == 1:
@@ -137,6 +128,68 @@ def cari_halaman_sisipan(pdf_path: str) -> tuple:
     except Exception as e:
         print(f"[WARN] Gagal membaca teks PDF: {e}")
         
+    return p1, p2, q1, q2
+
+
+def _collect_attendance_pages(pdf_path: str) -> tuple[list[int], list[int]]:
+    """Kumpulkan halaman daftar hadir yang benar-benar berupa lembar hadir.
+
+    Jangan memakai substring global saja: halaman BA Pembuktian dapat memuat
+    referensi teks ``5.1 DAFTAR HADIR ...`` di bagian bawah. Heading harus
+    muncul sebagai awal sebuah baris dan halaman wajib memiliki field khas
+    lembar hadir agar referensi silang tidak dihitung sebagai copy baru.
+    """
+    p_indices = []
+    q_indices = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for idx, page in enumerate(pdf.pages):
+            text = page.extract_text() or ""
+            lines = [re.sub(r"\s+", " ", line).strip().upper() for line in text.splitlines()]
+            has_attendance_fields = (
+                any("HARI/TANGGAL/BULAN/TAHUN" in line for line in lines)
+                and any("TEMPAT" in line for line in lines)
+                and any("TANDA TANGAN" in line for line in lines)
+            )
+            if not has_attendance_fields:
+                continue
+            if any(
+                line == "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"
+                or line.startswith("DAFTAR HADIR PEMBUKTIAN KUALIFIKASI ")
+                for line in lines
+            ):
+                p_indices.append(idx)
+            if any(
+                line == "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"
+                or line.startswith("DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI ")
+                for line in lines
+            ):
+                q_indices.append(idx)
+    return p_indices, q_indices
+
+
+def _resolve_plpk_copy_anchors(pdf_path: str) -> tuple[int, int, int, int]:
+    """Validasi dua copy PLPK dan kembalikan p1, p2, q1, q2.
+
+    Copy atas/PPK harus tampil lebih dulu dan lengkap sebelum copy bawah/arsip:
+    p1 (pembuktian atas) < q1 (klarifikasi atas) <
+    p2 (pembuktian bawah) < q2 (klarifikasi bawah).
+    Struktur lain ditolak agar BA sistem tidak tersisip ke arsip atau halaman
+    yang salah.
+    """
+    p_indices, q_indices = _collect_attendance_pages(pdf_path)
+    if len(p_indices) != 2 or len(q_indices) != 2:
+        raise ValueError(
+            "harus menemukan tepat dua copy daftar hadir "
+            f"(pembuktian={len(p_indices)}, klarifikasi={len(q_indices)})"
+        )
+
+    p1, p2 = p_indices
+    q1, q2 = q_indices
+    if not (p1 < q1 < p2 < q2):
+        raise ValueError(
+            "urutan copy tidak valid; expected pembuktian-atas, "
+            "klarifikasi-atas, pembuktian-arsip, klarifikasi-arsip"
+        )
     return p1, p2, q1, q2
 
 
@@ -270,8 +323,21 @@ def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
         n_utama = len(rdr_utama.pages)
         rdr_pembuktian = None
         
-        # Cari penanda halaman
-        p1, p2, q1, q2 = cari_halaman_sisipan(ba_utama)
+        # Cari penanda halaman. Untuk PLPK, BA sistem hanya boleh masuk ke
+        # copy atas/PPK; validasi ketat mencegah layout baru salah dipetakan.
+        strict_plpk_copy = jenis == "PLPK" and bool(ba_eval or ba_hasil)
+        if strict_plpk_copy:
+            try:
+                p1, p2, q1, q2 = _resolve_plpk_copy_anchors(ba_utama)
+            except ValueError as exc:
+                return {
+                    'ok': False,
+                    'output': '',
+                    'pesan': f"Struktur dua copy BA PLPK tidak valid: {exc}",
+                    'warning': None,
+                }
+        else:
+            p1, p2, q1, q2 = cari_halaman_sisipan(ba_utama)
 
         # Blok pembuktian dapat berasal dari BA tervalidasi sebelumnya, hanya
         # jika anchor-nya sama persis dengan BA utama terbaru.
@@ -282,10 +348,9 @@ def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
                 if len(candidate.pages) > p2:
                     rdr_pembuktian = candidate
         
-        # Dokumen final mempertahankan seluruh BA utama. Summary hanya disisipkan:
-        # - Evaluasi sebelum daftar hadir pembuktian occurrence ke-2;
-        # - Hasil setelah daftar hadir klarifikasi occurrence ke-1.
-        # Dua halaman tidak boleh menggantikan blok BA utama.
+        # Dokumen final mempertahankan seluruh BA utama. Untuk PLPK, summary
+        # hanya disisipkan ke copy atas/PPK. Dua halaman tidak menggantikan
+        # blok BA utama dan copy bawah tidak menerima BA sistem.
         if ba_eval and (p1 is None or p2 is None):
             warning_msgs.append("Penanda 'DAFTAR HADIR PEMBUKTIAN KUALIFIKASI' tidak lengkap, skip sisipan evaluasi.")
             ba_eval = None
@@ -311,7 +376,7 @@ def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
         insert_before = {}
         insert_after = {}
         if ba_eval:
-            insert_before[p2] = ba_eval
+            insert_before[p1 if strict_plpk_copy else p2] = ba_eval
         if ba_hasil:
             insert_after[q1] = ba_hasil
 

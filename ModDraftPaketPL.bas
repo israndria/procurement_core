@@ -2169,7 +2169,7 @@ Private Function NextSnapshotBackupPathPL(ByVal snapshotPath As String) As Strin
     NextSnapshotBackupPathPL = candidate
 End Function
 
-Public Sub LoadDataPL()
+Public Sub LoadDataPL(Optional ByVal allowTemplateMigration As Boolean = False)
     Dim wsMD As Worksheet
     Dim snapshotPath As String
     Dim dom As Object
@@ -2235,14 +2235,21 @@ Public Sub LoadDataPL()
 
     snapshotCode = Trim$(CStr(root.getAttribute("kode_paket")))
     currentCode = Trim$(CStr(wsMD.Cells(PLR_KODE_PAKET, 3).Value))
-    If snapshotCode = "" Or currentCode = "" Then
+    If snapshotCode = "" Then
         If m_SilentMode Then Err.Raise vbObjectError + 2111, "LoadDataPL", _
-            "Load dibatalkan: kode paket snapshot/workbook kosong."
-        If Not m_SilentMode Then MsgBox "Load dibatalkan: kode paket snapshot/workbook kosong.", _
+            "Load dibatalkan: kode paket snapshot kosong."
+        If Not m_SilentMode Then MsgBox "Load dibatalkan: kode paket snapshot kosong.", _
                vbExclamation, "Load Data"
         Exit Sub
     End If
-    If snapshotCode <> "" And currentCode <> "" And snapshotCode <> currentCode Then
+    If currentCode = "" And Not allowTemplateMigration Then
+        If m_SilentMode Then Err.Raise vbObjectError + 2111, "LoadDataPL", _
+            "Load dibatalkan: kode paket workbook kosong. Gunakan mode migrasi template terverifikasi."
+        If Not m_SilentMode Then MsgBox "Load dibatalkan: kode paket workbook kosong." & _
+               vbCrLf & "Gunakan mode migrasi template terverifikasi.", vbExclamation, "Load Data"
+        Exit Sub
+    End If
+    If currentCode <> "" And snapshotCode <> currentCode And Not allowTemplateMigration Then
         If Not m_SilentMode Then MsgBox "Snapshot milik kode paket " & snapshotCode & ", bukan " & currentCode & "." & _
                vbCrLf & "Load dibatalkan agar data tidak tertukar.", vbExclamation, "Load Data"
         Exit Sub
@@ -2269,7 +2276,11 @@ Public Sub LoadDataPL()
                 Err.Raise vbObjectError + 2114, "LoadDataPL", "Alamat snapshot tidak diizinkan: " & address
             End If
         Else
-            If IsSnapshotReadOnlyAddressPL(address, workbookFamily, wsMD) Then
+            ' Mode migrasi template memang harus memindahkan field read-only
+            ' dari snapshot resmi (termasuk F2 kode unik) ke donor baru.
+            ' Guard read-only tetap berlaku pada mode normal agar snapshot
+            ' tidak mengubah field manual/formula yang sudah dikunci.
+            If Not allowTemplateMigration And IsSnapshotReadOnlyAddressPL(address, workbookFamily, wsMD) Then
                 If Not SnapshotNodeMatchesCurrentPL(wsMD.Range(address), node) Then
                     Err.Raise vbObjectError + 2115, "LoadDataPL", "Field read-only berubah: " & address
                 End If
@@ -2284,10 +2295,12 @@ Public Sub LoadDataPL()
             applied = applied + 1
         End If
     Next node
-    Application.EnableEvents = True
-
+    ' Pertahankan event mati sampai Save selesai. Jika event dinyalakan
+    ' sebelum ThisWorkbook.Save, Workbook_BeforeSave akan memanggil
+    ' SaveDataPL lagi dan membuat loop pada loader headless.
     wsMD.Calculate
     ThisWorkbook.Save
+    Application.EnableEvents = True
     If Not m_SilentMode Then MsgBox applied & " sel berhasil dimuat dari snapshot." & vbCrLf & snapshotPath, _
            vbInformation, "Load Data"
     Exit Sub
