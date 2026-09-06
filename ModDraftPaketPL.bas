@@ -853,11 +853,14 @@ Public Sub MuatPenawaranPL()
     ' Format: [{"peserta_id":...},{"peserta_id":...}]
     ' Tulis baris header + data per peserta
 
-    ' Hapus konten lama (baris 2 ke bawah, biarkan baris 1 header)
+    ' Hapus isi lama tanpa menghapus baris.
+    ' Formula 7.2 Dengan Nego!L merujuk ke range 6. Penawaran!A/E;
+    ' Rows.Delete membuat Excel mengubah referensi lintas-sheet menjadi #REF!.
+    ' ClearContents mempertahankan struktur baris dan referensi formula.
     Dim lastRow As Long
     lastRow = wsPen.Cells(wsPen.Rows.Count, 1).End(xlUp).Row
     If lastRow > 1 Then
-        wsPen.Rows("2:" & lastRow).Delete
+        wsPen.Range("A2:I" & lastRow).ClearContents
     End If
 
     ' Parse peserta array manual — ekstrak tiap blok peserta
@@ -1648,6 +1651,45 @@ Private Function KodeBAOutputPL() As String
 End Function
 
 
+Public Sub RefreshDerivedPL()
+    ' Recalculate only the PL dependency chain. The workbook deliberately
+    ' uses Manual calculation for speed and UDF safety, so dependent cached
+    ' values do not refresh automatically after a COM/import or a user edit.
+    ' Order is critical: 7.2 totals must be current before @ Evaluasi and
+    ' mail-merge sheets read them.
+    Static isRefreshing As Boolean
+    Dim oldEvents As Boolean
+    Dim sheetName As Variant
+    Dim ws As Worksheet
+
+    If isRefreshing Then Exit Sub
+    isRefreshing = True
+    On Error GoTo CleanFail
+    oldEvents = Application.EnableEvents
+    Application.EnableEvents = False
+
+    For Each sheetName In Array("5. HPS", "6. Penawaran", "6. Harga Penawaran", _
+                               "7.2 Dengan Nego", "@ Evaluasi", "satu_data", _
+                               "list_reviu", "list_dokpil")
+        Set ws = Nothing
+        On Error Resume Next
+        Set ws = ThisWorkbook.Worksheets(CStr(sheetName))
+        On Error GoTo CleanFail
+        If Not ws Is Nothing Then ws.Calculate
+    Next sheetName
+
+CleanExit:
+    On Error Resume Next
+    Application.EnableEvents = oldEvents
+    isRefreshing = False
+    On Error GoTo 0
+    Exit Sub
+
+CleanFail:
+    Resume CleanExit
+End Sub
+
+
 Private Function PrepareWorkbookForMailMerge() As Boolean
     ' Mail merge membaca cached value workbook secara read-only. Hitung hanya
     ' sheet yang menjadi sumber BA; CalculateFullRebuild sangat lambat dan
@@ -1675,11 +1717,11 @@ Private Function PrepareWorkbookForMailMerge() As Boolean
     ' kalkulasi. Layout dipanggil sekali secara eksplisit di bawah.
     Application.EnableEvents = False
 
-    ' Urutan mengikuti dependensi: sumber identitas/HPS -> penawaran/nego ->
-    ' sheet mail-merge. Sheet yang tidak ada pada varian lama dilewati.
-    For Each sheetName In Array("@ Master Data", "@ Evaluasi", "5. HPS", _
+    ' Urutan mengikuti dependensi: sumber HPS/penawaran -> nego -> evaluasi
+    ' -> sheet mail-merge. Sheet yang tidak ada pada varian lama dilewati.
+    For Each sheetName In Array("@ Master Data", "5. HPS", "6. Penawaran", _
                                 "6. Harga Penawaran", "7.2 Dengan Nego", _
-                                "satu_data", "list_reviu", "list_dokpil")
+                                "@ Evaluasi", "satu_data", "list_reviu", "list_dokpil")
         Set ws = Nothing
         On Error Resume Next
         Set ws = ThisWorkbook.Worksheets(CStr(sheetName))

@@ -4,7 +4,9 @@ import pytest
 
 from inject_pl import (
     MOD_NAME,
+    NEGO_EVENT_CODE,
     PLPK_BUTTON_GEOMETRY,
+    WORKBOOK_OPEN_DATE_CODE,
     _is_backup_workbook_path,
     _validate_vba_source,
     find_bapljkk_files,
@@ -18,6 +20,9 @@ def test_snapshot_buttons_use_requested_labels_and_current_macros():
     assert '"Load Data", "LoadDataPL"' in source
     assert '"Save Input Data"' not in source
     assert '"Load Input Data"' not in source
+    assert '"btnCetakTimpangPL"' in source
+    assert '"PrintPembuktianTimpangPDF"' in source
+    assert "btnCetakTimpangPL" in PLPK_BUTTON_GEOMETRY
 
 
 def test_default_discovery_includes_jkk_and_pk_and_skips_backups(tmp_path):
@@ -102,7 +107,7 @@ def test_ba_print_aborts_if_recalculation_or_save_fails():
     assert "Private Function PrepareWorkbookForMailMerge() As Boolean" in source
     assert "Application.CalculateFullRebuild" not in source
     assert "Application.CalculateBeforeSave = False" in source
-    assert 'Array("@ Master Data", "@ Evaluasi", "5. HPS"' in source
+    assert 'Array("@ Master Data", "5. HPS", "6. Penawaran"' in source
     assert "If Not PrepareWorkbookForMailMerge() Then Exit Sub" in source
     assert "ThisWorkbook.ReadOnly" in source
 
@@ -116,3 +121,18 @@ def test_injector_never_recalculates_formula_cache_during_structural_injection()
     assert "excel.Calculation = XL_CALCULATION_MANUAL" in source
     assert "excel.CalculateBeforeSave = True" not in source
     assert "excel.CalculateFullRebuild()" not in source
+
+
+def test_nego_event_recalculates_dependent_values_in_manual_mode():
+    assert 'Set changed = Intersect(Target, Me.Range("J8:M26"))' in NEGO_EVENT_CODE
+    assert 'Me.Range("M8:T29").Calculate' in NEGO_EVENT_CODE
+    assert "Private Sub Worksheet_Activate()" in NEGO_EVENT_CODE
+
+
+def test_refresh_chain_is_scoped_and_dependency_ordered():
+    source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
+    assert "Public Sub RefreshDerivedPL()" in source
+    assert '"7.2 Dengan Nego", "@ Evaluasi", "satu_data"' in source
+    assert '"6. Penawaran", _' in source
+    assert "Application.CalculateFullRebuild" not in source
+    assert "ModDraftPaketPL.RefreshDerivedPL" in WORKBOOK_OPEN_DATE_CODE

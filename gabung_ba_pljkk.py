@@ -13,7 +13,8 @@ Logic:
    - Pertahankan blok BA Pembuktian Kualifikasi tervalidasi.
    - Untuk PLPK, sisipkan BA Evaluasi dan BA Hasil hanya ke copy atas
      (dokumen yang diserahkan ke PPK); copy bawah tetap menjadi arsip internal.
-   - Duplikasi halaman akhir BA Klarifikasi sebelum sheet 7.2.
+    - Pertahankan dua copy tanda tangan BA Klarifikasi; BA Timpang juga
+      menggandakan halaman tanda tangan sebelum sisipan sheet.
    - Untuk PLJKK, pertahankan aturan legacy yang sudah ada.
 4. Output ke root paket: "BA_{jenis}_FULL_Gabungan_{kode}.pdf"
 
@@ -45,7 +46,11 @@ def _is_generated_merged_output(path: str, jenis: str) -> bool:
     return filename.upper().startswith(prefix.upper() + MERGED_OUTPUT_MARKER.upper())
 
 
-def deteksi_file(folder_paket: str, jenis: str = "PLJKK") -> dict:
+def deteksi_file(
+    folder_paket: str,
+    jenis: str = "PLJKK",
+    ba_utama_override: str | None = None,
+) -> dict:
     """Deteksi file-file input di root folder_paket."""
     jenis = _normalize_jenis(jenis)
     prefix = f"BA_{jenis}_"
@@ -58,23 +63,32 @@ def deteksi_file(folder_paket: str, jenis: str = "PLJKK") -> dict:
         'err': None
     }
     
-    # 1. BA Utama sesuai konteks workflow (PLJKK atau PLPK).
-    ba_utama_pattern = os.path.join(folder_paket, f"{prefix}*.pdf")
-    ba_utama_files = [
-        path for path in glob.glob(ba_utama_pattern)
-        if not _is_generated_merged_output(path, jenis)
-    ]
-    if not ba_utama_files:
-        res['err'] = f"File {prefix}*.pdf tidak ditemukan di root folder paket."
-        return res
-    
-    # Pilih yang terbaru jika ada lebih dari 1
-    ba_utama_files_sorted = sorted(ba_utama_files, key=os.path.getmtime, reverse=True)
-    res['ba_utama'] = ba_utama_files_sorted[0]
-    # Jika ada BA sebelumnya, gunakan blok Pembuktian Kualifikasi tervalidasi
-    # dari file itu. Ekspor Word terbaru tetap menjadi sumber halaman lainnya.
-    if len(ba_utama_files_sorted) > 1:
-        res['ba_pembuktian'] = ba_utama_files_sorted[1]
+    # 1. BA Utama sesuai konteks workflow (PLJKK atau PLPK). Workflow
+    # Timpang memakai nama file khusus, jadi caller boleh memberikan PDF dasar
+    # yang baru saja diekspor. Jalur normal tetap fail-closed terhadap backup.
+    if ba_utama_override:
+        override = os.path.abspath(os.path.normpath(os.fspath(ba_utama_override)))
+        if not os.path.isfile(override):
+            res['err'] = f"PDF BA utama override tidak ditemukan: {override}"
+            return res
+        res['ba_utama'] = override
+    else:
+        ba_utama_pattern = os.path.join(folder_paket, f"{prefix}*.pdf")
+        ba_utama_files = [
+            path for path in glob.glob(ba_utama_pattern)
+            if not _is_generated_merged_output(path, jenis)
+        ]
+        if not ba_utama_files:
+            res['err'] = f"File {prefix}*.pdf tidak ditemukan di root folder paket."
+            return res
+
+        # Pilih yang terbaru jika ada lebih dari 1
+        ba_utama_files_sorted = sorted(ba_utama_files, key=os.path.getmtime, reverse=True)
+        res['ba_utama'] = ba_utama_files_sorted[0]
+        # Jika ada BA sebelumnya, gunakan blok Pembuktian Kualifikasi tervalidasi
+        # dari file itu. Ekspor Word terbaru tetap menjadi sumber halaman lainnya.
+        if len(ba_utama_files_sorted) > 1:
+            res['ba_pembuktian'] = ba_utama_files_sorted[1]
     
     # Ekstrak kode dari nama file (BA_{jenis}_{kode}.pdf)
     base_name = os.path.basename(res['ba_utama'])
@@ -220,6 +234,35 @@ def cari_halaman_ttd_penyedia(pdf_path: str) -> list[int]:
     return indices
 
 
+def cari_halaman_ttd_timpang(pdf_path: str) -> list[int]:
+    """Cari halaman tanda tangan BA Timpang dari urutan dokumen aktual."""
+    pages = []
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                pages.append(re.sub(r"\s+", " ", page.extract_text() or "").upper())
+    except Exception as exc:
+        raise RuntimeError(f"Gagal mendeteksi halaman tanda tangan BA Timpang: {exc}") from exc
+
+    indices = []
+    attendance_marker = "DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG"
+    for index, text in enumerate(pages):
+        if attendance_marker not in text or index == 0:
+            continue
+        previous = pages[index - 1]
+        has_provider_label = bool(re.search(r"DIREKTUR\s*/\s*PIMPINAN", previous))
+        has_official_label = "PEJABAT PENGADAAN" in previous
+        if has_provider_label and has_official_label:
+            candidate = index - 1
+            # Idempotensi: setelah signature diduplikasi, attendance berada
+            # setelah dua halaman signature yang identik. Pilih halaman pertama
+            # agar pengecekan existing-copy mengenali kondisi sudah selesai.
+            if candidate > 0 and pages[candidate] == pages[candidate - 1]:
+                candidate -= 1
+            indices.append(candidate)
+    return list(dict.fromkeys(indices))
+
+
 def _page_text(page) -> str:
     try:
         return re.sub(r"\s+", " ", page.extract_text() or "").strip()
@@ -281,9 +324,48 @@ def ensure_plpk_provider_signature_copy(pdf_path: str) -> bool:
     return True
 
 
-def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
+def ensure_plpk_timpang_signature_copy(pdf_path: str) -> bool:
+    """Pastikan halaman tanda tangan BA Timpang muncul dua kali berurutan."""
+    reader = PdfReader(pdf_path)
+    signature_pages = cari_halaman_ttd_timpang(pdf_path)
+    if not signature_pages:
+        raise RuntimeError(
+            "Halaman tanda tangan BA Timpang tidak terdeteksi; PDF tidak diubah."
+        )
+    target = signature_pages[0]
+    if target + 1 < len(reader.pages) and _pages_equivalent(
+        reader.pages[target], reader.pages[target + 1]
+    ):
+        return False
+
+    writer = PdfWriter()
+    for index, page in enumerate(reader.pages):
+        writer.add_page(page)
+        if index == target:
+            writer.add_page(page)
+
+    temporary = f"{pdf_path}.timpang-signature-copy.tmp"
+    try:
+        with open(temporary, "wb") as output:
+            writer.write(output)
+        os.replace(temporary, pdf_path)
+    finally:
+        try:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+        except OSError:
+            pass
+    return True
+
+
+def gabung(
+    folder_paket: str,
+    jenis: str = "PLJKK",
+    ba_utama_override: str | None = None,
+    output_filename: str | None = None,
+) -> dict:
     jenis = _normalize_jenis(jenis)
-    files = deteksi_file(folder_paket, jenis)
+    files = deteksi_file(folder_paket, jenis, ba_utama_override=ba_utama_override)
     if files['err']:
         return {'ok': False, 'output': '', 'pesan': files['err'], 'warning': None}
         
@@ -295,7 +377,7 @@ def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
     
     # Output final sengaja berada di root paket agar mudah ditemukan dan tidak
     # tercampur dengan BA evaluasi/hasil yang menjadi bahan sisipan.
-    output_filename = f"BA_{jenis}{MERGED_OUTPUT_MARKER}{kode}.pdf"
+    output_filename = output_filename or f"BA_{jenis}{MERGED_OUTPUT_MARKER}{kode}.pdf"
     output_path = os.path.join(folder_paket, output_filename)
 
     # Tanpa BA evaluasi/hasil dan tanpa BA lama, tidak ada halaman yang perlu
@@ -428,6 +510,43 @@ def gabung(folder_paket: str, jenis: str = "PLJKK") -> dict:
         
     except Exception as e:
         return {'ok': False, 'output': '', 'pesan': f"Gagal menggabungkan PDF: {e}", 'warning': None}
+
+
+def gabung_timpang(folder_paket: str, ba_utama_path: str, output_path: str) -> dict:
+    """Buat copy FULL/Gabungan untuk PDF dasar BA Timpang.
+
+    PDF dasar Timpang selalu dibuat oleh ``word_merge``. Fungsi ini hanya
+    membuat output kedua bila BA Evaluasi atau BA Hasil sistem tersedia di
+    subfolder standar; tanpa sumber itu, output gabungan dilewati.
+    """
+    folder = os.path.abspath(os.path.normpath(os.fspath(folder_paket)))
+    base_pdf = os.path.abspath(os.path.normpath(os.fspath(ba_utama_path)))
+    full_pdf = os.path.abspath(os.path.normpath(os.fspath(output_path)))
+    if os.path.dirname(full_pdf).casefold() != folder.casefold():
+        return {
+            'ok': False,
+            'output': '',
+            'pesan': 'Output FULL/Gabungan Timpang harus berada di root folder paket.',
+            'warning': None,
+        }
+
+    files = deteksi_file(folder, "PLPK", ba_utama_override=base_pdf)
+    if files['err']:
+        return {'ok': False, 'output': '', 'pesan': files['err'], 'warning': None}
+    if not files['ba_eval'] and not files['ba_hasil']:
+        return {
+            'ok': True,
+            'output': '',
+            'pesan': 'BA sistem tidak ditemukan; output FULL/Gabungan dilewati.',
+            'warning': None,
+        }
+
+    return gabung(
+        folder,
+        "PLPK",
+        ba_utama_override=base_pdf,
+        output_filename=os.path.basename(full_pdf),
+    )
 
 
 def main():

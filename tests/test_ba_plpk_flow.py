@@ -7,12 +7,20 @@ from pypdf import PdfReader, PdfWriter
 
 from gabung_ba_pljkk import (
     _collect_attendance_pages,
+    cari_halaman_ttd_timpang,
     deteksi_file,
     ensure_plpk_provider_signature_copy,
+    ensure_plpk_timpang_signature_copy,
+    gabung_timpang,
     gabung,
 )
 from document_profiles import inject_header_profile
-from word_merge import _find_active_xlsm, _patch_plpk_layout_xml, _resolve_ba_kind
+from word_merge import (
+    _find_active_xlsm,
+    _patch_plpk_layout_xml,
+    _resolve_ba_kind,
+    _stitch_excel_at_anchor,
+)
 
 
 def _blank_pdf(path: Path):
@@ -136,6 +144,52 @@ def test_gabung_plpk_writes_full_output_to_package_root(tmp_path):
     assert Path(result["output"]).read_bytes() == (tmp_path / "BA_PLPK_GPR_P.Bng.pdf").read_bytes()
 
 
+def test_gabung_timpang_creates_full_only_when_system_ba_exists(tmp_path):
+    base = tmp_path / "BA_Pembuktian_Timpang_DEMO.pdf"
+    _text_pdf(
+        base,
+        [
+            _attendance_page("TOP PEMBUKTIAN", "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"),
+            _attendance_page("TOP KLARIFIKASI", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"),
+            _attendance_page("BOTTOM PEMBUKTIAN", "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"),
+            _attendance_page("BOTTOM KLARIFIKASI", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"),
+        ],
+    )
+    _make_system_ba_inputs(tmp_path)
+    full = tmp_path / "BA_Pembuktian_Timpang_FULL_Gabungan_DEMO.pdf"
+
+    result = gabung_timpang(str(tmp_path), str(base), str(full))
+
+    assert result["ok"] is True
+    assert Path(result["output"]) == full
+    assert full.exists()
+    assert _page_texts(base)[0].startswith("TOP PEMBUKTIAN")
+    assert _page_texts(full)[0] == "SYSTEM BA EVALUASI"
+    assert _page_texts(full)[3] == "SYSTEM BA HASIL"
+    assert _page_texts(full)[4].startswith("BOTTOM PEMBUKTIAN")
+
+
+def test_gabung_timpang_skips_full_without_system_ba(tmp_path):
+    base = tmp_path / "BA_Pembuktian_Timpang_DEMO.pdf"
+    _text_pdf(
+        base,
+        [
+            _attendance_page("TOP PEMBUKTIAN", "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"),
+            _attendance_page("TOP KLARIFIKASI", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"),
+            _attendance_page("BOTTOM PEMBUKTIAN", "DAFTAR HADIR PEMBUKTIAN KUALIFIKASI"),
+            _attendance_page("BOTTOM KLARIFIKASI", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"),
+        ],
+    )
+    full = tmp_path / "BA_Pembuktian_Timpang_FULL_Gabungan_DEMO.pdf"
+
+    result = gabung_timpang(str(tmp_path), str(base), str(full))
+
+    assert result["ok"] is True
+    assert result["output"] == ""
+    assert not full.exists()
+    assert base.exists()
+
+
 def test_deteksi_file_ignores_previous_full_output(tmp_path):
     _blank_pdf(tmp_path / "BA_PLJKK_CURRENT.pdf")
     _blank_pdf(tmp_path / "BA_PLJKK_FULL_Gabungan_CURRENT.pdf")
@@ -169,6 +223,84 @@ def test_plpk_signature_copy_is_dynamic_and_idempotent(tmp_path):
     ]
     assert ensure_plpk_provider_signature_copy(str(pdf)) is False
     assert len(PdfReader(pdf).pages) == 4
+
+
+def test_plpk_timpang_signature_copy_is_dynamic_and_idempotent(tmp_path):
+    pdf = tmp_path / "BA_Pembuktian_Timpang_DYNAMIC.pdf"
+    _text_pdf(
+        pdf,
+        [
+            "BERITA ACARA KLARIFIKASI HARGA SATUAN TIMPANG",
+            "Pejabat Pengadaan pada Dinas\nDIREKTUR/PIMPINAN\nCV CONTOH",
+            "DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG",
+        ],
+    )
+
+    assert cari_halaman_ttd_timpang(str(pdf)) == [1]
+    assert ensure_plpk_timpang_signature_copy(str(pdf)) is True
+    assert _page_texts(pdf) == [
+        "BERITA ACARA KLARIFIKASI HARGA SATUAN TIMPANG",
+        "Pejabat Pengadaan pada Dinas DIREKTUR/PIMPINAN CV CONTOH",
+        "Pejabat Pengadaan pada Dinas DIREKTUR/PIMPINAN CV CONTOH",
+        "DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG",
+    ]
+    assert ensure_plpk_timpang_signature_copy(str(pdf)) is False
+
+
+def test_stitch_supports_anchor_aliases_and_before_placement(tmp_path):
+    word = tmp_path / "word.pdf"
+    nego = tmp_path / "nego.pdf"
+    harga = tmp_path / "harga.pdf"
+    after_nego = tmp_path / "after-nego.pdf"
+    final = tmp_path / "final.pdf"
+    _text_pdf(
+        word,
+        [
+            "BA BODY",
+            "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI TEKNIS DAN HARGA",
+            "BA NEGO ARSIP",
+            "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI TEKNIS DAN HARGA",
+            "BA TIMPANG BODY",
+            "DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG",
+            "BA TIMPANG ARSIP",
+            "DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG",
+        ],
+    )
+    _text_pdf(nego, ["SHEET 7.2 DENGAN NEGO"])
+    _text_pdf(harga, ["SHEET HARGA TIMPANG"])
+
+    _stitch_excel_at_anchor(
+        word,
+        [
+            (("DAFTAR HADIR NEGOSIASI KUANTITAS DAN HARGA", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"), nego),
+            (("DAFTAR HADIR NEGOSIASI KUANTITAS DAN HARGA", "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI"), nego),
+        ],
+        str(after_nego),
+    )
+    _stitch_excel_at_anchor(
+        str(after_nego),
+        [
+            ("DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG", harga),
+            ("DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG", harga),
+        ],
+        str(final),
+        placement="before",
+    )
+
+    assert _page_texts(final) == [
+        "BA BODY",
+        "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI TEKNIS DAN HARGA",
+        "SHEET 7.2 DENGAN NEGO",
+        "BA NEGO ARSIP",
+        "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI TEKNIS DAN HARGA",
+        "SHEET 7.2 DENGAN NEGO",
+        "BA TIMPANG BODY",
+        "SHEET HARGA TIMPANG",
+        "DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG",
+        "BA TIMPANG ARSIP",
+        "SHEET HARGA TIMPANG",
+        "DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG",
+    ]
 
 
 def test_old_pljkk_command_is_upgraded_for_a_plpk_package():
@@ -313,6 +445,17 @@ def test_plpk_vba_passes_current_workbook_to_merge_engine():
 
     assert 'Chr(34) & ThisWorkbook.FullName & Chr(34)' in procedure
     assert "If Not PrepareWorkbookForMailMerge() Then Exit Sub" in procedure
+
+
+def test_muat_penawaran_keeps_rows_used_by_nego_formulas():
+    source = Path(__file__).resolve().parents[1] / "ModDraftPaketPL.bas"
+    content = source.read_text(encoding="utf-8")
+    start = content.index("Public Sub MuatPenawaranPL")
+    procedure = content[start:content.index("End Sub", start)]
+
+    assert 'wsPen.Range("A2:I" & lastRow).ClearContents' in procedure
+    assert 'wsPen.Rows("2:" & lastRow).Delete' not in procedure
+    assert "Rows.Delete" in procedure  # guard comment documents the regression
 
 
 def test_active_xlsm_resolver_ignores_backup_copies(tmp_path):

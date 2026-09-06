@@ -59,6 +59,7 @@ PLPK_BUTTON_GEOMETRY = {
     "btnIsiEvaluasiPL": (927.7, 218.6, 129.9, 27.0),
     "btnCetakBAPLJKK": (657.9, 312.5, 130.2, 28.0),
     "btnGabungBAPLJKK": (793.2, 312.5, 129.9, 28.0),
+    "btnCetakTimpangPL": (657.9, 341.5, 130.2, 28.0),
     "btnSaveInputData": (926.7, 280.4, 130.2, 40.0),
     "btnLoadInputData": (925.7, 323.3, 130.4, 39.4),
 }
@@ -66,11 +67,18 @@ PLPK_BUTTON_GEOMETRY = {
 # Event workbook untuk BAPLJKK — relink tetap manual, input tanggal dipermudah.
 WORKBOOK_OPEN_DATE_CODE = (
     "Private Sub Workbook_Open()\n"
+    "    On Error Resume Next\n"
+    "    ModDraftPaketPL.RefreshDerivedPL\n"
     "    ' Workbook_Open dimatikan — relink manual lewat tombol Relink Word\n"
     "End Sub\n"
     "\n"
     "Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)\n"
     "    On Error GoTo SafeExit\n"
+    "    If Sh.Name = \"5. HPS\" Or Sh.Name = \"6. Penawaran\" Or _\n"
+    "       Sh.Name = \"6. Harga Penawaran\" Or Sh.Name = \"7.2 Dengan Nego\" Then\n"
+    "        ModDraftPaketPL.RefreshDerivedPL\n"
+    "        Exit Sub\n"
+    "    End If\n"
     "    If Sh.Name <> \"@ Master Data\" And Sh.Name <> \"@ Evaluasi\" Then Exit Sub\n"
     "    If Target.CountLarge <> 1 Or Target.Column <> 3 Then Exit Sub\n"
     "    If InStr(1, CStr(Sh.Cells(Target.Row, 2).Value), \"tanggal\", vbTextCompare) = 0 Then Exit Sub\n"
@@ -225,6 +233,25 @@ HPS_EVENT_CODE = (
 
 NEGO_EVENT_CODE = (
     "' BEGIN POKJA_AUTO_LAYOUT_NEGO\n"
+    "Private Sub Worksheet_Change(ByVal Target As Range)\n"
+    "    Dim changed As Range\n"
+    "    Dim oldEvents As Boolean\n"
+    "    On Error GoTo SafeExit\n"
+    "    Set changed = Intersect(Target, Me.Range(\"J8:M26\"))\n"
+    "    If changed Is Nothing Then Exit Sub\n"
+    "\n"
+    "    ' Workbook PL memakai kalkulasi Manual untuk menjaga kecepatan cetak.\n"
+    "    ' Hitung blok turunan nego dan seluruh cache downstream agar P/Q/S/T\n"
+    "    ' serta @ Evaluasi langsung mengikuti input.\n"
+    "    oldEvents = Application.EnableEvents\n"
+    "    Application.EnableEvents = False\n"
+    "    Me.Range(\"M8:T29\").Calculate\n"
+    "    ModDraftPaketPL.RefreshDerivedPL\n"
+    "\n"
+    "SafeExit:\n"
+    "    If Not changed Is Nothing Then Application.EnableEvents = oldEvents\n"
+    "End Sub\n"
+    "\n"
     "Private Sub Worksheet_Calculate()\n"
     "    On Error GoTo SafeExit\n"
     "    modAutoLayoutNego.AutoRapikanJikaPerlu Me\n"
@@ -233,6 +260,7 @@ NEGO_EVENT_CODE = (
     "\n"
     "Private Sub Worksheet_Activate()\n"
     "    On Error GoTo SafeExit\n"
+    "    Me.Range(\"M8:T29\").Calculate\n"
     "    modAutoLayoutNego.PasangShortcutRapikan\n"
     "    modAutoLayoutNego.AutoRapikanJikaPerlu Me\n"
     "SafeExit:\n"
@@ -760,7 +788,7 @@ def inject_pl(filepath: str):
 
             # Hapus tombol lama
             names_to_delete = []
-            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnKodeUnik", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnRefreshDataPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK", "btnGabungBAReviu", "btnGabungBAPLJKK", "btnSaveInputData", "btnLoadInputData")
+            BTN_NAMES = ("btnMuatPL", "btnIsiPL", "btnKodeUnik", "btnBukaBA_PL", "btnBukaReviu_PL", "btnBukaDokpil_PL", "btnRelinkPL", "btnRefreshDataPL", "btnMuatHPS_PL", "btnCetakBAReviu_PL", "btnSyncDraftPL", "btnClearHighlightPL", "btnCetakDokpil_PL", "btnCetakReviu_PL", "btnGabungReviu_PL", "btnIsiEvaluasiPL", "btnCetakBAPLJKK", "btnGabungBAReviu", "btnGabungBAPLJKK", "btnCetakTimpangPL", "btnSaveInputData", "btnLoadInputData")
             for shp in ws.Shapes:
                 if shp.Name in BTN_NAMES:
                     names_to_delete.append(shp.Name)
@@ -856,6 +884,8 @@ def inject_pl(filepath: str):
             # dipertahankan agar injector tidak meninggalkan tombol duplikat.
             add_btn("btnCetakBAPLJKK",    ba_label,    ba_macro,    (140, 20, 20))
             add_btn("btnGabungBAPLJKK",   gabung_label, gabung_macro, (100, 20, 80))
+            if is_pk:
+                add_btn("btnCetakTimpangPL", "Cetak Timpang", "PrintPembuktianTimpangPDF", RED_DARK)
             add_btn("btnSaveInputData",    "Save Data", "SaveDataPL", (0, 128, 96))
             add_btn("btnLoadInputData",    "Load Data", "LoadDataPL", (0, 96, 160))
 

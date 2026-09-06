@@ -235,37 +235,121 @@ def _normalize_revaluasi_data(data):
         data["Eva_K_47"] = re.sub(r"\s*\(\s*\)\s*$", "", str(data["Eva_K_47"]).strip())
 
 
+_DIRECT_EXCEL_REF_RE = re.compile(
+    r"^\s*=\s*(?:'(?P<quoted>(?:''|[^'])+)'|(?P<plain>[^!]+))!"
+    r"\s*\$?(?P<column>[A-Za-z]{1,3})\s*\$?(?P<row>\d+)\s*$"
+)
+
+
+def _resolve_stale_cached_formula_value(
+    cached_value,
+    formula_sheets,
+    cached_sheets,
+    sheet_name,
+    coordinate,
+    _seen=None,
+):
+    """Resolve a stale cached value made of chained direct sheet references.
+
+    Excel can leave the cached value of a direct-link formula as the formula
+    text itself after a partial/manual calculation.  This is especially
+    visible in the mail-merge path, where ``data_only=True`` is intentionally
+    used.  Resolve only the narrow, deterministic form ``='Sheet'!A1``;
+    complex formulas remain untouched and are still governed by Excel's cache.
+    """
+    if not isinstance(cached_value, str) or not cached_value.lstrip().startswith("="):
+        return cached_value
+
+    if _seen is None:
+        _seen = set()
+    current = (str(sheet_name), str(coordinate))
+    if current in _seen:
+        return cached_value
+    _seen.add(current)
+
+    formula_sheet = formula_sheets.get(sheet_name)
+    if formula_sheet is None:
+        return cached_value
+    try:
+        formula = formula_sheet[coordinate].value
+    except (KeyError, TypeError, AttributeError):
+        return cached_value
+    if not isinstance(formula, str):
+        return cached_value
+
+    match = _DIRECT_EXCEL_REF_RE.match(formula)
+    if not match:
+        return cached_value
+    target_sheet = (match.group("quoted") or match.group("plain")).strip()
+    target_sheet = target_sheet.replace("''", "'")
+    target_coordinate = f"{match.group('column').upper()}{match.group('row')}"
+
+    target_ws = cached_sheets.get(target_sheet)
+    if target_ws is None:
+        return cached_value
+    try:
+        target_value = target_ws[target_coordinate].value
+    except (KeyError, TypeError, AttributeError):
+        return cached_value
+    return _resolve_stale_cached_formula_value(
+        target_value,
+        formula_sheets,
+        cached_sheets,
+        target_sheet,
+        target_coordinate,
+        _seen,
+    )
+
+
 def read_excel_data(excel_path, sheet_name):
     """Baca data Excel via openpyxl (copy ke temp dulu karena file mungkin terkunci oleh Excel)."""
     import tempfile
     from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
 
     data = {}
     temp_dir = tempfile.mkdtemp()
     temp_path = os.path.join(temp_dir, os.path.basename(excel_path))
+    wb = None
+    formula_wb = None
 
     try:
         shutil.copy2(excel_path, temp_path)
         wb = load_workbook(temp_path, read_only=True, data_only=True, keep_links=False)
+        formula_wb = load_workbook(temp_path, read_only=True, data_only=False, keep_links=False)
 
         if sheet_name not in wb.sheetnames:
-            wb.close()
             show_error(f"Sheet '{sheet_name}' tidak ditemukan di Excel.")
             return None
 
         ws = wb[sheet_name]
+        formula_sheets = {name: formula_wb[name] for name in formula_wb.sheetnames}
+        cached_sheets = {name: wb[name] for name in wb.sheetnames}
         headers = [c.value for c in ws[1]]
-        values = [c.value for c in ws[2]]
-        wb.close()
+        value_cells = list(ws[2])
 
         # Word mail-merge menomori kolom dengan nama duplikat: occurrence ke-2 dst
         # dapat suffix "1", "2", ... (mis. Hari, Hari1, Hari2). Replikasi agar
         # MERGEFIELD seperti "Harga_Penawaran1"/"Hari1" ketemu saat re-merge.
         seen = {}
-        for header, value in zip(headers, values):
+        for column_index, (header, value_cell) in enumerate(
+            zip(headers, value_cells), start=1
+        ):
             if header:
                 header = str(header).strip()
                 normalized = normalize_field_name(header)
+                coordinate = getattr(
+                    value_cell,
+                    "coordinate",
+                    f"{get_column_letter(column_index)}2",
+                )
+                value = _resolve_stale_cached_formula_value(
+                    value_cell.value,
+                    formula_sheets,
+                    cached_sheets,
+                    sheet_name,
+                    coordinate,
+                )
                 val = format_value(value, header)
                 # Formula Excel untuk slot peserta yang tidak terisi sering
                 # menghasilkan angka 0. Untuk Word, slot kosong harus benar-
@@ -306,6 +390,12 @@ def read_excel_data(excel_path, sheet_name):
         show_error(f"Error baca Excel:\n{e}")
         return None
     finally:
+        for book in (wb, formula_wb):
+            try:
+                if book is not None:
+                    book.close()
+            except Exception:
+                pass
         try:
             os.remove(temp_path)
             os.rmdir(temp_dir)
@@ -2069,11 +2159,12 @@ def _export_sheet_pdf(excel_path, sheet_name, out_pdf, landscape=True, fit_wide=
             except Exception: pass
 
 
-def _stitch_excel_at_anchor(word_pdf, anchor_excel_pairs, out_pdf):
+def _stitch_excel_at_anchor(word_pdf, anchor_excel_pairs, out_pdf, *, placement="after"):
     """
-    Sisip PDF Excel ke word_pdf SETELAH tiap halaman yang mengandung anchor teks.
+    Sisip PDF Excel sebelum/SETELAH tiap halaman yang mengandung anchor teks.
 
     anchor_excel_pairs: list of (anchor_text_upper, excel_pdf_path).
+      Anchor boleh berupa tuple/list alias untuk satu occurrence.
       Tiap occurrence anchor di word_pdf -> sisip excel_pdf_path setelah halaman itu.
       Anchor dicocokkan berurutan: occurrence ke-N halaman anchor -> excel ke-N (jika anchor
       sama, daftarkan pasangan itu sekali per occurrence — lihat caller).
@@ -2081,6 +2172,9 @@ def _stitch_excel_at_anchor(word_pdf, anchor_excel_pairs, out_pdf):
     Implementasi: scan tiap halaman word, untuk tiap anchor yang match di halaman,
     jadwalkan sisip excel-nya setelah halaman tsb. Robust thd geseran halaman.
     """
+    if placement not in {"before", "after"}:
+        raise ValueError("placement harus 'before' atau 'after'")
+
     import pdfplumber
     from pypdf import PdfReader, PdfWriter
 
@@ -2098,24 +2192,34 @@ def _stitch_excel_at_anchor(word_pdf, anchor_excel_pairs, out_pdf):
     # Bangun antrian per anchor_text -> list excel_pdf (FIFO).
     from collections import defaultdict, deque
     queues = defaultdict(deque)
-    for atext, epath in anchor_excel_pairs:
-        queues[atext.upper()].append(epath)
+    for anchor, epath in anchor_excel_pairs:
+        if isinstance(anchor, (tuple, list, set)):
+            anchor_key = tuple(str(item).upper() for item in anchor if str(item).strip())
+        else:
+            anchor_key = (str(anchor).upper(),)
+        if anchor_key:
+            queues[anchor_key].append(epath)
 
     # Tentukan halaman -> list excel yang disisip setelahnya.
     insert_after = defaultdict(list)  # page_idx -> [excel_path,...]
     with pdfplumber.open(word_pdf) as plb:
         for pi, pp in enumerate(plb.pages):
             up = (pp.extract_text() or "").upper()
-            for atext, q in queues.items():
-                if q and atext in up:
+            for anchor_key, q in queues.items():
+                if q and any(marker in up for marker in anchor_key):
                     insert_after[pi].append(q.popleft())
 
     writer = PdfWriter()
     for pi in range(n_word):
+        if placement == "before":
+            for epath in insert_after.get(pi, []):
+                for epg in _rdr_excel(epath).pages:
+                    writer.add_page(epg)
         writer.add_page(rdr_word.pages[pi])
-        for epath in insert_after.get(pi, []):
-            for epg in _rdr_excel(epath).pages:
-                writer.add_page(epg)
+        if placement == "after":
+            for epath in insert_after.get(pi, []):
+                for epg in _rdr_excel(epath).pages:
+                    writer.add_page(epg)
     return _safe_write_pdf(writer, out_pdf)
 
 
@@ -3468,43 +3572,101 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
                 else:
                     import shutil as _sh
                     _sh.copy2(temp_word_pdf, final_pdf_path)
+
                 _deferred_pdf_success = final_pdf_path
 
             elif mode == "pdf_pembuktian_timpang":
                 # File "7. BA Dengan Timpang PK": export full Word -> PDF, sisip:
                 #   - "7.2 Dengan Nego" setelah tiap anchor nego (2 occurrence)
-                #   - "Klarifikasi Timpang Fix (2)" setelah tiap anchor timpang (2 occurrence)
+                #   - "Harga Timpang" sebelum tiap daftar hadir timpang (2 occurrence)
                 # Urutan sisip per halaman ditentukan posisi anchor di dokumen (robust).
                 import tempfile
                 final_pdf_path = _fit_path(folder, f"BA_Pembuktian_Timpang_{nama_paket_pdf}.pdf")
                 temp_dir = tempfile.mkdtemp()
                 temp_word_pdf = os.path.join(temp_dir, "temp_word.pdf")
+                temp_with_nego_pdf = os.path.join(temp_dir, "temp_with_nego.pdf")
                 temp_nego_pdf = os.path.join(temp_dir, "temp_nego.pdf")
-                temp_timpang_pdf = os.path.join(temp_dir, "temp_timpang.pdf")
+                temp_harga_timpang_pdf = os.path.join(temp_dir, "temp_harga_timpang.pdf")
+                temp_legacy_timpang_pdf = os.path.join(temp_dir, "temp_legacy_timpang.pdf")
 
                 wdDoc.ExportAsFixedFormat(
                     OutputFileName=temp_word_pdf, ExportFormat=17, Range=0,
                 )
+                # Tanda tangan BA Timpang ada satu halaman dan tidak memuat
+                # judul/penutup yang stabil. Gandakan sebelum menyisipkan sheet;
+                # setelah Harga Timpang disisipkan, halaman sebelum daftar hadir
+                # bukan lagi halaman tanda tangan.
+                from gabung_ba_pljkk import ensure_plpk_timpang_signature_copy
+                ensure_plpk_timpang_signature_copy(temp_word_pdf)
+
                 _has_nego = _export_sheet_pdf(excel_path, "7.2 Dengan Nego", temp_nego_pdf, landscape=True)
-                _has_timpang = _export_sheet_pdf(
-                    excel_path, "Klarifikasi Timpang Fix (2)", temp_timpang_pdf,
+                _has_harga_timpang = _export_sheet_pdf(
+                    excel_path, "Harga Timpang", temp_harga_timpang_pdf,
                     landscape=True, fit_wide=1, fit_tall=1,
                 )
+                # Kompatibilitas donor lama; template baru wajib memakai Harga Timpang.
+                if not _has_harga_timpang:
+                    _has_harga_timpang = _export_sheet_pdf(
+                        excel_path, "Klarifikasi Timpang Fix (2)", temp_legacy_timpang_pdf,
+                        landscape=True, fit_wide=1, fit_tall=1,
+                    )
+                    if _has_harga_timpang:
+                        temp_harga_timpang_pdf = temp_legacy_timpang_pdf
 
-                _ANCHOR_NEGO = "DAFTAR HADIR NEGOSIASI KUANTITAS DAN HARGA"
+                _ANCHOR_NEGO = (
+                    "DAFTAR HADIR NEGOSIASI KUANTITAS DAN HARGA",
+                    "DAFTAR HADIR KLARIFIKASI DAN NEGOSIASI",
+                )
                 _ANCHOR_TIMPANG = "DAFTAR HADIR KLARIFIKASI HARGA SATUAN TIMPANG"
-                pairs = []
+                working_pdf = temp_word_pdf
                 if _has_nego:
-                    pairs += [(_ANCHOR_NEGO, temp_nego_pdf), (_ANCHOR_NEGO, temp_nego_pdf)]
-                if _has_timpang:
-                    pairs += [(_ANCHOR_TIMPANG, temp_timpang_pdf), (_ANCHOR_TIMPANG, temp_timpang_pdf)]
+                    nego_pairs = [(_ANCHOR_NEGO, temp_nego_pdf), (_ANCHOR_NEGO, temp_nego_pdf)]
+                    _stitch_excel_at_anchor(temp_word_pdf, nego_pairs, temp_with_nego_pdf)
+                    working_pdf = temp_with_nego_pdf
 
-                if pairs:
-                    final_pdf_path = _stitch_excel_at_anchor(temp_word_pdf, pairs, final_pdf_path)
+                if _has_harga_timpang:
+                    harga_pairs = [
+                        (_ANCHOR_TIMPANG, temp_harga_timpang_pdf),
+                        (_ANCHOR_TIMPANG, temp_harga_timpang_pdf),
+                    ]
+                    final_pdf_path = _stitch_excel_at_anchor(
+                        working_pdf,
+                        harga_pairs,
+                        final_pdf_path,
+                        placement="before",
+                    )
                 else:
                     import shutil as _sh
-                    _sh.copy2(temp_word_pdf, final_pdf_path)
-                _deferred_pdf_success = final_pdf_path
+                    _sh.copy2(working_pdf, final_pdf_path)
+
+                # PDF dasar selalu dipertahankan. Jika BA sistem tersedia di
+                # subfolder standar, buat output kedua FULL/Gabungan dengan
+                # aturan PLPK yang sama: BA sistem hanya masuk copy atas/PPK.
+                _timpang_outputs = [final_pdf_path]
+                try:
+                    from gabung_ba_pljkk import gabung_timpang
+                    _full_timpang_path = _fit_path(
+                        folder,
+                        f"BA_Pembuktian_Timpang_FULL_Gabungan_{nama_paket_pdf}.pdf",
+                    )
+                    _timpang_result = gabung_timpang(
+                        folder,
+                        final_pdf_path,
+                        _full_timpang_path,
+                    )
+                    if _timpang_result.get("ok") and _timpang_result.get("output"):
+                        _timpang_outputs.append(_timpang_result["output"])
+                    elif not _timpang_result.get("ok"):
+                        print(
+                            "[WARN] PDF dasar Timpang tetap dibuat; "
+                            f"FULL/Gabungan dilewati: {_timpang_result.get('pesan', '')}"
+                        )
+                except Exception as _timpang_merge_error:
+                    print(
+                        "[WARN] PDF dasar Timpang tetap dibuat; "
+                        f"FULL/Gabungan gagal: {_timpang_merge_error}"
+                    )
+                _deferred_pdf_success = _timpang_outputs
 
             else:
                 pdf_path = _fit_path(folder, f"Undangan_{nama_paket_pdf}.pdf")
@@ -3578,13 +3740,19 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
         except Exception:
             pass
         # Buka PDF setelah Word dan file Merged benar-benar selesai ditutup.
-        if _deferred_pdf_success:
-            if not os.path.isfile(_deferred_pdf_success) or os.path.getsize(_deferred_pdf_success) <= 0:
+    if _deferred_pdf_success:
+        _pdf_outputs = (
+            list(_deferred_pdf_success)
+            if isinstance(_deferred_pdf_success, (list, tuple))
+            else [_deferred_pdf_success]
+        )
+        for _pdf_output in _pdf_outputs:
+            if not os.path.isfile(_pdf_output) or os.path.getsize(_pdf_output) <= 0:
                 raise RuntimeError(
                     "Export PDF dilaporkan selesai tetapi output tidak terbentuk: "
-                    + str(_deferred_pdf_success)
+                    + str(_pdf_output)
                 )
-            show_success(_deferred_pdf_success)
+        show_success(_pdf_outputs)
 
     if _headless_error is not None:
         raise RuntimeError(f"Merge headless gagal: {_headless_error}") from _headless_error
@@ -3618,17 +3786,23 @@ def _safe_write_pdf(writer, target_path):
 
 def show_success(pdf_path):
     """Notifikasi popup setelah PDF selesai dibuat, lalu buka file."""
+    pdf_paths = (
+        list(pdf_path)
+        if isinstance(pdf_path, (list, tuple))
+        else [pdf_path]
+    )
     try:
         import ctypes
-        filename = os.path.basename(pdf_path)
+        filename = "\n".join(os.path.basename(path) for path in pdf_paths)
         ctypes.windll.user32.MessageBoxW(
             0, f"PDF berhasil dibuat:\n{filename}", "Export PDF Selesai", 0x40
         )
     except:
         pass
     try:
-        if os.path.exists(pdf_path):
-            os.startfile(pdf_path)
+        # Buka output terakhir (FULL/Gabungan bila tersedia).
+        if pdf_paths and os.path.exists(pdf_paths[-1]):
+            os.startfile(pdf_paths[-1])
     except:
         pass
 
