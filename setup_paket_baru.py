@@ -124,7 +124,7 @@ def _write_setup_status(target_dir, status, **extra):
         print(f"  [WARN] Status setup gagal ditulis: {exc}")
 
 
-def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
+def _link_word_to_excel_once(word_path, excel_path, sheet_name="data_tender"):
     """Link Word mail merge ke Excel dengan mengedit XML di dalam .docx."""
     word_io_path = _win_extended_path(word_path)
     parent_dir = os.path.dirname(os.path.abspath(os.fspath(word_path)))
@@ -206,6 +206,45 @@ def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
         if os.path.exists(temp_path):
             os.remove(temp_path)
         return False
+
+
+def _word_link_is_valid(word_path):
+    """Validasi post-write mail merge; mencegah DOCX parsial lolos setup."""
+    word_io_path = _win_extended_path(word_path)
+    try:
+        with zipfile.ZipFile(word_io_path, "r") as zf:
+            if zf.testzip() is not None:
+                return False
+            names = set(zf.namelist())
+            required = {"word/settings.xml", "word/_rels/settings.xml.rels"}
+            if not required.issubset(names):
+                return False
+            settings = zf.read("word/settings.xml").decode("utf-8")
+            rels = zf.read("word/_rels/settings.xml.rels").decode("utf-8")
+            return (
+                "<w:mailMerge>" in settings
+                and "mailMergeSource" in rels
+                and 'Target="file:' in rels
+            )
+    except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile):
+        return False
+
+
+def link_word_to_excel(word_path, excel_path, sheet_name="data_tender"):
+    """Link Word ke Excel dengan retry bounded + read-back ZIP fail-closed."""
+    last_reason = "writer mengembalikan False"
+    for attempt in range(1, 4):
+        try:
+            ok = _link_word_to_excel_once(word_path, excel_path, sheet_name)
+            if ok and _word_link_is_valid(word_path):
+                return True
+            last_reason = "hasil DOCX belum memuat settings.xml.rels/mailMerge valid"
+        except Exception as exc:
+            last_reason = f"{type(exc).__name__}: {exc}"
+        if attempt < 3:
+            time.sleep(0.75 * attempt)
+    print(f"      Auto-link gagal setelah 3 percobaan: {last_reason}")
+    return False
 
 
 def _nama_output_template(nama_template, suffix):
