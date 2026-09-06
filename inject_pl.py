@@ -10,11 +10,15 @@ import win32com.client
 import pythoncom
 import os
 import hashlib
+import re
 import shutil
 import sys
 import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
+
+from template_scrub import clean_workbook_donor_state
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 BAS_FILE = SCRIPT_DIR / "ModDraftPaketPL.bas"
@@ -23,6 +27,7 @@ WORDLINK_BAS_FILE = SCRIPT_DIR / "ModWordLink.bas"
 WORDLINK_MOD_NAME = "ModWordLink"
 LAYOUT_MODULES = ("modBarisItem", "modAutoLayoutNego")
 XL_CALCULATION_MANUAL = -4135
+XL_CALCULATION_AUTOMATIC = -4105
 XL_AUTOMATION_SECURITY_LOW = 1
 
 _BACKUP_DIRECTORY_NAMES = {
@@ -76,8 +81,22 @@ WORKBOOK_OPEN_DATE_CODE = (
     "    On Error GoTo SafeExit\n"
     "    If Sh.Name = \"5. HPS\" Or Sh.Name = \"6. Penawaran\" Or _\n"
     "       Sh.Name = \"6. Harga Penawaran\" Or Sh.Name = \"7.2 Dengan Nego\" Then\n"
-    "        ModDraftPaketPL.RefreshDerivedPL\n"
-    "        Exit Sub\n"
+        "        ModDraftPaketPL.RefreshDerivedPL\n"
+        "        Exit Sub\n"
+    "    End If\n"
+    "    ' Workbook memakai kalkulasi Manual. Perubahan kode unik F2 harus\n"
+    "    ' langsung menghitung ulang nomor Dokpil/undangan/BA dan seluruh\n"
+    "    ' sheet downstream; jangan menunggu Enter atau buka-tutup workbook.\n"
+    "    If Sh.Name = \"@ Master Data\" Then\n"
+    "        If Target.CountLarge = 1 Then\n"
+    "            If Target.Address(False, False) = \"F2\" Then\n"
+    "                ModDraftPaketPL.RefreshDerivedPL\n"
+    "                Exit Sub\n"
+    "            End If\n"
+    "            If Not Intersect(Target, Sh.Range(\"C3:C89\")) Is Nothing Then\n"
+    "                ModDraftPaketPL.RefreshDerivedPL\n"
+    "            End If\n"
+    "        End If\n"
     "    End If\n"
     "    If Sh.Name <> \"@ Master Data\" And Sh.Name <> \"@ Evaluasi\" Then Exit Sub\n"
     "    If Target.CountLarge <> 1 Or Target.Column <> 3 Then Exit Sub\n"
@@ -100,6 +119,7 @@ WORKBOOK_OPEN_DATE_CODE = (
     "    Application.EnableEvents = False\n"
     "    Target.NumberFormat = \"dd mmmm yyyy\"\n"
     "    Target.Value = hasil\n"
+    "    ModDraftPaketPL.RefreshDerivedPL\n"
     "\n"
     "SafeExit:\n"
     "    Application.EnableEvents = True\n"
@@ -330,6 +350,79 @@ def _is_backup_workbook_path(filepath: str | os.PathLike) -> bool:
     )
 
 
+def _is_template_workbook_path(filepath: str | os.PathLike) -> bool:
+    """True bila workbook berada di folder template, bukan folder paket."""
+    parent_name = Path(filepath).resolve().parent.name.strip()
+    return re.match(r"^\d+\.", parent_name) is None
+
+
+def _reset_template_number_formulas(ws_master) -> None:
+    """Hilangkan nomor donor dari template pusat sebelum disebarkan."""
+    formulas = {
+        "C20": '=IF($F$2="","","000.3.3/01/PL/PP-NN/"&$F$2&"/SKPD/TAHUN")',
+        "C22": '=IF($F$2="","","000.3.3/02/PL/PP-NN/"&$F$2&"/SKPD/TAHUN")',
+        "C26": '=IF($F$2="","","000.3.3/02/PL/PP-NN/Reviu-"&$F$2&"/SKPD/TAHUN")',
+    }
+    for address, formula in formulas.items():
+        ws_master.Range(address).Formula = formula
+
+
+def _force_template_auto_calculation(filepath: str | os.PathLike) -> None:
+    """Set calc mode template to automatic without recalculating/saving Excel.
+
+    Injector intentionally runs Excel in manual mode to protect UDF cache. The
+    template itself must still recalculate when opened with macros disabled;
+    otherwise editing @ Master Data!F2 leaves C20/C22/C26 stale. Patch only
+    ``xl/workbook.xml`` after Excel is closed, preserving VBA and drawings.
+    """
+    path = Path(filepath)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.calc.tmp")
+    try:
+        with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(
+            tmp, "w", compression=zipfile.ZIP_DEFLATED
+        ) as target:
+            for item in source.infolist():
+                data = source.read(item.filename)
+                if item.filename == "xl/workbook.xml":
+                    text = data.decode("utf-8")
+                    match = re.search(r"<calcPr\b([^>]*)/?>", text)
+                    if match:
+                        attrs = match.group(1).strip()
+                        if attrs.endswith("/"):
+                            attrs = attrs[:-1].rstrip()
+                        if re.search(r"\bcalcMode=\"[^\"]*\"", attrs):
+                            attrs = re.sub(
+                                r"\bcalcMode=\"[^\"]*\"",
+                                'calcMode="auto"',
+                                attrs,
+                            )
+                        else:
+                            attrs += ' calcMode="auto"'
+                        if re.search(r"\bcalcOnSave=\"[^\"]*\"", attrs):
+                            attrs = re.sub(
+                                r"\bcalcOnSave=\"[^\"]*\"",
+                                'calcOnSave="1"',
+                                attrs,
+                            )
+                        else:
+                            attrs += ' calcOnSave="1"'
+                        replacement = "<calcPr" + (" " + attrs if attrs else "") + "/>"
+                        text = text[: match.start()] + replacement + text[match.end() :]
+                    else:
+                        text = text.replace(
+                            "</workbook>",
+                            '<calcPr calcMode="auto" calcOnSave="1"/></workbook>',
+                        )
+                    data = text.encode("utf-8")
+                target.writestr(item, data)
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def _harden_evaluasi_date_formulas(ws_eval) -> int:
     """Hardening formula turunan tanggal agar memakai nilai tanggal Excel."""
     weekday = '"Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"'
@@ -382,6 +475,48 @@ def _harden_evaluasi_date_formulas(ws_eval) -> int:
     return patched
 
 
+def _harden_master_date_helpers(ws_master) -> None:
+    """Buat helper tanggal Master Data aman saat template masih kosong."""
+    ws_master.Range("I10").Formula = (
+        '=IF(OR(H8="",H9="",H10="",H10=0),"",'
+        'IFERROR(DATE(H10,H9,H8),""))'
+    )
+    ws_master.Range("H11").Formula = (
+        '=IF(I10="","",IFERROR(CHOOSE(WEEKDAY(I10),'
+        '"Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"),""))'
+    )
+
+
+def _harden_template_udf_formulas(workbook) -> int:
+    """Prevent #NAME? when template opens with VBA disabled.
+
+    Normal Excel with macros enabled still returns terbilang1/KonversiBulan.
+    If macros are blocked, formula recalculation must produce blank rather than
+    an error that can become a stale cached value during later COM saves.
+    """
+    formulas = {
+        ("@ Evaluasi", "C7"): '=IF(C5="","",IFERROR(terbilang1(C5),""))',
+        ("@ Evaluasi", "C14"): '=IF(C12="","",IFERROR(terbilang1(C12),""))',
+        ("@ Evaluasi", "C21"): '=IF(C19="","",IFERROR(terbilang1(C19),""))',
+        ("@ Evaluasi", "C23"): '=IF(C18="","",IFERROR(terbilang1(YEAR(C18)),""))',
+        ("@ Evaluasi", "C35"): '=IF(C33="","",IFERROR(terbilang1(C33),""))',
+        ("@ Evaluasi", "D46"): '=IFERROR(terbilang1(C46),"")',
+        ("satu_data", "S3"): '=IFERROR(terbilang1(\'@ Master Data\'!C15),"")',
+        ("list_reviu", "H3"): '=IFERROR(PROPER(terbilang1(\'@ Master Data\'!C15)),"")',
+        ("database_dokpil", "G3"): '=IFERROR(KonversiBulan(\'@ Master Data\'!I22),"")',
+        ("7.2 Dengan Nego", "N29"): '=IFERROR(CONCATENATE(U32,terbilang1(P28)," Rupiah",U33),"")',
+        ("7.2 Dengan Nego", "W29"): '=IFERROR(terbilang1(P28),"")',
+    }
+    patched = 0
+    for (sheet_name, address), formula in formulas.items():
+        try:
+            workbook.Worksheets(sheet_name).Range(address).Formula = formula
+            patched += 1
+        except Exception:
+            pass
+    return patched
+
+
 def _coerce_eval_date_serial(value):
     """Konversi tanggal sumber template ke serial Excel tanpa locale COM."""
     if isinstance(value, datetime):
@@ -411,6 +546,27 @@ def _coerce_eval_date_serial(value):
     except ValueError:
         return None
     return (parsed.date() - datetime(1899, 12, 30).date()).days
+
+
+def _is_plpk_workbook(workbook) -> bool:
+    """Deteksi PLPK dari sheet khas konstruksi, bukan label donor di A76.
+
+    Template pusat menyimpan label master sebagai shape/format donor sehingga
+    ``@ Master Data!A76`` dapat kosong walaupun workbook jelas PLPK. Sheet
+    ``7.2 Dengan Nego`` dan ``Harga Timpang`` adalah penanda struktural yang
+    stabil; fallback A76 tetap dipakai untuk workbook lama.
+    """
+    try:
+        sheet_names = {
+            str(workbook.Sheets(index).Name).strip()
+            for index in range(1, workbook.Sheets.Count + 1)
+        }
+        if "7.2 Dengan Nego" in sheet_names or "Harga Timpang" in sheet_names:
+            return True
+        master_ws = workbook.Sheets("@ Master Data")
+        return str(master_ws.Cells(76, 1).Value or "").strip() == "5. DATA PESERTA"
+    except Exception:
+        return False
 
 
 def _inject_marked_sheet_event(vb_project, workbook, sheet_name, event_code,
@@ -528,6 +684,8 @@ def inject_pl(filepath: str):
     excel = None
     wb = None
     backup_path = None
+    succeeded = False
+    template_auto_calculation = False
 
     try:
         backup_path = _create_backup(filepath)
@@ -551,6 +709,12 @@ def inject_pl(filepath: str):
             print(f"  [WARN] Open normal gagal, coba Excel repair: {open_error}")
             wb = excel.Workbooks.Open(filepath, 0, False, None, None, None, None, None, 1)
             print("  [OK] Excel repair open berhasil")
+        donor_logs = clean_workbook_donor_state(
+            wb,
+            clear_draft_lists=_is_template_workbook_path(filepath),
+        )
+        for donor_log in donor_logs:
+            print(f"  [CLEAN] {donor_log}")
         # Excel menolak mengubah Calculation sebelum workbook terbuka pada
         # sebagian versi. Set setelah Open, sebelum perubahan struktural.
         # Injector hanya mengubah VBA/shape; cached formula dipertahankan.
@@ -560,8 +724,8 @@ def inject_pl(filepath: str):
         # PLPK dikenali dari struktur workbook, bukan nama file/folder.
         # PLJKK Pengawasan/Perencanaan harus tetap mendapat fitur umum PL,
         # tetapi tidak boleh menerima otomasi 7.2 Dengan Nego.
-        master_ws = wb.Sheets("@ Master Data")
-        is_pk = str(master_ws.Cells(76, 1).Value or "").strip() == "5. DATA PESERTA"
+        is_pk = _is_plpk_workbook(wb)
+        template_auto_calculation = is_pk and _is_template_workbook_path(filepath)
         active_layout_modules = LAYOUT_MODULES if is_pk else ()
 
         # PL tidak memakai generator kode unik otomatis. Bersihkan modul/button
@@ -785,6 +949,13 @@ def inject_pl(filepath: str):
                 ws.Unprotect("pokja2026")
             except Exception:
                 pass
+            _harden_master_date_helpers(ws)
+            print("  [OK] Helper tanggal @ Master Data dibuat blank-safe")
+            if is_pk and _is_template_workbook_path(filepath):
+                _reset_template_number_formulas(ws)
+                print("  [OK] Formula nomor template direset; tidak ada PP donor")
+                udf_count = _harden_template_udf_formulas(wb)
+                print(f"  [OK] Formula UDF template blank-safe ({udf_count} sel)")
 
             # Hapus tombol lama
             names_to_delete = []
@@ -808,7 +979,7 @@ def inject_pl(filepath: str):
             # Layout tombol disimpan eksplisit agar injector tidak mengembalikan
             # tombol ke layout JKK saat workbook PLPK di-inject ulang.
             # Deteksi berdasarkan struktur @ Master Data, bukan nama file/folder.
-            is_pk = str(ws.Cells(76, 1).Value or '').strip() == '5. DATA PESERTA'
+            is_pk = _is_plpk_workbook(wb)
             if is_pk:
                 button_geometry = PLPK_BUTTON_GEOMETRY.copy()
                 print('  Layout tombol: PLPK (template Konstruksi)')
@@ -900,7 +1071,7 @@ def inject_pl(filepath: str):
         # ketika workbook lama memiliki fungsi VBA yang belum ter-load.
         wb.Save()
         print(f"  [SAVED] {os.path.basename(filepath)}")
-        return True
+        succeeded = True
 
     except Exception as e:
         print(f"  [ERROR] {e}")
@@ -918,6 +1089,11 @@ def inject_pl(filepath: str):
         except:
             pass
         pythoncom.CoUninitialize()
+
+    if succeeded and template_auto_calculation:
+        _force_template_auto_calculation(filepath)
+        print("  [OK] Template calc mode: automatic (anti-stale F2)")
+    return succeeded
 
 
 def find_bapljkk_files(root: str) -> list:

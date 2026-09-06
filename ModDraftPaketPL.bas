@@ -619,11 +619,11 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Const seqUndangan As String = "02"
 
         .Cells(PLR_NOMOR_DOKPIL, 3).Formula = _
-            "=""000.3.3/" & seqDokpil & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """"
+            "=IF($F$2="""","""",""000.3.3/" & seqDokpil & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
         .Cells(PLR_NO_UNDANGAN, 3).Formula = _
-            "=""000.3.3/" & seqUndangan & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """"
+            "=IF($F$2="""","""",""000.3.3/" & seqUndangan & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
         .Cells(PLR_NO_BA_REVIU, 3).Formula = _
-            "=""000.3.3/" & seqUndangan & "/PL/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """"
+            "=IF($F$2="""","""",""000.3.3/" & seqUndangan & "/PL/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
 
         If IsPaketUlang() Then
             .Cells(PLR_NOMOR_DOKPIL, 3).Value = SisipPLU(CStr(.Cells(PLR_NOMOR_DOKPIL, 3).Value))
@@ -1668,9 +1668,10 @@ Public Sub RefreshDerivedPL()
     oldEvents = Application.EnableEvents
     Application.EnableEvents = False
 
-    For Each sheetName In Array("5. HPS", "6. Penawaran", "6. Harga Penawaran", _
+    For Each sheetName In Array("@ Master Data", "5. HPS", "6. Penawaran", "6. Harga Penawaran", _
                                "7.2 Dengan Nego", "@ Evaluasi", "satu_data", _
-                               "list_reviu", "list_dokpil")
+                               "list_reviu", "list_dokpil", "database_reviu", _
+                               "database_dokpil", "Tabel Alat & Personil", "Harga Timpang")
         Set ws = Nothing
         On Error Resume Next
         Set ws = ThisWorkbook.Worksheets(CStr(sheetName))
@@ -1721,7 +1722,9 @@ Private Function PrepareWorkbookForMailMerge() As Boolean
     ' -> sheet mail-merge. Sheet yang tidak ada pada varian lama dilewati.
     For Each sheetName In Array("@ Master Data", "5. HPS", "6. Penawaran", _
                                 "6. Harga Penawaran", "7.2 Dengan Nego", _
-                                "@ Evaluasi", "satu_data", "list_reviu", "list_dokpil")
+                                "@ Evaluasi", "satu_data", "list_reviu", "list_dokpil", _
+                                "database_reviu", "database_dokpil", "Tabel Alat & Personil", _
+                                "Harga Timpang")
         Set ws = Nothing
         On Error Resume Next
         Set ws = ThisWorkbook.Worksheets(CStr(sheetName))

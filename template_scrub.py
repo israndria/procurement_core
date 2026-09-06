@@ -15,6 +15,63 @@ def _cell_text(value) -> str:
     return str(value).strip() if value not in (None, "") else ""
 
 
+def clean_workbook_donor_state(workbook, *, clear_draft_lists: bool = False) -> list[str]:
+    """Putus state donor Excel yang dapat menghidupkan kembali data stale.
+
+    Workbook PL standalone tidak boleh membawa externalLink dari workbook
+    tender donor. Defined name scoped yang menunjuk ``[1]``/``#REF!`` juga
+    harus dihapus; Excel dapat memuat ulang cache external book saat dropdown
+    atau formula disentuh walaupun sheet yang terlihat sudah dikosongkan.
+    """
+    logs: list[str] = []
+
+    try:
+        links = workbook.LinkSources(1)  # xlLinkTypeExcelLinks
+        if links:
+            if isinstance(links, str):
+                links = [links]
+            for link in list(links):
+                try:
+                    workbook.BreakLink(Name=str(link), Type=1)
+                    logs.append(f"External link diputus: {link}")
+                except Exception as exc:
+                    logs.append(f"⚠ External link gagal diputus ({link}): {exc}")
+    except Exception:
+        # Workbook tanpa link mengembalikan None/COM error pada beberapa Excel.
+        pass
+
+    # Kumpulkan object sebelum Delete agar penghapusan tidak menggeser index
+    # COM collection saat sedang diiterasi.
+    stale_names = []
+    try:
+        for index in range(1, int(workbook.Names.Count) + 1):
+            name = workbook.Names.Item(index)
+            refers_to = str(name.RefersTo or "")
+            if "[" in refers_to or "#REF!" in refers_to:
+                stale_names.append(name)
+    except Exception as exc:
+        logs.append(f"⚠ Audit defined name gagal: {exc}")
+
+    for name in stale_names:
+        try:
+            name_text = str(name.Name)
+            name.Delete()
+            logs.append(f"Defined name donor dihapus: {name_text}")
+        except Exception as exc:
+            logs.append(f"⚠ Defined name donor gagal dihapus: {exc}")
+
+    if clear_draft_lists:
+        for sheet_name in ("_DraftPaketList", "_DraftPaketPLList"):
+            try:
+                workbook.Worksheets(sheet_name).Range("A1:A500").ClearContents()
+                logs.append(f"List donor dikosongkan: {sheet_name}")
+            except Exception:
+                # Varian workbook lama dapat tidak memiliki salah satu sheet.
+                pass
+
+    return logs
+
+
 def _excel_markers(excel_path: Path) -> list[str]:
     """Ambil marker donor dari workbook tanpa menyimpan ulang workbook."""
     try:
@@ -105,6 +162,14 @@ def _clear_constants_com(excel_path: Path, targets: dict[str, list[str]]) -> lis
             xl.AutomationSecurity = 1
         except Exception:
             pass
+        # Scrub harus menjadi operasi data-only. Jangan biarkan Workbook_Open/
+        # Workbook_BeforeSave donor menulis ulang snapshot atau cache lama.
+        xl.EnableEvents = False
+        try:
+            xl.Calculation = -4135  # xlCalculationManual
+            xl.CalculateBeforeSave = False
+        except Exception:
+            pass
         wb = xl.Workbooks.Open(str(excel_path), UpdateLinks=0, ReadOnly=False)
         logs: list[str] = []
         # xlCellTypeConstants = 2; satu ClearContents jauh lebih cepat daripada
@@ -121,6 +186,7 @@ def _clear_constants_com(excel_path: Path, targets: dict[str, list[str]]) -> lis
                     # 1004 = tidak ada konstanta pada area; aman diabaikan.
                     pass
             logs.append(f"Excel scrub {sheet_name}: {cleared} area dibersihkan")
+        logs.extend(clean_workbook_donor_state(wb, clear_draft_lists=True))
         wb.Save()
         wb.Close(SaveChanges=False)
         return logs
@@ -163,12 +229,22 @@ def scrub_excel_pl_copy(excel_path: str | Path, *, is_pk: bool) -> list[str]:
     """
     path = Path(excel_path)
     if is_pk:
-        md_ranges = ["C3:C10", "C13:C28", "C29:C80", "C87:C89"]
+        md_ranges = ["F2", "C3:C10", "C13:C28", "C29:C80", "C87:C89"]
     else:
-        md_ranges = ["C3:C10", "C13:C28", "C29:C54", "C61:C63"]
+        md_ranges = ["F2", "C3:C10", "C13:C28", "C29:C54", "C61:C63"]
     targets = {
         "@ Master Data": md_ranges,
         "5. HPS": ["A2:I300"],
+        # Rantai data PLPK lain juga dapat membawa donor walau @ Master Data
+        # sudah bersih. Hanya konstanta dibersihkan; formula/layout tetap utuh.
+        "6. Penawaran": ["A2:I300"],
+        "7.2 Dengan Nego": ["A8:AR26", "U1:U4", "U35", "AH27"],
+        "@ Evaluasi": ["C3:D47"],
+        "Hasil Evaluasi": ["A2:F300"],
+        "Harga Timpang": ["A8:K26"],
+        "database_reviu": ["E2:J38"],
+        "_DraftPaketList": ["A1:A500"],
+        "_DraftPaketPLList": ["A1:A500"],
     }
     logs: list[str] = []
     try:
