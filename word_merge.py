@@ -419,7 +419,7 @@ def _normalized_document_text(value):
     return re.sub(r"\s+", " ", format_value(value)).strip().casefold()
 
 
-def _validate_merge_source_data(data):
+def _validate_merge_source_data(data, *, strict=True):
     """Fail-closed sebelum merge jika sumber aktif ternyata kosong.
 
     Nilai ``0`` pada slot yang tidak dipakai sah, tetapi tidak sah untuk
@@ -432,6 +432,9 @@ def _validate_merge_source_data(data):
         if label.startswith("Kapasitas Alat") and format_value(value).strip() in ("-", "—"):
             return
         if not _meaningful_dokpil_value(value):
+            if not strict:
+                print(f"[WARN] Sumber list_reviu kosong; dokumen interaktif tetap dibuka: {label}")
+                return
             raise ValueError(f"Sumber list_reviu kosong/tidak valid: {label}")
 
     required("Uraian Pekerjaan Resiko K3", data.get("Uraian_Pekerjaan_Resiko_K3"))
@@ -3020,7 +3023,11 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
 
     # Jangan mulai proses jika workbook sumber sudah kehilangan nilai aktif.
     # Ini menjaga kegagalan tetap terlihat dan mencegah PDF kosong terbit.
-    _validate_merge_source_data(data)
+    # Tombol Buka Reviu bersifat interaktif: Word tetap perlu dibuka agar
+    # user dapat melengkapi field yang memang belum ditetapkan (contoh C64
+    # risiko tertinggi K3). Gate ketat tetap berlaku untuk PDF/permanent,
+    # supaya dokumen final tidak terbit dengan data kritis kosong.
+    _validate_merge_source_data(data, strict=mode not in ("buka",))
     validate_merge_source_fields(word_path, data)
 
     # `merge_word()` juga dipanggil langsung oleh beberapa workflow, bukan

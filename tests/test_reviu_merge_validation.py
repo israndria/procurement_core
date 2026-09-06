@@ -31,6 +31,15 @@ def test_reviu_source_allows_dash_for_not_applicable_equipment_capacity():
     _validate_merge_source_data(data)
 
 
+def test_reviu_interactive_open_allows_missing_risk_but_strict_gate_rejects():
+    data = _source()
+    data["Resiko_TertinggiFatal_K3"] = ""
+
+    _validate_merge_source_data(data, strict=False)
+    with pytest.raises(ValueError, match="Resiko Tertinggi/Fatal K3"):
+        _validate_merge_source_data(data)
+
+
 def test_reviu_readback_accepts_source_values_and_rejects_marker():
     data = _source()
     text = " ".join([

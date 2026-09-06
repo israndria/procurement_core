@@ -229,9 +229,21 @@ def scrub_excel_pl_copy(excel_path: str | Path, *, is_pk: bool) -> list[str]:
     """
     path = Path(excel_path)
     if is_pk:
-        md_ranges = ["F2", "C3:C10", "C13:C28", "C29:C80", "C87:C89"]
+        # Hanya kolom C yang berisi data paket. Jangan gunakan satu range
+        # besar C29:C80: beberapa baris C adalah bagian merged header A:D
+        # (A29:D29, A32:D32, A65:D65, A76:D76). SpecialCells pada range
+        # tersebut dapat mengembalikan merged area penuh dan menghapus label
+        # kolom B. Kolom F adalah panel/keterangan BA Reviu dan wajib utuh.
+        md_ranges = [
+            "C3:C10", "C13:C28", "C30:C31", "C33:C64",
+            "C66:C75", "C77:C80", "C87:C89", "H8:H10",
+        ]
     else:
-        md_ranges = ["F2", "C3:C10", "C13:C28", "C29:C54", "C61:C63"]
+        # JKK memiliki merged header berbeda; tetap batasi scrub ke sel data
+        # eksplisit dan pertahankan seluruh kolom B/F sebagai label/panel.
+        md_ranges = [
+            "C3:C10", "C13:C28", "C30:C54", "C61:C63", "H8:H10",
+        ]
     targets = {
         "@ Master Data": md_ranges,
         "5. HPS": ["A2:I300"],
