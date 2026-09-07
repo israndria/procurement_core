@@ -445,35 +445,10 @@ def _setup_folder(folder_name, template_dir, excel_template, word_sheet_map, out
             f"{success_count}/{len(dst_word_map)}"
         )
 
-    # Scrub data donor setelah template disalin dan mail merge terhubung.
-    # PL memakai range berbeda untuk JKK vs konstruksi; jangan bawa data contoh.
-    if is_tender and excel_created:
-        try:
-            from template_scrub import scrub_package_copy
-
-            scrub_log = scrub_package_copy(
-                target_dir,
-                dst_excel,
-                [item[0] for item in dst_word_map],
-            )
-            print("\n[4/4] Scrub data donor...")
-            for line in scrub_log:
-                print(f"  {line}")
-        except Exception as exc:
-            print(f"  [WARN] Scrub template gagal: {exc}")
-    elif is_tender:
-        print("\n[4/4] Scrub data donor dilewati — workbook existing dipertahankan.")
-    elif excel_created and workflow:
-        try:
-            from template_scrub import scrub_excel_pl_copy
-
-            is_pk = "KONSTRUKSI" in str(workflow).upper() or "PLPK" in folder_name.upper()
-            scrub_log = scrub_excel_pl_copy(dst_excel, is_pk=is_pk)
-            print("\n[4/4] Scrub data donor PL...")
-            for line in scrub_log:
-                print(f"  {line}")
-        except Exception as exc:
-            print(f"  [WARN] Scrub template PL gagal: {exc}")
+    # Donor workbook sengaja dipertahankan apa adanya saat provisioning.
+    # Penggantian data dilakukan oleh tahap pengisian workflow masing-masing.
+    if is_tender or workflow:
+        print("\n[4/4] Scrub data donor dinonaktifkan — replacement dilakukan saat pengisian data.")
 
     print(f"\n{'='*60}")
     print(f"  SETUP SELESAI!")
