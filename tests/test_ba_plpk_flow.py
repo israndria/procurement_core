@@ -447,6 +447,16 @@ def test_plpk_vba_passes_current_workbook_to_merge_engine():
     assert "If Not PrepareWorkbookForMailMerge() Then Exit Sub" in procedure
 
 
+def test_plpk_dokpil_print_prepares_cached_merge_values():
+    source = Path(__file__).resolve().parents[1] / "ModDraftPaketPL.bas"
+    content = source.read_text(encoding="utf-8")
+    start = content.index("Public Sub CetakDokpilPlJkkPDF")
+    procedure = content[start:content.index("End Sub", start)]
+
+    assert "If Not PrepareWorkbookForMailMerge() Then Exit Sub" in procedure
+    assert "ThisWorkbook.Save" not in procedure
+
+
 def test_muat_penawaran_keeps_rows_used_by_nego_formulas():
     source = Path(__file__).resolve().parents[1] / "ModDraftPaketPL.bas"
     content = source.read_text(encoding="utf-8")

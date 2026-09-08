@@ -1398,9 +1398,10 @@ Public Sub CetakDokpilPlJkkPDF()
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
 
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
+    ' word_merge membaca cached value secara read-only. Workbook PL memakai
+    ' kalkulasi Manual, jadi hitung dan simpan dependency chain dahulu agar
+    ' tanggal Dokpil terbaru masuk ke list_dokpil sebelum Python dijalankan.
+    If Not PrepareWorkbookForMailMerge() Then Exit Sub
 
     Dim scriptDir As String
     scriptDir = ScriptDirPL()
@@ -1692,8 +1693,8 @@ End Sub
 
 
 Private Function PrepareWorkbookForMailMerge() As Boolean
-    ' Mail merge membaca cached value workbook secara read-only. Hitung hanya
-    ' sheet yang menjadi sumber BA; CalculateFullRebuild sangat lambat dan
+    ' Mail merge BA/Dokpil membaca cached value workbook secara read-only.
+    ' Hitung hanya dependency chain yang menjadi sumber output; CalculateFullRebuild sangat lambat dan
     ' dapat menyimpan #NAME? pada UDF terbilang ketika cache belum siap.
     Dim oldCalculateBeforeSave As Boolean
     Dim oldForceFullCalculation As Boolean
