@@ -18,8 +18,6 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from template_scrub import clean_workbook_donor_state
-
 SCRIPT_DIR = Path(__file__).parent.resolve()
 BAS_FILE = SCRIPT_DIR / "ModDraftPaketPL.bas"
 MOD_NAME = "ModDraftPaketPL"
@@ -356,17 +354,6 @@ def _is_template_workbook_path(filepath: str | os.PathLike) -> bool:
     return re.match(r"^\d+\.", parent_name) is None
 
 
-def _reset_template_number_formulas(ws_master) -> None:
-    """Hilangkan nomor donor dari template pusat sebelum disebarkan."""
-    formulas = {
-        "C20": '=IF($F$2="","","000.3.3/01/PL/PP-NN/"&$F$2&"/SKPD/TAHUN")',
-        "C22": '=IF($F$2="","","000.3.3/02/PL/PP-NN/"&$F$2&"/SKPD/TAHUN")',
-        "C26": '=IF($F$2="","","000.3.3/02/PL/PP-NN/Reviu-"&$F$2&"/SKPD/TAHUN")',
-    }
-    for address, formula in formulas.items():
-        ws_master.Range(address).Formula = formula
-
-
 def _force_template_auto_calculation(filepath: str | os.PathLike) -> None:
     """Set calc mode template to automatic without recalculating/saving Excel.
 
@@ -549,19 +536,20 @@ def _coerce_eval_date_serial(value):
 
 
 def _is_plpk_workbook(workbook) -> bool:
-    """Deteksi PLPK dari sheet khas konstruksi, bukan label donor di A76.
+    """Deteksi PLPK dari marker konstruksi, bukan sheet generic PLJKK.
 
     Template pusat menyimpan label master sebagai shape/format donor sehingga
     ``@ Master Data!A76`` dapat kosong walaupun workbook jelas PLPK. Sheet
-    ``7.2 Dengan Nego`` dan ``Harga Timpang`` adalah penanda struktural yang
-    stabil; fallback A76 tetap dipakai untuk workbook lama.
+    ``7.2 Dengan Nego`` juga ada pada PLJKK, sehingga bukan penanda keluarga.
+    ``Harga Timpang`` dan label A76 adalah marker konstruksi; fallback A76
+    tetap dipakai untuk workbook lama.
     """
     try:
         sheet_names = {
             str(workbook.Sheets(index).Name).strip()
             for index in range(1, workbook.Sheets.Count + 1)
         }
-        if "7.2 Dengan Nego" in sheet_names or "Harga Timpang" in sheet_names:
+        if "Harga Timpang" in sheet_names:
             return True
         master_ws = workbook.Sheets("@ Master Data")
         return str(master_ws.Cells(76, 1).Value or "").strip() == "5. DATA PESERTA"
@@ -709,15 +697,9 @@ def inject_pl(filepath: str):
             print(f"  [WARN] Open normal gagal, coba Excel repair: {open_error}")
             wb = excel.Workbooks.Open(filepath, 0, False, None, None, None, None, None, 1)
             print("  [OK] Excel repair open berhasil")
-        donor_logs = clean_workbook_donor_state(
-            wb,
-            clear_draft_lists=_is_template_workbook_path(filepath),
-        )
-        for donor_log in donor_logs:
-            print(f"  [CLEAN] {donor_log}")
         # Excel menolak mengubah Calculation sebelum workbook terbuka pada
         # sebagian versi. Set setelah Open, sebelum perubahan struktural.
-        # Injector hanya mengubah VBA/shape; cached formula dipertahankan.
+        # Injector tidak melakukan scrub donor; data/cache dipertahankan.
         excel.Calculation = XL_CALCULATION_MANUAL
         vb = wb.VBProject
 
@@ -952,8 +934,6 @@ def inject_pl(filepath: str):
             _harden_master_date_helpers(ws)
             print("  [OK] Helper tanggal @ Master Data dibuat blank-safe")
             if is_pk and _is_template_workbook_path(filepath):
-                _reset_template_number_formulas(ws)
-                print("  [OK] Formula nomor template direset; tidak ada PP donor")
                 udf_count = _harden_template_udf_formulas(wb)
                 print(f"  [OK] Formula UDF template blank-safe ({udf_count} sel)")
 

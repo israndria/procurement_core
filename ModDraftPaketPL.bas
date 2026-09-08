@@ -1455,9 +1455,7 @@ Public Sub CetakReviuPlJkkPDF()
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
 
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
+    If Not PrepareWorkbookForMailMerge() Then Exit Sub
 
     Dim scriptDir As String
     scriptDir = ScriptDirPL()
@@ -1513,14 +1511,7 @@ Public Sub CetakBAReviuPLPDF()
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
 
-    ' Recalculate before saving. Python reads saved cached values from
-    ' satu_data via openpyxl(data_only=True); without this, Tanggal_acara_reviu
-    ' can remain on the previous cached date even when @ Master Data is current.
-    On Error Resume Next
-    ThisWorkbook.Worksheets(MD_SHEET).Calculate
-    ThisWorkbook.Worksheets(WM_SHEET_BA).Calculate
-    ThisWorkbook.Save
-    On Error GoTo 0
+    If Not PrepareWorkbookForMailMerge() Then Exit Sub
 
     Dim scriptDir As String
     scriptDir = ScriptDirPL()
@@ -1633,6 +1624,16 @@ Private Function IsPLPKWorkbook() As Boolean
     Set ws = ThisWorkbook.Sheets(MD_SHEET)
     IsPLPKWorkbook = (InStr(1, CStr(ws.Range("A76").Value), "5. DATA PESERTA", vbTextCompare) > 0)
     If IsPLPKWorkbook Then Exit Function
+
+    Set ws = Nothing
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("Harga Timpang")
+    On Error GoTo Fallback
+    If Not ws Is Nothing Then
+        IsPLPKWorkbook = True
+        Exit Function
+    End If
+
     IsPLPKWorkbook = (InStr(1, ThisWorkbook.Name, "PLPK", vbTextCompare) > 0)
     Exit Function
 Fallback:
@@ -1733,13 +1734,16 @@ Private Function PrepareWorkbookForMailMerge() As Boolean
         If Not ws Is Nothing Then ws.Calculate
     Next sheetName
 
-    ' Sembunyikan surplus item dan ukur uraian sebelum cache disimpan. Macro
-    ' ini optional agar workbook lama tanpa modul layout tetap dapat dicetak.
-    On Error Resume Next
-    modBarisItem.RefreshBarisItem True
-    modAutoLayoutNego.RapikanDaftarNego False, False
-    Err.Clear
-    On Error GoTo Gagal
+    ' Sembunyikan surplus item dan ukur uraian hanya pada PLPK Konstruksi.
+    ' PLJKK dapat memiliki sheet 7.2 Dengan Nego, tetapi tidak memiliki modul
+    ' layout konstruksi. Application.Run menjaga source tetap compile-safe.
+    If IsPLPKWorkbook() Then
+        On Error Resume Next
+        Application.Run "'" & ThisWorkbook.Name & "'!modBarisItem.RefreshBarisItem", True
+        Application.Run "'" & ThisWorkbook.Name & "'!modAutoLayoutNego.RapikanDaftarNego", False, False
+        Err.Clear
+        On Error GoTo Gagal
+    End If
 
     ThisWorkbook.Save
     If Not ThisWorkbook.Saved Then
@@ -2818,9 +2822,7 @@ Private Sub RunMergePL(ByVal mode As String, ByVal wordPattern As String, ByVal 
     Dim wordPath As String
     wordPath = ThisWorkbook.Path & "\" & wordFile
 
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo 0
+    If Not PrepareWorkbookForMailMerge() Then Exit Sub
 
     Dim excelPath As String
     excelPath = ThisWorkbook.FullName

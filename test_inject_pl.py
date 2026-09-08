@@ -98,9 +98,10 @@ def test_template_calc_patch_is_zip_minimal_and_preserves_vba(tmp_path):
         ET.fromstring(xml)
 
 
-def test_template_number_reset_is_limited_to_plpk():
+def test_template_injection_does_not_scrub_or_reset_donor_data():
     source = Path(__file__).with_name("inject_pl.py").read_text(encoding="utf-8")
-    assert "if is_pk and _is_template_workbook_path(filepath):" in source
+    assert "clean_workbook_donor_state" not in source
+    assert "_reset_template_number_formulas" not in source
     assert "def _harden_template_udf_formulas" in source
     assert 'IFERROR(terbilang1' in source
 
@@ -182,16 +183,48 @@ def test_plpk_geometry_matches_konstruksi_template_layout():
     assert PLPK_BUTTON_GEOMETRY["btnLoadInputData"] == (925.7, 323.3, 130.4, 39.4)
 
 
-def test_plpk_detection_uses_structural_nego_sheet_when_master_labels_are_shapes():
+def test_plpk_detection_does_not_misclassify_generic_nego_sheet():
+    class Cell:
+        Value = None
+
     class Sheet:
         def __init__(self, name):
             self.Name = name
+
+        def Cells(self, _row, _column):
+            return Cell()
+
+    class Sheets:
+        def __init__(self, names):
+            self.items = [Sheet(name) for name in names]
+            self.Count = len(self.items)
+
+        def __call__(self, index):
+            if isinstance(index, int):
+                return self.items[index - 1]
+            return next(sheet for sheet in self.items if sheet.Name == index)
+
+    class Workbook:
+        pass
+
+    Workbook.Sheets = Sheets(["@ Master Data", "7.2 Dengan Nego"])
+
+    assert not _is_plpk_workbook(Workbook())
+
+
+def test_plpk_detection_accepts_construction_only_marker():
+    class Sheet:
+        def __init__(self, name):
+            self.Name = name
+
+        def Cells(self, _row, _column):
+            return type("Cell", (), {"Value": None})()
 
     class Sheets:
         Count = 2
 
         def __call__(self, index):
-            return [Sheet("@ Master Data"), Sheet("7.2 Dengan Nego")][index - 1]
+            return [Sheet("@ Master Data"), Sheet("Harga Timpang")][index - 1]
 
     class Workbook:
         pass
@@ -239,6 +272,15 @@ def test_ba_print_aborts_if_recalculation_or_save_fails():
     assert 'Array("@ Master Data", "5. HPS", "6. Penawaran"' in source
     assert "If Not PrepareWorkbookForMailMerge() Then Exit Sub" in source
     assert "ThisWorkbook.ReadOnly" in source
+
+
+def test_all_word_merge_paths_prepare_cached_values():
+    source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
+
+    assert source.count("If Not PrepareWorkbookForMailMerge() Then Exit Sub") == 5
+    assert "Private Sub RunMergePL" in source
+    assert "Public Sub CetakReviuPlJkkPDF()" in source
+    assert "Public Sub CetakBAReviuPLPDF()" in source
 
 
 def test_injector_never_recalculates_formula_cache_during_structural_injection():
