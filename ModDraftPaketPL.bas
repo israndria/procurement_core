@@ -618,18 +618,22 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         Const seqDokpil As String = "01"
         Const seqUndangan As String = "02"
 
-        .Cells(PLR_NOMOR_DOKPIL, 3).Formula = _
-            "=IF($F$2="""","""",""000.3.3/" & seqDokpil & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
-        .Cells(PLR_NO_UNDANGAN, 3).Formula = _
-            "=IF($F$2="""","""",""000.3.3/" & seqUndangan & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
-        .Cells(PLR_NO_BA_REVIU, 3).Formula = _
-            "=IF($F$2="""","""",""000.3.3/" & seqUndangan & "/PL/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
-
+        ' Paket ulang tetap memakai formula dinamis. Prefix /PLU/ dibentuk
+        ' langsung di formula agar perubahan F2 tetap mengalir ke seluruh
+        ' dokumen; jangan pernah mengubah hasil formula menjadi .Value.
+        Dim nomorPrefix As String
         If IsPaketUlang() Then
-            .Cells(PLR_NOMOR_DOKPIL, 3).Value = SisipPLU(CStr(.Cells(PLR_NOMOR_DOKPIL, 3).Value))
-            .Cells(PLR_NO_UNDANGAN, 3).Value = SisipPLU(CStr(.Cells(PLR_NO_UNDANGAN, 3).Value))
-            .Cells(PLR_NO_BA_REVIU, 3).Value = SisipPLU(CStr(.Cells(PLR_NO_BA_REVIU, 3).Value))
+            nomorPrefix = "000.3.3/PLU/"
+        Else
+            nomorPrefix = "000.3.3/"
         End If
+
+        .Cells(PLR_NOMOR_DOKPIL, 3).Formula = _
+            "=IF($F$2="""","""",""" & nomorPrefix & seqDokpil & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
+        .Cells(PLR_NO_UNDANGAN, 3).Formula = _
+            "=IF($F$2="""","""",""" & nomorPrefix & seqUndangan & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
+        .Cells(PLR_NO_BA_REVIU, 3).Formula = _
+            "=IF($F$2="""","""",""" & nomorPrefix & seqUndangan & "/PL/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
 
         ' ── ALAMAT PP: lookup master_dinas.alamat_pp_bertugas via satker ───
         Dim alamatPP As String: alamatPP = LookupAlamatPP(CStr(item(2)))
@@ -1227,14 +1231,8 @@ Private Function IsPaketUlang() As Boolean
     IsPaketUlang = (ThisWorkbook.Name Like "*(PL - Ulang)*")
 End Function
 
-Private Function SisipPLU(ByVal nomor As String) As String
-    ' Sisip "/PLU" tepat setelah prefix "000.3.3". Idempoten.
-    ' 000.3.3/01/PL/...  -> 000.3.3/PLU/01/PL/...
-    SisipPLU = nomor
-    If nomor = "" Then Exit Function
-    If InStr(nomor, "/PLU/") > 0 Then Exit Function
-    If Left(nomor, 7) = "000.3.3" Then SisipPLU = "000.3.3/PLU" & Mid(nomor, 8)
-End Function
+' Prefix /PLU/ dibentuk langsung pada formula di atas; tidak ada penulisan
+' ulang hasil formula menjadi nilai.
 
 ' Cek apakah ADA folder paket ulang "...(PL - Ulang)" di root PL yang cocok namaPaket.
 ' Root = parent dari folder workbook (ThisWorkbook.Path). Word-match: semua kata

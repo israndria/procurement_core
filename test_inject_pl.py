@@ -308,6 +308,17 @@ def test_source_hardens_blank_master_date_helpers():
     assert 'Helper tanggal @ Master Data dibuat blank-safe' in source
 
 
+def test_paket_ulang_keeps_plu_inside_dynamic_formula():
+    source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
+
+    assert 'nomorPrefix = "000.3.3/PLU/"' in source
+    assert 'nomorPrefix = "000.3.3/"' in source
+    assert '""" & nomorPrefix & seqDokpil' in source
+    assert '""" & nomorPrefix & seqUndangan' in source
+    assert ".Value = SisipPLU" not in source
+    assert "Private Function SisipPLU" not in source
+
+
 def test_refresh_chain_is_scoped_and_dependency_ordered():
     source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
     assert "Public Sub RefreshDerivedPL()" in source
