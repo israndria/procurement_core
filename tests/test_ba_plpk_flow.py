@@ -19,6 +19,7 @@ from word_merge import (
     _find_active_xlsm,
     _patch_plpk_layout_xml,
     _resolve_ba_kind,
+    _sheet72_fit_tall_for_ba_kind,
     _stitch_excel_at_anchor,
 )
 
@@ -572,6 +573,28 @@ def test_gabung_ba_vba_requires_confirmation_before_running_python():
     procedure = content[start:end]
     assert "vbYesNo + vbQuestion" in procedure
     assert "<> vbYes Then" in procedure
+
+
+def test_nego_sheet_height_policy_keeps_plpk_signatures_together():
+    assert _sheet72_fit_tall_for_ba_kind("PLPK") == 1
+    assert _sheet72_fit_tall_for_ba_kind("plpk") == 1
+    assert _sheet72_fit_tall_for_ba_kind("PLJKK") is False
+
+
+def test_ba_export_uses_kind_specific_nego_height_policy():
+    source = Path(__file__).resolve().parents[1] / "word_merge.py"
+    content = source.read_text(encoding="utf-8")
+
+    assert re.search(
+        r"_configure_inserted_excel_sheet\(\s*_sheet72,\s*"
+        r"fit_tall=_sheet72_fit_tall_for_ba_kind\(jenis\),?\s*\)",
+        content,
+    )
+    assert re.search(
+        r"_configure_inserted_excel_sheet\(\s*_ws72,\s*"
+        r"fit_tall=_sheet72_fit_tall_for_ba_kind\(jenis_ba\),?\s*\)",
+        content,
+    )
 
 
 def test_plpk_layout_patch_only_locks_signature_rows_and_drops_cached_break(tmp_path):

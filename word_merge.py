@@ -2108,8 +2108,19 @@ def _sisip_2ba_pljkk(pdf_path, folder):
         pass  # best-effort, jangan gagalkan cetak utama
 
 
+def _sheet72_fit_tall_for_ba_kind(jenis):
+    """Return the height policy for the inserted PL negotiation sheet.
+
+    The PLPK 7.2 sheet is a short, signed annex: it must stay on one
+    landscape page after its item rows are expanded. PLJKK sheets can contain
+    substantially more rows, so they retain Excel's automatic page height to
+    avoid making the consultation tables unreadably small.
+    """
+    return 1 if str(jenis or "").upper() == "PLPK" else False
+
+
 def _configure_inserted_excel_sheet(ws, landscape=True, fit_wide=1, fit_tall=False):
-    """Keep inserted Excel tables readable: fit width, let height flow."""
+    """Configure an inserted Excel sheet without mutating the source workbook."""
     if landscape:
         ws.PageSetup.Orientation = 2  # xlLandscape
     setup = ws.PageSetup
@@ -2955,7 +2966,10 @@ def _build_ba_pl_final_pdf(wd_doc, folder, kode, jenis="PLJKK", excel_path=None)
                     AddToMru=False,
                 )
                 _sheet72 = wb.Sheets("7.2 Dengan Nego")
-                _configure_inserted_excel_sheet(_sheet72)
+                _configure_inserted_excel_sheet(
+                    _sheet72,
+                    fit_tall=_sheet72_fit_tall_for_ba_kind(jenis),
+                )
                 _sheet72.ExportAsFixedFormat(
                     Type=0, Filename=tmp_72, Quality=0,
                     IncludeDocProperties=True, IgnorePrintAreas=False,
@@ -3135,7 +3149,10 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
                         except Exception:
                             pass
                         if _ws72 is not None:
-                            _configure_inserted_excel_sheet(_ws72)
+                            _configure_inserted_excel_sheet(
+                                _ws72,
+                                fit_tall=_sheet72_fit_tall_for_ba_kind(jenis_ba),
+                            )
                             _ws72.ExportAsFixedFormat(
                                 Type=0,  # xlTypePDF
                                 Filename=_tmp_72,
