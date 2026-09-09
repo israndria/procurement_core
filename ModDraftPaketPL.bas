@@ -1143,8 +1143,10 @@ Public Sub IsiEvaluasiPLStandalone()
     IsiEvaluasiPL wsMD, wsEval, item
     If Not m_SilentMode Then MsgBox "Sheet '@ Evaluasi' berhasil diisi dari Supabase.", vbInformation, "Isi Evaluasi PL"
 
-    ' Auto muat harga penawaran dari SPSE → sheet "6. Penawaran"
-    MuatPenawaranPL
+    ' Saat dipanggil headless oleh Streamlit, jangan scrape/tulis penawaran
+    ' ulang di sini. Jalur tersebut blocking dan Tab 8 sudah memiliki writer
+    ' khusus. Tombol Excel manual tetap memuat penawaran seperti sebelumnya.
+    If Not m_SilentMode Then MuatPenawaranPL
 
     Exit Sub
 

@@ -468,6 +468,15 @@ def test_muat_penawaran_keeps_rows_used_by_nego_formulas():
     assert "Rows.Delete" in procedure  # guard comment documents the regression
 
 
+def test_standalone_evaluation_does_not_scrape_when_silent():
+    source = Path(__file__).resolve().parents[1] / "ModDraftPaketPL.bas"
+    content = source.read_text(encoding="utf-8")
+    start = content.index("Public Sub IsiEvaluasiPLStandalone")
+    procedure = content[start:content.index("End Sub", start)]
+
+    assert "If Not m_SilentMode Then MuatPenawaranPL" in procedure
+
+
 def test_active_xlsm_resolver_ignores_backup_copies(tmp_path):
     active = tmp_path / "0. BAPLPK - Paket.xlsm"
     active.write_bytes(b"active")
