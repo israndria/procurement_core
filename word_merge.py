@@ -257,9 +257,6 @@ def _resolve_stale_cached_formula_value(
     used.  Resolve only the narrow, deterministic form ``='Sheet'!A1``;
     complex formulas remain untouched and are still governed by Excel's cache.
     """
-    if not isinstance(cached_value, str) or not cached_value.lstrip().startswith("="):
-        return cached_value
-
     if _seen is None:
         _seen = set()
     current = (str(sheet_name), str(coordinate))
