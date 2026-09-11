@@ -303,7 +303,14 @@ Private Sub ClearPackageDerivedFields(ws As Worksheet, isPK As Boolean)
     ' header A29:D29 pada template PK). Excel akan menolak seluruh operasi
     ' walaupun target yang hendak dikosongkan sebenarnya hanya kolom C.
     ClearColumnRangePL ws, 3, 10
-    ClearColumnRangePL ws, 13, 28
+    If isPK Then
+        ' C19 pada PLPK adalah formula dinamis berbasis C5 dan C66:C75.
+        ' Jangan menghapusnya saat refresh data dari Supabase.
+        ClearColumnRangePL ws, 13, 18
+        ClearColumnRangePL ws, 20, 28
+    Else
+        ClearColumnRangePL ws, 13, 28
+    End If
     If isPK Then
         ' PK: R39:R56 adalah alat/kapasitas/jumlah yang diisi dari KAK
         ' atau hasil parsing paket. IsiMasterDataPL tidak mengambil alat dari
@@ -537,21 +544,24 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         End If
 
         ' ── URAIAN SINGKAT ────────────────────────────────────────────────
-        ' Prioritas: item(40)=uraian_singkat (auto-build dari divisi HPS, untuk PK konstruksi)
-        ' Fallback: template lama "Mengerjakan ... sesuai dengan KAK/Dokumen ..." (untuk JKK konsultansi)
-        Dim uraianPK As String
-        If UBound(item) >= 40 Then uraianPK = Trim(CStr(item(40)))
-        If uraianPK <> "" Then
-            .Cells(PLR_URAIAN_SINGKAT, 3).Value = uraianPK
-        Else
-            Dim namaUraian As String: namaUraian = Trim(CStr(item(23)))
-            If namaUraian = "" Then namaUraian = "Uraian Singkat Pekerjaan"
-            ' Buang ekstensi .pdf di display
-            If LCase(Right(namaUraian, 4)) = ".pdf" Then
-                namaUraian = Left(namaUraian, Len(namaUraian) - 4)
+        ' PLPK memakai formula dinamis pada C19 yang mengambil C5 dan C66:C75.
+        ' Jangan menimpa formula tersebut dengan cache Supabase.
+        ' PLJKK tetap memakai uraian_singkat/fallback legacy.
+        If Not isPK Then
+            Dim uraianPK As String
+            If UBound(item) >= 40 Then uraianPK = Trim(CStr(item(40)))
+            If uraianPK <> "" Then
+                .Cells(PLR_URAIAN_SINGKAT, 3).Value = uraianPK
+            Else
+                Dim namaUraian As String: namaUraian = Trim(CStr(item(23)))
+                If namaUraian = "" Then namaUraian = "Uraian Singkat Pekerjaan"
+                ' Buang ekstensi .pdf di display
+                If LCase(Right(namaUraian, 4)) = ".pdf" Then
+                    namaUraian = Left(namaUraian, Len(namaUraian) - 4)
+                End If
+                .Cells(PLR_URAIAN_SINGKAT, 3).Value = _
+                    "Mengerjakan " & CStr(item(1)) & " sesuai dengan KAK/Dokumen " & namaUraian
             End If
-            .Cells(PLR_URAIAN_SINGKAT, 3).Value = _
-                "Mengerjakan " & CStr(item(1)) & " sesuai dengan KAK/Dokumen " & namaUraian
         End If
 
         ' ── NOMOR DOKPIL: 000.3.3/NN/PL/PP-NN/KodeUnik/SKPD/Tahun ────────

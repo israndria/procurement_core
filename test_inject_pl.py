@@ -308,6 +308,15 @@ def test_source_hardens_blank_master_date_helpers():
     assert 'Helper tanggal @ Master Data dibuat blank-safe' in source
 
 
+def test_plpk_refresh_preserves_dynamic_c19_but_pljkk_keeps_legacy_writer():
+    source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
+
+    assert "ClearColumnRangePL ws, 13, 18" in source
+    assert "ClearColumnRangePL ws, 20, 28" in source
+    assert "If Not isPK Then" in source
+    assert "Jangan menimpa formula tersebut dengan cache Supabase." in source
+
+
 def test_paket_ulang_keeps_plu_inside_dynamic_formula():
     source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
 
