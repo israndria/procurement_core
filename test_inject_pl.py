@@ -328,6 +328,14 @@ def test_paket_ulang_keeps_plu_inside_dynamic_formula():
     assert "Private Function SisipPLU" not in source
 
 
+def test_paket_ulang_ba_reviu_uses_requested_plu_number_shape():
+    source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
+
+    assert '000.3.3/PLU/02/PP-" & numStr & "/Reviu-' in source
+    assert "jangan sisipkan segmen /PL/ lagi" in source
+    assert "If IsPaketUlang() Then" in source
+
+
 def test_refresh_chain_is_scoped_and_dependency_ordered():
     source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
     assert "Public Sub RefreshDerivedPL()" in source

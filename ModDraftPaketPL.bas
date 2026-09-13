@@ -642,8 +642,15 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             "=IF($F$2="""","""",""" & nomorPrefix & seqDokpil & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
         .Cells(PLR_NO_UNDANGAN, 3).Formula = _
             "=IF($F$2="""","""",""" & nomorPrefix & seqUndangan & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
-        .Cells(PLR_NO_BA_REVIU, 3).Formula = _
-            "=IF($F$2="""","""",""" & nomorPrefix & seqUndangan & "/PL/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
+        If IsPaketUlang() Then
+            ' Format BA Reviu PL ulang: 000.3.3/PLU/02/PP-NN/Reviu-KodeUnik/SKPD/Tahun.
+            ' PLU sudah menjadi penanda metode; jangan sisipkan segmen /PL/ lagi.
+            .Cells(PLR_NO_BA_REVIU, 3).Formula = _
+                "=IF($F$2="""","""","""000.3.3/PLU/02/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
+        Else
+            .Cells(PLR_NO_BA_REVIU, 3).Formula = _
+                "=IF($F$2="""","""",""" & nomorPrefix & seqUndangan & "/PL/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
+        End If
 
         ' ── ALAMAT PP: lookup master_dinas.alamat_pp_bertugas via satker ───
         Dim alamatPP As String: alamatPP = LookupAlamatPP(CStr(item(2)))
@@ -3308,9 +3315,31 @@ Private Function LookupAlamatPP(namaDinas As String) As String
     http.Send
     If http.Status = 200 Then
         Dim resp As String: resp = http.ResponseText
-        LookupAlamatPP = ExtractJSONValPL(resp, "alamat_pp_bertugas")
+        LookupAlamatPP = NormalizeAlamatPPPL(namaDinas, ExtractJSONValPL(resp, "alamat_pp_bertugas"))
     End If
     On Error GoTo 0
+End Function
+
+Private Function IsDisdagDinasPL(ByVal namaDinas As String) As Boolean
+    Dim normalized As String
+    normalized = LCase$(Trim$(namaDinas))
+    IsDisdagDinasPL = (InStr(1, normalized, "perdagangan", vbTextCompare) > 0) Or _
+                      (InStr(1, normalized, "disdag", vbTextCompare) > 0)
+End Function
+
+Private Function NormalizeAlamatPPPL(ByVal namaDinas As String, ByVal alamat As String) As String
+    Dim hasil As String
+    hasil = alamat
+    If Not IsDisdagDinasPL(namaDinas) Then
+        NormalizeAlamatPPPL = hasil
+        Exit Function
+    End If
+
+    hasil = Replace(hasil, "No.7", "No.6", 1, -1, vbTextCompare)
+    hasil = Replace(hasil, "No. 7", "No. 6", 1, -1, vbTextCompare)
+    hasil = Replace(hasil, "No 7", "No 6", 1, -1, vbTextCompare)
+    hasil = Replace(hasil, "Nomor 7", "Nomor 6", 1, -1, vbTextCompare)
+    NormalizeAlamatPPPL = hasil
 End Function
 
 Private Function LookupTeleponPP(namaDinas As String) As String

@@ -300,3 +300,13 @@ def test_load_data_pl_keeps_strict_guard_and_explicit_template_migration():
     assert "Public Sub LoadDataPL(Optional ByVal allowTemplateMigration As Boolean = False)" in source
     assert "snapshotCode <> currentCode And Not allowTemplateMigration" in source
     assert "kode paket workbook kosong. Gunakan mode migrasi template terverifikasi." in source
+
+
+def test_disdag_address_correction_is_scoped_to_disdag_lookup():
+    source = (Path(__file__).parents[1] / "ModDraftPaketPL.bas").read_text(encoding="utf-8")
+
+    assert "NormalizeAlamatPPPL" in source
+    assert "IsDisdagDinasPL" in source
+    assert 'Replace(hasil, "No.7", "No.6", 1, -1, vbTextCompare)' in source
+    assert 'Replace(hasil, "No. 7", "No. 6", 1, -1, vbTextCompare)' in source
+    assert 'LookupAlamatPP = NormalizeAlamatPPPL(namaDinas, ExtractJSONValPL(resp, "alamat_pp_bertugas"))' in source
