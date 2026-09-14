@@ -1637,3 +1637,92 @@
 [2026-09-14 07:30:51] 
 📊 Selesai — Updated: 0 | Unchanged: 4 | Empty: 0 | Failed: 0
 [2026-09-14 07:30:51] ============================================================
+[2026-09-14 12:31:59] ============================================================
+[2026-09-14 12:31:59] 🚀 Mulai sync jadwal tender...
+[2026-09-14 12:32:06]   ⚠️ Discovery Supabase gagal: 504 Server Error: Gateway Timeout for url: https://iubvqphzalodqqhpatcy.supabase.co/rest/v1/draft_paket?select=kode_tender%2Cnama_tender%2Ckode_pokja%2Cfolder_dibuat&limit=1000
+[2026-09-14 12:32:07]   ⏭️ Tender 10129575000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:07]   ⏭️ Tender 10131057000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:07]   ⏭️ Tender 10150916000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:07]   ⏭️ Tender 10150937000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:07]   ⏭️ Tender 10151007000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:07]   ⏭️ Tender 10155286000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:07]   ⏭️ Tender 10155297000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:07]   ⏭️ Tender 10156445000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:09]   ⏭️ Tender 10156703000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:11]   ⏭️ Tender 10158074000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:11]   ⏭️ Tender 10160074000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 12:32:12] 
+🔍 [1/4] Pelebaran Ruas Jalan Desa Pulau Pinang - Jalan Transad Desa Pulau Pinang Kecamatan Binuang, Kab. Tapin
+[2026-09-14 12:32:14]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 12:32:14] 
+🔍 [2/4] Pelebaran jalan masyarakat kec hatungun
+[2026-09-14 12:32:15]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 12:32:15] 
+🔍 [3/4] PEMBANGUNAN RABAT BETON DESA BATU HAPU RT. 12 RW 03
+[2026-09-14 12:32:16]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 12:32:16] 
+🔍 [4/4] Pembangunan Los Tempat Pedagang Kaki Lima Jalan Bay Pass Kec.Binuang
+[2026-09-14 12:32:16]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 12:32:16] 
+📊 Selesai — Updated: 0 | Unchanged: 4 | Empty: 0 | Failed: 0
+[2026-09-14 12:32:16] ============================================================
+[2026-09-14 17:00:27] ============================================================
+[2026-09-14 17:00:27] 🚀 Mulai sync jadwal tender...
+[2026-09-14 17:00:29]   ⏭️ Tender 10129575000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:29]   ⏭️ Tender 10131057000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:29]   ⏭️ Tender 10150916000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:29]   ⏭️ Tender 10150937000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:29]   ⏭️ Tender 10151007000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:29]   ⏭️ Tender 10155286000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:29]   ⏭️ Tender 10155297000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:29]   ⏭️ Tender 10156445000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:30]   ⏭️ Tender 10156703000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:32]   ⏭️ Tender 10158074000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:32]   ⏭️ Tender 10160074000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 17:00:33] 🔄 Refreshing Google token...
+[2026-09-14 17:00:33] 
+🔍 [1/4] Pelebaran Ruas Jalan Desa Pulau Pinang - Jalan Transad Desa Pulau Pinang Kecamatan Binuang, Kab. Tapin
+[2026-09-14 17:00:35]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 17:00:35] 
+🔍 [2/4] Pelebaran jalan masyarakat kec hatungun
+[2026-09-14 17:00:36]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 17:00:36] 
+🔍 [3/4] PEMBANGUNAN RABAT BETON DESA BATU HAPU RT. 12 RW 03
+[2026-09-14 17:00:37]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 17:00:37] 
+🔍 [4/4] Pembangunan Los Tempat Pedagang Kaki Lima Jalan Bay Pass Kec.Binuang
+[2026-09-14 17:00:38]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 17:00:38] 
+📊 Selesai — Updated: 0 | Unchanged: 4 | Empty: 0 | Failed: 0
+[2026-09-14 17:00:38] ============================================================
+[2026-09-14 18:47:03] ============================================================
+[2026-09-14 18:47:03] 🚀 Mulai sync jadwal tender...
+[2026-09-14 18:47:05]   ⏭️ Tender 10129575000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:05]   ⏭️ Tender 10131057000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:05]   ⏭️ Tender 10150916000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:05]   ⏭️ Tender 10150937000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:05]   ⏭️ Tender 10151007000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:05]   ⏭️ Tender 10155286000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:05]   ⏭️ Tender 10155297000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:05]   ⏭️ Tender 10156445000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:05]   ⏭️ Tender 10156703000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:06]   ⏭️ Tender 10158074000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:06]   ⏭️ Tender 10160074000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 18:47:07] 
+🔍 [1/5] Pelebaran Ruas Jalan Desa Pulau Pinang - Jalan Transad Desa Pulau Pinang Kecamatan Binuang, Kab. Tapin
+[2026-09-14 18:47:08]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 18:47:08] 
+🔍 [2/5] Pelebaran jalan masyarakat kec hatungun
+[2026-09-14 18:47:09]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 18:47:09] 
+🔍 [3/5] PEMBANGUNAN RABAT BETON DESA BATU HAPU RT. 12 RW 03
+[2026-09-14 18:47:10]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 18:47:10] 
+🔍 [4/5] Pembangunan Los Tempat Pedagang Kaki Lima Jalan Bay Pass Kec.Binuang
+[2026-09-14 18:47:11]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 18:47:11] 
+🔍 [5/5] Belanja Modal Bangunan Gedung Kantor (Gudang Arsip)
+[2026-09-14 18:47:11]   ⚠️ Jadwal kosong di SPSE — skip sementara.
+[2026-09-14 18:47:11] 
+📊 Selesai — Updated: 0 | Unchanged: 4 | Empty: 1 | Failed: 0
+[2026-09-14 18:47:11] ============================================================
