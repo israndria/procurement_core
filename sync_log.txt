@@ -1608,3 +1608,32 @@
 [2026-09-13 19:59:25] 
 📊 Selesai — Updated: 0 | Unchanged: 4 | Empty: 0 | Failed: 0
 [2026-09-13 19:59:25] ============================================================
+[2026-09-14 07:30:36] ============================================================
+[2026-09-14 07:30:36] 🚀 Mulai sync jadwal tender...
+[2026-09-14 07:30:39]   ⏭️ Tender 10129575000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:39]   ⏭️ Tender 10131057000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:39]   ⏭️ Tender 10150916000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:39]   ⏭️ Tender 10150937000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:39]   ⏭️ Tender 10151007000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:39]   ⏭️ Tender 10155286000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:39]   ⏭️ Tender 10155297000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:39]   ⏭️ Tender 10156445000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:40]   ⏭️ Tender 10156703000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:44]   ⏭️ Tender 10158074000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:44]   ⏭️ Tender 10160074000 dilewati: folder POKJA tidak terbaca.
+[2026-09-14 07:30:46] 🔄 Refreshing Google token...
+[2026-09-14 07:30:47] 
+🔍 [1/4] Pelebaran Ruas Jalan Desa Pulau Pinang - Jalan Transad Desa Pulau Pinang Kecamatan Binuang, Kab. Tapin
+[2026-09-14 07:30:48]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 07:30:48] 
+🔍 [2/4] Pelebaran jalan masyarakat kec hatungun
+[2026-09-14 07:30:49]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 07:30:49] 
+🔍 [3/4] PEMBANGUNAN RABAT BETON DESA BATU HAPU RT. 12 RW 03
+[2026-09-14 07:30:50]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 07:30:50] 
+🔍 [4/4] Pembangunan Los Tempat Pedagang Kaki Lima Jalan Bay Pass Kec.Binuang
+[2026-09-14 07:30:51]   ✅ Tidak ada perubahan; event GCal terverifikasi.
+[2026-09-14 07:30:51] 
+📊 Selesai — Updated: 0 | Unchanged: 4 | Empty: 0 | Failed: 0
+[2026-09-14 07:30:51] ============================================================
