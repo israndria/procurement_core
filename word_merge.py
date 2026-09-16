@@ -164,11 +164,46 @@ def _format_rupiah(value):
     return f"{sign}Rp. {'.'.join(groups)},{fraction}"
 
 
+_BULAN_INDONESIA = (
+    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+)
+
+
+def _is_date_field(field_name):
+    normalized = normalize_field_name(field_name).casefold() if field_name else ""
+    return normalized == "tanggal" or normalized.startswith(("tanggal_", "tgl_"))
+
+
+def _format_date_field(value):
+    if isinstance(value, datetime.datetime):
+        date_value = value.date()
+    elif isinstance(value, datetime.date):
+        date_value = value
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        serial = float(value)
+        # Excel 1900 date system; reject implausible values so normal numeric
+        # fields are never silently interpreted as dates.
+        # A few legacy bridge columns named ``Tanggal BAPP/BAPK/BAHP`` carry
+        # only the day number (e.g. 15), not a full Excel date serial.
+        if not 20000 <= serial <= 2958465:
+            return None
+        try:
+            date_value = (datetime.datetime(1899, 12, 30) + datetime.timedelta(days=serial)).date()
+        except (OverflowError, ValueError):
+            return None
+    else:
+        return None
+    return f"{date_value.day} {_BULAN_INDONESIA[date_value.month - 1]} {date_value.year}"
+
+
 def format_value(value, field_name=None):
     if value is None:
         return ""
-    if isinstance(value, datetime.datetime):
-        return value.strftime("%d-%m-%Y")
+    if _is_date_field(field_name):
+        formatted_date = _format_date_field(value)
+        if formatted_date is not None:
+            return formatted_date
     if _is_rupiah_field(field_name):
         formatted = _format_rupiah(value)
         if formatted is not None:
@@ -3221,7 +3256,11 @@ def merge_word(word_path, data, mode="buka", pdf_name="", excel_path=None):
                 # sehingga helper lama tidak pernah menemukannya saat Cetak BA.
                 try:
                     from gabung_ba_pljkk import gabung as _gabung_ba_pl
-                    _gabung_result = _gabung_ba_pl(_folder, jenis_ba)
+                    _gabung_result = _gabung_ba_pl(
+                        _folder,
+                        jenis_ba,
+                        ba_utama_override=_pdf_path,
+                    )
                     if _gabung_result.get("ok"):
                         _pdf_path = _gabung_result["output"]
                 except Exception:

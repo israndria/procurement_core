@@ -21,6 +21,11 @@ def test_non_budget_numeric_fields_keep_existing_merge_format():
     assert format_value(199984583.13, "Harga Penawaran") == "199984583.13"
 
 
+def test_excel_serial_date_fields_are_rendered_as_indonesian_date():
+    assert format_value(46266, "Tanggal_Nota_Dinas") == "1 September 2026"
+    assert format_value(15, "Tanggal BAPP") == "15"
+
+
 def test_header_injector_preserves_existing_section_mapping():
     ns_w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     ns_r = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
