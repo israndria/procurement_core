@@ -2936,6 +2936,11 @@ def _normalize_plpk_static_content(wd_doc, data):
     # The PLPK source is a legacy donor. These are ordinary text, not fields,
     # and therefore survive normal mail merge. Replace only known donor
     # literals, preserving layout and all actual MERGEFIELDs.
+    # Prefix lama di enam key berikut sengaja dipertahankan: itu literal nomor
+    # donor yang masih tertanam pada template Word legacy. Nilai aktual dari
+    # workbook (sekarang 000.3.2 untuk PL) menggantikannya saat merge. Jangan
+    # mengganti key donor menjadi prefix baru tanpa memperbarui template donor,
+    # karena teks lama tidak akan ditemukan dan dapat lolos ke output.
     replacements = {
         "Konsultan Perencanaan Paket 30": nama_paket or "Paket pekerjaan ini",
         "Dinas Pekerjaan Umum dan Penataan Ruang Kabupaten Tapin": _agency(),

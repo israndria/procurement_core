@@ -193,7 +193,6 @@ PLJKK_FORMULA_ADDRESSES = frozenset(
         "C22",
         "C24",
         "C26",
-        "H10",
         "H11",
         "I8",
         "I9",
@@ -203,8 +202,15 @@ PLJKK_FORMULA_ADDRESSES = frozenset(
 PLPK_FORMULA_ADDRESSES = PLJKK_FORMULA_ADDRESSES | frozenset({"C27", "H18", "I17", "I18"})
 FORMULA_ADDRESSES = PLJKK_FORMULA_ADDRESSES
 IMMUTABLE_ADDRESSES = frozenset({"C3", "F2"})
-PLJKK_READ_ONLY_ADDRESSES = PLJKK_FORMULA_ADDRESSES | IMMUTABLE_ADDRESSES
-PLPK_READ_ONLY_ADDRESSES = PLPK_FORMULA_ADDRESSES | IMMUTABLE_ADDRESSES
+# H10 adalah input tahun numerik untuk formula I10, bukan formula itu sendiri.
+# Tetap read-only agar revisi snapshot tidak mengubah tahun sumber secara diam-diam.
+DATE_INPUT_READ_ONLY_ADDRESSES = frozenset({"H10"})
+PLJKK_READ_ONLY_ADDRESSES = (
+    PLJKK_FORMULA_ADDRESSES | IMMUTABLE_ADDRESSES | DATE_INPUT_READ_ONLY_ADDRESSES
+)
+PLPK_READ_ONLY_ADDRESSES = (
+    PLPK_FORMULA_ADDRESSES | IMMUTABLE_ADDRESSES | DATE_INPUT_READ_ONLY_ADDRESSES
+)
 READ_ONLY_ADDRESSES = PLJKK_READ_ONLY_ADDRESSES
 
 
@@ -276,6 +282,7 @@ for _address in FORMULA_ADDRESSES:
     ] = False
 for _address in ("H8", "H9"):
     CELL_METADATA[_address] = _metadata(_address.lower(), _address, "Tanggal Sumber")
+CELL_METADATA["H10"] = _metadata("tahun_sumber", "Tahun Sumber", "Tanggal Sumber", False)
 
 # Metadata lama dipertahankan untuk caller existing, tetapi semantic labels
 # profile-specific mencegah collision C51:C63 antara PLJKK dan PLPK.
@@ -346,8 +353,9 @@ def _profile_config(family: str) -> tuple[frozenset[str], frozenset[str], dict[s
 
 
 def _read_only_addresses(family: str, cells: dict[str, "SnapshotCell"] | None = None) -> frozenset[str]:
+    family = family.strip().upper()
     _, formulas, _ = _profile_config(family)
-    result = set(formulas) | set(IMMUTABLE_ADDRESSES)
+    result = set(formulas) | set(IMMUTABLE_ADDRESSES) | set(DATE_INPUT_READ_ONLY_ADDRESSES)
     # C21 boleh manual pada PLPK; jika workbook menyimpannya sebagai formula,
     # formula tersebut tetap read-only dan sumber tanggal tidak boleh ditimpa AI.
     if family.strip().upper() == FAMILY_PLPK and cells and cells.get("C21") is not None:

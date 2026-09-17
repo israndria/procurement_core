@@ -564,7 +564,7 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
             End If
         End If
 
-        ' ── NOMOR DOKPIL: 000.3.3/NN/PL/PP-NN/KodeUnik/SKPD/Tahun ────────
+        ' ── NOMOR PL: 000.3.2/NN/PL/PP-NN/KodeUnik/SKPD/Tahun ─────────────
         ' PP-NN dari angka prefix nama FOLDER workbook (misal "16. PLJKK - ..." -> 16)
         ' Fallback: nomor_urut Supabase (item(41)), lalu "01"
         Dim numStr As String: numStr = ""
@@ -633,9 +633,9 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         ' dokumen; jangan pernah mengubah hasil formula menjadi .Value.
         Dim nomorPrefix As String
         If IsPaketUlang() Then
-            nomorPrefix = "000.3.3/PLU/"
+            nomorPrefix = "000.3.2/PLU/"
         Else
-            nomorPrefix = "000.3.3/"
+            nomorPrefix = "000.3.2/"
         End If
 
         .Cells(PLR_NOMOR_DOKPIL, 3).Formula = _
@@ -643,10 +643,10 @@ Private Sub IsiMasterDataPL(wsMD As Worksheet, item As Variant)
         .Cells(PLR_NO_UNDANGAN, 3).Formula = _
             "=IF($F$2="""","""",""" & nomorPrefix & seqUndangan & "/PL/PP-" & numStr & "/""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
         If IsPaketUlang() Then
-            ' Format BA Reviu PL ulang: 000.3.3/PLU/02/PP-NN/Reviu-KodeUnik/SKPD/Tahun.
+            ' Format BA Reviu PL ulang: 000.3.2/PLU/02/PP-NN/Reviu-KodeUnik/SKPD/Tahun.
             ' PLU sudah menjadi penanda metode; jangan sisipkan segmen /PL/ lagi.
             .Cells(PLR_NO_BA_REVIU, 3).Formula = _
-                "=IF($F$2="""","""","""000.3.3/PLU/02/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
+                "=IF($F$2="""","""",""" & nomorPrefix & "02/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
         Else
             .Cells(PLR_NO_BA_REVIU, 3).Formula = _
                 "=IF($F$2="""","""",""" & nomorPrefix & seqUndangan & "/PL/PP-" & numStr & "/Reviu-""&$F$2&""/" & singkatan & "/" & tahunDokpil & """ )"
@@ -1182,7 +1182,7 @@ Private Sub IsiEvaluasiPL(wsMD As Worksheet, wsEval As Worksheet, item As Varian
 
     ' R3/R10/R17/R31/R42/R44: pakai formula SUBSTITUTE dari MD C20 (Nomor Dokpil)
     ' agar edit F2 (Kode Unik) di @ Master Data langsung mengalir ke semua nomor BA.
-    ' MD C20 = ="000.3.3/01/PL/PP-NN/"&$F$2&"/SKPD/TAHUN"
+    ' MD C20 = ="000.3.2/01/PL/PP-NN/"&$F$2&"/SKPD/TAHUN"
     ' Formula: =SUBSTITUTE('@ Master Data'!C20,"/01/","/03/") dst.
     Dim mdRef As String: mdRef = "'@ Master Data'!C20"
     wsEval.Cells(3, 3).Formula  = "=SUBSTITUTE(" & mdRef & "," & Chr(34) & "/01/" & Chr(34) & "," & Chr(34) & "/03/" & Chr(34) & ")"
@@ -1220,8 +1220,8 @@ End Sub
 
 Private Function NomorDokPL(ByVal nomorDokpil As String, ByVal nomorBaru As String) As String
     ' Ganti segmen nomor dokumen tepat sebelum /PL/.
-    ' 000.3.3/16/PL/...      -> 000.3.3/03/PL/...
-    ' 000.3.3/PLU/16/PL/...  -> 000.3.3/PLU/03/PL/...
+    ' 000.3.2/16/PL/...      -> 000.3.2/03/PL/...
+    ' 000.3.2/PLU/16/PL/...  -> 000.3.2/PLU/03/PL/...
     Dim parts() As String
     parts = Split(nomorDokpil, "/")
     If UBound(parts) < 3 Then

@@ -98,8 +98,9 @@ hanya memperbarui current dan tidak menimpa baseline.
 - Jangan menghapus node `<cell>` untuk mengosongkan Excel. Gunakan
   `type="empty"`; node yang hilang berarti field tidak diubah.
 - Jangan mengubah `C3` atau `F2`; keduanya identitas paket/kode unik.
-- Jangan mengubah formula `C11`, `C12`, `C20`, `C22`, `C24`, `C26`, `H10`,
-  `H11`, `I8`, `I9`, `I10`; ubah input sumbernya.
+- Jangan mengubah formula `C11`, `C12`, `C20`, `C22`, `C24`, `C26`, `H11`,
+  `I8`, `I9`, `I10`; ubah input sumbernya. `H10` adalah tahun sumber numerik
+  dan tetap read-only pada promosi snapshot.
 - Perbedaan angka dinormalisasi secara numerik, tetapi perubahan teks tetap
   dilaporkan agar user dapat menilai substansinya.
 - Setiap perbedaan harus memiliki sumber dokumen dan halaman dalam laporan AI.

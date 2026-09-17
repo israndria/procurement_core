@@ -320,8 +320,8 @@ def test_plpk_refresh_preserves_dynamic_c19_but_pljkk_keeps_legacy_writer():
 def test_paket_ulang_keeps_plu_inside_dynamic_formula():
     source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
 
-    assert 'nomorPrefix = "000.3.3/PLU/"' in source
-    assert 'nomorPrefix = "000.3.3/"' in source
+    assert 'nomorPrefix = "000.3.2/PLU/"' in source
+    assert 'nomorPrefix = "000.3.2/"' in source
     assert '""" & nomorPrefix & seqDokpil' in source
     assert '""" & nomorPrefix & seqUndangan' in source
     assert ".Value = SisipPLU" not in source
@@ -331,7 +331,8 @@ def test_paket_ulang_keeps_plu_inside_dynamic_formula():
 def test_paket_ulang_ba_reviu_uses_requested_plu_number_shape():
     source = Path(__file__).with_name("ModDraftPaketPL.bas").read_text(encoding="utf-8")
 
-    assert '000.3.3/PLU/02/PP-" & numStr & "/Reviu-' in source
+    assert 'nomorPrefix = "000.3.2/PLU/"' in source
+    assert '"02/PP-" & numStr & "/Reviu-' in source
     assert "jangan sisipkan segmen /PL/ lagi" in source
     assert "If IsPaketUlang() Then" in source
 

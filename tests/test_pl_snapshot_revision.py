@@ -79,8 +79,24 @@ def test_whitelist_contains_date_inputs_but_not_static_labels():
     assert not {"F8", "F9", "F10", "F11"} & WHITELIST_ADDRESSES
     assert FORMULA_ADDRESSES <= WHITELIST_ADDRESSES
     assert {"C11", "C12", "C20", "C22", "C24", "C26"} <= FORMULA_ADDRESSES
+    assert "H10" not in FORMULA_ADDRESSES
     assert all(not CELL_METADATA[address]["editable"] for address in FORMULA_ADDRESSES)
     assert IMMUTABLE_ADDRESSES <= WHITELIST_ADDRESSES
+
+
+@pytest.mark.parametrize("family", [FAMILY_PLPK, FAMILY_PLJKK])
+def test_validate_accepts_numeric_h10_year_and_keeps_it_read_only(tmp_path, family):
+    current = tmp_path / "current.xml"
+    proposal = tmp_path / "proposal.xml"
+    _write_profile_snapshot(current, family, overrides={"H10": ("number", "2026")})
+    _write_profile_snapshot(proposal, family, overrides={"H10": ("number", "2027")})
+
+    result = validate_snapshot(current, expected_family=family, require_complete=True)
+
+    assert result["ok"] is True
+    assert CELL_METADATA["H10"]["editable"] is False
+    with pytest.raises(SnapshotError, match="read-only"):
+        promote_proposal(proposal, current)
 
 
 def test_compare_reports_semantic_cell_change(tmp_path):
