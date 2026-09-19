@@ -516,6 +516,11 @@ def _validate_merged_document_text(document_text, data):
 
     missing = []
     for label, value in expected:
+        # Kapasitas ``-`` berarti N/A. Word mail-merge dapat merender field
+        # tersebut sebagai kosong, sehingga literal dash tidak boleh menjadi
+        # syarat semantic read-back seperti nilai alat aktif lainnya.
+        if label.startswith("Kapasitas Alat") and format_value(value).strip() in ("-", "—"):
+            continue
         needle = _normalized_document_text(value)
         if needle and needle not in text:
             missing.append(label)
